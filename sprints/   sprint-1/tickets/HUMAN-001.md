@@ -3,63 +3,34 @@
 ## Purpose
 Define the minimum set of intake inputs and the exact rules for constructing `fractPathScenarioSummary`.
 
-This document freezes product meaning and legal boundaries. No code is written here.
+This document freezes product meaning and legal boundaries for Sprint 1.  
+No code is written here.
 
 ---
 
 ## Minimum Intake Fields (Frozen)
+
 The intake must collect the following fields and no more:
 
-- **[Field 1]**:
-  - Description:
-  - Example value:
+1. **Home Address**
+   - Description: Street address of the property being evaluated
+   - Purpose: Used to determine approximate fair market value via automated valuation models (AVMs)
+   - Example: “123 Main St, Annapolis, MD”
 
-- **[Field 2]**:
-  - Description:
-  - Example value:
+2. **Estimated Equity Percentage Owned**
+   - Description: Homeowner’s estimate of the portion of the home owned outright (not financed)
+   - Purpose: Used as a conservative signal to estimate how much equity may be available to sell
+   - Example: “Approximately 60% owned”
 
-- **[Field 3]**:
-  - Description:
-  - Example value:
+3. **Preferred Cash Structure**
+   - Description: How the homeowner prefers to receive cash from a potential equity sale
+   - Allowed values:
+     - “Upfront lump sum”
+     - “Ongoing installments”
+     - “Combination of upfront + installments”
+     - “Not sure / exploring”
+   - Purpose: Signals flexibility and intent without implying specific amounts or outcomes
+   - Example: “Ongoing installments”
 
-(Optional: add 1–2 more if absolutely necessary.)
-
----
-
-## Scenario Summary Rules (Frozen)
-
-The `fractPathScenarioSummary` MUST:
-
-- Be generated server-side only
-- Reflect user-provided inputs faithfully
-- Be deterministic (same inputs → same output)
-- Be human-readable for internal review
-- Include a non-binding disclaimer line
-
-The summary MUST NOT:
-
-- Include approval, eligibility, pricing, or offer language
-- Include advice or recommendations
-- Infer or calculate values the user did not provide
-- Change meaning based on UI context
-
----
-
-## Required Disclaimer Line (Exact)
-Include the following line verbatim at the end of the summary:
-
-> “This scenario summary is illustrative only and does not represent an offer, approval, or commitment.”
-
----
-
-## Formatting Guidance (Non-Binding)
-- Bullets or short paragraphs are acceptable
-- Clarity > brevity
-- Internal-facing tone
-
----
-
-## Out of Scope
-- Eligibility logic
-- Financial calculations
-- Data persistence beyond submission handling
+4. **Intended Sale Timeline**
+   - Description: When the homeowner expects or prefers to sell the home
