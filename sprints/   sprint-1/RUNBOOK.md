@@ -1,63 +1,32 @@
 # Sprint 1 Runbook — Remaining Work
 
 ## Sprint Goal
-Ensure that homeowner intake submissions reliably generate a complete, structured lead record in HubSpot, including a populated `fractPathScenarioSummary`, so that internal review and follow-up can occur without manual reconstruction.
+Ship the minimum secure intake pipeline that produces a deterministic, non-binding `fractPathScenarioSummary` and writes it to HubSpot on submission.
 
 ## Context
-- Public intake flow exists and is able to collect scenario inputs from users.
-- Scenario data is being generated client-side and/or server-side.
-- HubSpot contact creation/update is partially wired and functioning for some fields.
-- The custom HubSpot property `fractPathScenarioSummary` exists but is **not consistently populating**.
-- Debugging to date has shown uncertainty around:
-  - where the scenario summary is assembled
-  - whether it is being sent at all
-  - whether the payload matches HubSpot property expectations
-- No reliable end-to-end confirmation exists that:
-  intake → scenario summary → HubSpot contact → internal review
-  is working deterministically.
+- Marketing site is being built in Webflow.
+- This repo currently serves a static placeholder (no app code yet).
+- HubSpot property `fractPathScenarioSummary` exists (or will be confirmed).
+- No intake form, scenario logic, or HubSpot API integration exists in code yet.
 
 ## In-Scope Tasks
-- Identify the authoritative source of truth for `fractPathScenarioSummary`
-  (where it is generated and when).
-- Ensure `fractPathScenarioSummary` is deterministically assembled in a single place
-  (not partially in client code and partially in server code).
-- Validate that the HubSpot contact property:
-  - exists
-  - is writable via API
-  - matches the payload key exactly
-- Confirm that the HubSpot API call:
-  - includes `fractPathScenarioSummary`
-  - sends a non-empty value
-  - handles create vs update correctly
-- Add safe logging or inspection to confirm payload contents
-  without leaking PII or sensitive financial data.
-- Ensure failure modes are explicit:
-  - scenario summary missing
-  - HubSpot API rejection
-  - partial contact creation
-- Document the final, working data flow so it is understandable
-  without reading code.
+- Create a minimal secure app skeleton (server-side capable) suitable for intake submissions.
+- Implement a single canonical `fractPathScenarioSummary` generator (server-side).
+- Create an intake form that collects the minimum scenario inputs (no semantic changes beyond “minimum viable fields”).
+- Implement server-side HubSpot write to populate `fractPathScenarioSummary` deterministically.
+- Add explicit failure handling (no silent failures) and a simple verification path.
+- Document the end-to-end flow and how to test.
 
 ## Explicitly Out of Scope
-- Lead scoring or prioritization logic
-- Sales pipeline automation or lifecycle stage changes
-- Marketing email triggers or nurture campaigns
-- Dashboard analytics or reporting
-- Changes to intake questions or scenario semantics
-- Any interpretation, approval, or pricing logic
+- Lead scoring, lifecycle stage automation, nurture emails, workflows
+- Eligibility/approval/pricing logic or offer language
+- Analytics dashboards and reporting
+- Complex multi-step onboarding UX
+- Supabase auth/RLS (unless needed for minimal secure submission)
+- Any long-term architecture refactor
 
 ## Risks / Sensitivities
-- Legal:
-  - Scenario summaries must remain illustrative and non-binding.
-  - No language implying approval, eligibility, or offer may be introduced.
-- Financial:
-  - Scenario data may reference home value, equity, or ranges and must not
-    be framed as financial advice.
-- Trust:
-  - Internal teams must be able to trust that what appears in HubSpot
-    accurately reflects what the user submitted.
-  - Silent failures (empty summaries) erode confidence quickly.
-- Data:
-  - Scenario summary may include sensitive personal or financial context.
-  - Logging and debugging must avoid storing or exposing raw payloads unnecessarily.
-  - Cross-user data leakage must be impossible.
+- Legal: summary must remain illustrative/non-binding; no approval language
+- Financial: no financial advice, no implied terms
+- Trust: HubSpot must reflect what user submitted; failures must be visible
+- Data: minimize sensitive data; no raw payload logging; secrets must stay in env vars
