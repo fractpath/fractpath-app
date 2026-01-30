@@ -1,11 +1,10 @@
-| Task                                                        | Short Description                                               | Execution Mode | Reason                                                                               |
-| ----------------------------------------------------------- | --------------------------------------------------------------- | -------------- | ------------------------------------------------------------------------------------ |
-| Identify authoritative source of `fractPathScenarioSummary` | Determine where the scenario summary is generated and finalized | **HUMAN-ONLY** | Requires product judgment about semantic ownership and prevents silent meaning drift |
-| Assemble `fractPathScenarioSummary` deterministically       | Ensure summary is built in one consistent location              | **HYBRID**     | Human freezes meaning; agent can implement deterministic assembly                    |
-| Validate HubSpot property existence and writability         | Confirm property exists, matches key, and is API-writable       | **AGENTIC**    | Pure plumbing and verification work                                                  |
-| Ensure HubSpot payload includes non-empty summary           | Confirm API calls send populated value                          | **AGENTIC**    | Mechanical execution aligned to frozen intent                                        |
-| Handle create vs update logic correctly                     | Ensure summary is written on contact create/update              | **AGENTIC**    | Implementation detail with low product risk                                          |
-| Add safe inspection/logging for payload confirmation        | Confirm what is sent without persisting sensitive data          | **HYBRID**     | Human defines safety boundaries; agent implements                                    |
-| Detect and surface HubSpot write failures                   | Make failures explicit, not silent                              | **AGENTIC**    | Execution-only error handling                                                        |
-| Document final data flow                                    | Explain intake → summary → HubSpot flow                         | **AGENTIC**    | Documentation task with no product judgment                                          |
-
+| Task | Short Description | Execution Mode | Reason |
+|---|---|---|---|
+| Define minimum intake fields | Decide minimal inputs required for meaningful summary | HUMAN-ONLY | Product meaning / semantics |
+| Define canonical summary rules | Decide what summary must include and forbidden language | HUMAN-ONLY | Prevent semantics drift and legal risk |
+| Scaffold minimal app skeleton | Create server-capable app structure | AGENTIC | Execution-only |
+| Build server-side summary generator | Implement generator exactly per human rules | HYBRID | Human defines content; agent codes |
+| Build intake form UI | Simple form to collect fields | AGENTIC | Execution-only within defined fields |
+| Implement HubSpot write | Server-side API to write property | AGENTIC | Integration plumbing |
+| Failure handling + verification | Explicit errors + basic smoke test | AGENTIC | Execution-only safety |
+| Document end-to-end flow | How to test and verify | AGENTIC | Documentation |
