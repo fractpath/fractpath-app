@@ -1,0 +1,341 @@
+AGENTIC-005 — Scenario Persistence (S2-002)
+
+Type: AGENT
+Sprint: Sprint 2
+Owner: Agent (Replit)
+Governor: Alex (review on completion)
+Depends on:
+
+AGENTIC-003 — Authentication (S2-001)
+
+HUMAN-002 — Sprint 2 UX & Semantic Lock
+
+🎯 Intent
+
+Enable authenticated users to save and retrieve scenarios they have explored, creating continuity across sessions — without introducing deal semantics, commitment signals, or property requirements.
+
+Scenario persistence exists to support:
+
+memory
+
+iteration
+
+learning
+
+Not:
+
+offers
+
+deals
+
+approvals
+
+submissions
+
+🧭 Product Context (Non-Negotiable)
+
+In Sprint 2:
+
+A Scenario is:
+
+pre-deal
+
+persona-bound
+
+editable
+
+non-binding
+
+optionally property-less
+
+A Deal does not exist yet as a first-class object.
+
+Persistence must not imply:
+
+seriousness
+
+finality
+
+readiness to transact
+
+🔒 UX & Semantic Constraints (Hard Rules)
+
+Scenario persistence must:
+
+Be available only to authenticated users
+
+Preserve deterministic scenario summaries
+
+Allow multiple scenarios per user
+
+Preserve informal history (chronological)
+
+Scenario persistence must not:
+
+Introduce Deal IDs
+
+Require Property IDs
+
+Introduce status states (draft / submitted / approved)
+
+Introduce sharing or collaboration
+
+Introduce binding language (“final”, “sent”, “locked”)
+
+If unsure → do not add it.
+
+🛠️ Implementation Scope
+Required
+
+Persist scenario data to app database
+
+Associate scenarios with authenticated user
+
+Store:
+
+persona
+
+raw inputs (JSON)
+
+generated scenario summary (string)
+
+timestamps
+
+Support retrieval of scenarios by user
+
+Explicitly Out of Scope
+
+Scenario editing UI (handled in S2-003 / S2-004)
+
+CRM sync on update (handled later)
+
+Deal creation
+
+Property verification
+
+🔀 Behavioral Rules
+
+Scenario creation:
+
+Creates a new scenario record
+
+Does not overwrite prior scenarios
+
+History:
+
+Chronological
+
+Informal
+
+Narrative, not legal
+
+✅ Acceptance Criteria (All Must Pass)
+
+ Authenticated users can save scenarios
+
+ Users can have multiple scenarios
+
+ Scenario summary matches deterministic output
+
+ Scenarios are retrievable by the same user
+
+ Scenarios do not require property IDs
+
+ No deal or submission language introduced
+
+ No breaking changes to Sprint 1 behavior
+
+📦 Deliverables
+
+When complete, report only:
+
+What was added
+
+DB schema / migration summary
+
+Files changed
+
+How to test scenario persistence locally
+
+Any risks or assumptions
+
+No verbose logs unless something failed.
+
+⚠️ Known Failure Modes (Reject If Seen)
+
+Introducing a “save vs submit” distinction
+
+Overwriting scenarios instead of creating new ones
+
+Adding deal-like states
+
+Enforcing property association
+
+🧠 Governor Review Gate
+
+This ticket is not done until:
+
+Scenario semantics align with the Sprint 2 UX Intent Doc
+
+Persistence feels exploratory, not transactional
+
+End of GitHub Issue
+
+🤖 Replit Agent Prompt
+S2-002 — Scenario Persistence
+
+Paste the following directly into Replit’s agent runner.
+
+ROLE
+
+You are an execution agent working on FractPath.
+
+Your task is to implement Sprint 2, Ticket S2-002: Scenario Persistence.
+
+You must prioritize:
+
+correctness
+
+minimalism
+
+future optionality
+
+You must not introduce deal semantics or UX drift.
+
+CONTEXT
+
+FractPath is a pre-deal exploration platform.
+
+In Sprint 2:
+
+Authentication exists
+
+Scenarios are still exploratory
+
+Nothing is binding
+
+Deals do not yet exist
+
+Scenario persistence exists only to allow users to return and continue exploring.
+
+UX & SEMANTIC CONSTRAINTS (NON-NEGOTIABLE)
+
+Scenarios:
+
+Are editable explorations
+
+Are not offers or submissions
+
+May exist without properties
+
+May be reshaped many times
+
+Avoid all language or logic implying:
+
+finality
+
+approval
+
+seriousness
+
+deal readiness
+
+If unsure → do not add it.
+
+IMPLEMENTATION REQUIREMENTS
+1. Data Model
+
+Create minimal persistence for scenarios with:
+
+id
+
+user_id
+
+persona
+
+inputs (JSON)
+
+scenario_summary (string)
+
+created_at
+
+updated_at
+
+No additional fields.
+
+2. Scenario Creation
+
+When an authenticated user generates a scenario:
+
+Generate summary deterministically (existing logic)
+
+Persist scenario record
+
+Do not overwrite existing scenarios
+
+3. Scenario Retrieval
+
+Allow retrieval of scenarios by authenticated user only
+
+Order chronologically (newest first is acceptable)
+
+Read-only for now
+
+4. Routing & Access
+
+Scenario persistence requires authentication
+
+Public scenario builder continues to work unauthenticated
+
+Do not introduce UI beyond what is required to test persistence
+
+EXPLICIT NON-GOALS
+
+Do not implement:
+
+Deal IDs
+
+Property IDs
+
+Status states
+
+Sharing
+
+Editing UI
+
+CRM updates
+
+ACCEPTANCE CHECKLIST
+
+Before marking complete, confirm:
+
+ Scenario persistence works end-to-end
+
+ Multiple scenarios per user are supported
+
+ No deal or submission semantics exist
+
+ Existing public functionality is unchanged
+
+DELIVERABLES
+
+When finished, report only:
+
+What was added
+
+DB schema / migrations
+
+Files changed
+
+How to test locally
+
+Risks or assumptions
+
+Do not include verbose logs unless there was a failure.
+
+FINAL REMINDER
+
+Your goal is memory and continuity, not structure or commitment.
+
+If you feel tempted to add rigor or states:
+👉 stop — that belongs in later sprints.
