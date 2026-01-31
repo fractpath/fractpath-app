@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { AuthHeader } from "@/components/AuthHeader";
 
 type CashStructure = "upfront" | "installments" | "both" | "exploring";
 type SaleTimeline = "3-12-months" | "exploring";
 
 export default function Home() {
+  const [email, setEmail] = useState("");
   const [homeAddress, setHomeAddress] = useState("");
   const [equityPct, setEquityPct] = useState("");
   const [cashStructure, setCashStructure] = useState<CashStructure>("exploring");
@@ -24,6 +26,7 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          email,
           homeAddress,
           estimatedEquityPercentageOwned: equityPct,
           preferredCashStructure: cashStructure,
@@ -49,12 +52,27 @@ export default function Home() {
 
   return (
     <main style={{ maxWidth: 640, margin: "40px auto", padding: 16, fontFamily: "system-ui" }}>
-      <h1 style={{ fontSize: 28, marginBottom: 8 }}>FractPath — Homeowner Intake</h1>
+      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 32 }}>
+        <h1 style={{ fontSize: 28, margin: 0 }}>FractPath — Homeowner Intake</h1>
+        <AuthHeader />
+      </header>
       <p style={{ marginTop: 0, color: "#444" }}>
-        Minimal intake scaffold (Sprint 1). No persistence, no integrations.
+        Share your exploratory scenario. Our team may follow up to discuss options.
       </p>
 
       <form onSubmit={onSubmit} style={{ display: "grid", gap: 12, marginTop: 24 }}>
+        <label style={{ display: "grid", gap: 6 }}>
+          <span>Email</span>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            placeholder="you@example.com"
+            style={{ padding: 10, border: "1px solid #ccc", borderRadius: 6 }}
+          />
+        </label>
+
         <label style={{ display: "grid", gap: 6 }}>
           <span>Home Address</span>
           <input
@@ -110,14 +128,14 @@ export default function Home() {
           style={{
             padding: 12,
             borderRadius: 8,
-            border: "1px solid #111",
+            border: "none",
             background: status === "submitting" ? "#eee" : "#111",
             color: status === "submitting" ? "#111" : "#fff",
             cursor: status === "submitting" ? "not-allowed" : "pointer",
             fontWeight: 600,
           }}
         >
-          {status === "submitting" ? "Submitting..." : "Submit"}
+          {status === "submitting" ? "Sharing..." : "Share My Scenario"}
         </button>
 
         {status !== "idle" && (
