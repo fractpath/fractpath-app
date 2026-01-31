@@ -1,0 +1,173 @@
+HYBRID-006 — Scenario Semantics Review
+
+Type: HYBRID (Agent + Human)
+Sprint: Sprint 2
+Owner: Agent (implementation complete), Alex (UX governor review)
+Depends on:
+
+AGENTIC-005 — Scenario Persistence (S2-002)
+
+HUMAN-002 — Sprint 2 UX & Semantic Lock
+
+🎯 Intent
+
+Validate that persisted scenarios in the authenticated experience:
+
+Preserve their pre-deal, exploratory meaning
+
+Do not imply commitment, submission, or deal readiness
+
+Align with the Sprint 2 UX Intent Doc
+
+This ticket exists to prevent semantic drift, not to add features.
+
+🧭 Review Scope (Strictly Limited)
+
+This review covers only:
+
+How scenarios are described in copy, labels, and headings
+
+How history is framed (language + ordering)
+
+What users are implicitly told a scenario is
+
+This ticket does not:
+
+Add new functionality
+
+Change persistence logic
+
+Introduce editing UI
+
+Introduce deal or property concepts
+
+🔍 UX Semantics Review Checklist (Governor)
+
+Review the authenticated scenario experience against the following:
+
+1. Scenario Meaning
+
+Confirm that a scenario is framed as:
+
+ Exploratory
+
+ Non-binding
+
+ Editable / revisitable
+
+ Safe to create and revisit
+
+Reject if a scenario feels like:
+
+an offer
+
+a submission
+
+a finalized artifact
+
+something the user “sent”
+
+2. Language Audit (Hard Rules)
+
+The following must NOT appear anywhere in the scenario experience:
+
+“Submit”
+
+“Apply”
+
+“Finalize”
+
+“Send”
+
+“Approve”
+
+“Offer”
+
+“Lock in”
+
+“Deal”
+
+Preferred framing examples (exact wording flexible):
+
+“What you explored”
+
+“A scenario you created”
+
+“An earlier version”
+
+“You can revisit or reshape this”
+
+3. History Framing
+
+Confirm that history:
+
+ Is chronological and narrative
+
+ Feels informal and exploratory
+
+ Does not imply legal or contractual record-keeping
+
+Reject if history feels like:
+
+version control
+
+audit logs
+
+deal revision tracking
+
+4. Property Association Semantics
+
+Confirm that:
+
+ Scenarios do not require a property
+
+ Property-less scenarios are framed as valid
+
+ No copy implies a scenario must become property-bound
+
+Acceptable framing:
+
+“This scenario isn’t tied to a specific property yet.”
+
+5. Deal Boundary Integrity
+
+Confirm that no deal concepts exist, explicitly or implicitly:
+
+ No Deal IDs
+
+ No status states (draft / pending / approved)
+
+ No multi-party language
+
+ No next-step CTAs that imply transaction
+
+If any of these appear → reject.
+
+✅ Acceptance Criteria
+
+This ticket is complete when one of the following outcomes is recorded:
+
+✅ Approved as-is
+
+✏️ Approved with minor copy or framing changes (list exact changes)
+
+❌ Rejected due to semantic drift (explain violation)
+
+No screenshots or logs required unless helpful.
+
+⚠️ Common Failure Modes (Auto-Reject)
+
+Scenarios feel “saved” in a way that implies seriousness
+
+History feels like a legal or deal record
+
+UX implies progression toward a transaction
+
+Language suggests obligation or expectation
+
+🧠 Governor’s Note
+
+This ticket is the last semantic guardrail before Sprint 2 closes.
+
+If scenarios feel heavier than exploration,
+the sprint has failed its intent — even if persistence works perfectly.
