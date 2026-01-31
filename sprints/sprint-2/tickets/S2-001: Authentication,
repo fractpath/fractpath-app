@@ -1,0 +1,194 @@
+S2-001 — Authentication (Minimal, Boring, Safe)
+ROLE
+
+You are an execution agent working on FractPath.
+
+Your job is to implement Sprint 2, Ticket S2-001: Authentication, exactly as specified below.
+
+You must prioritize:
+
+correctness
+
+minimalism
+
+future optionality
+
+You must not introduce new product scope, UX semantics, or deal logic.
+
+CONTEXT (READ CAREFULLY)
+
+FractPath is a fractional home-equity exploration platform.
+
+At this stage:
+
+Scenarios are pre-deal
+
+Nothing is binding
+
+Authentication exists only to allow users to return and retrieve what they explored
+
+This sprint is intentionally conservative.
+
+SPRINT 2 UX CONSTRAINTS (NON-NEGOTIABLE)
+
+Authentication must:
+
+Feel like “remember me”
+
+NOT feel like “apply”, “commit”, or “sign up for a deal”
+
+Avoid legal or financial seriousness
+
+Avoid over-designed UX
+
+Authentication must not:
+
+Imply approval, eligibility, or deal readiness
+
+Introduce profiles, roles, or permissions
+
+Introduce multi-user access
+
+Introduce deal IDs or property verification
+
+Introduce sharing or collaboration
+
+If you are unsure whether something violates this → do not add it.
+
+IMPLEMENTATION REQUIREMENTS
+1. Authentication Method
+
+Use a managed authentication provider (Supabase Auth, Clerk, Auth0, or equivalent already configured)
+
+Email + password authentication only
+
+Use default provider UI or minimal wrapper
+
+No custom password rules
+
+No custom recovery flows
+
+Auth must support:
+
+Sign up
+
+Log in
+
+Log out
+
+Password reset / recovery (provider default)
+
+2. UX Scope (Minimal)
+
+You may include:
+
+A basic auth page
+
+Clear but neutral copy like:
+
+“Sign in to continue exploring”
+
+“We’ll save what you’ve been exploring”
+
+You must avoid:
+
+“Apply”
+
+“Submit”
+
+“Get approved”
+
+“Create a deal”
+
+“Lock in terms”
+
+3. Session Handling
+
+Authenticated session must persist
+
+Logged-in users should be identifiable server-side
+
+Unauthenticated users can still access public scenario builder (existing behavior)
+
+4. Routing Rules
+
+Public routes remain accessible without auth
+
+Auth is required only for:
+
+scenario retrieval (future tickets)
+
+saving scenarios (future tickets)
+
+Do not block scenario generation behind auth yet.
+
+ACCEPTANCE CRITERIA (MUST ALL PASS)
+
+ User can sign up with email/password
+
+ User can log in
+
+ User can log out
+
+ User can reset password via provider flow
+
+ Session persists across refresh
+
+ No deal or commitment language introduced
+
+ No new product objects created
+
+ No breaking changes to Sprint 1 functionality
+
+EXPLICIT NON-GOALS (DO NOT IMPLEMENT)
+
+Profiles
+
+User settings pages
+
+Roles (buyer/seller/realtor)
+
+MFA
+
+OAuth / social login
+
+Deal IDs
+
+Property IDs
+
+Scenario persistence (that is S2-002)
+
+DELIVERABLES
+
+When finished, report only:
+
+What was added (high level)
+
+What files changed
+
+How to test auth locally
+
+Any risks or assumptions
+
+Do not include verbose logs or transcripts unless something failed.
+
+FAILURE MODE HANDLING
+
+If you encounter:
+
+provider configuration errors
+
+env issues
+
+framework conflicts
+
+Fix them only insofar as needed to complete auth.
+
+Do not refactor unrelated systems.
+
+FINAL REMINDER
+
+Your goal is identity continuity, not product maturity.
+
+If you feel tempted to improve UX, add structure, or “make it better”:
+👉 stop — that belongs in later sprints.
