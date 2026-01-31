@@ -1,0 +1,141 @@
+HYBRID-004 — Auth UX Review & Language Audit
+
+Type: HYBRID (Agent + Human)
+Sprint: Sprint 2
+Owner: Agent (implementation complete), Alex (UX governor review)
+Depends on: AGENTIC-003 — Authentication (S2-001)
+Status: Blocked until AGENTIC-003 complete
+
+🎯 Intent
+
+Validate that the authentication experience introduced in Sprint 2:
+
+Preserves FractPath’s exploratory, non-binding posture
+
+Does not introduce accidental commitment semantics
+
+Aligns with the Sprint 2 UX Intent Doc
+
+This ticket exists to catch meaning drift, not bugs.
+
+🧭 Review Scope (What This Ticket Covers)
+
+This ticket reviews only:
+
+Authentication-related copy
+
+Page titles, buttons, helper text
+
+Transitional language around login / logout
+
+Implied user promises (what auth “means”)
+
+This ticket does not:
+
+Add new functionality
+
+Change auth providers
+
+Modify flows beyond copy/labels
+
+Introduce new pages or logic
+
+🔍 UX Audit Checklist (Governor Review)
+
+Review the auth experience against the following:
+
+1. Commitment Framing
+
+ Auth feels like “remember me” or “pick up where you left off”
+
+ No language implies application, approval, or submission
+
+ No implication that the user has started a deal
+
+2. Language Audit (Hard Rules)
+
+Must NOT appear anywhere:
+
+“Apply”
+
+“Submit”
+
+“Get approved”
+
+“Lock in”
+
+“Create a deal”
+
+“Finalize”
+
+“Offer”
+
+Preferred language examples:
+
+“Sign in to continue exploring”
+
+“Save what you’ve been exploring”
+
+“Welcome back”
+
+(Exact wording may vary, meaning must match.)
+
+3. Identity Semantics
+
+ Logging in feels reversible and low-pressure
+
+ Logging out feels safe (no loss framing)
+
+ Auth does not feel like a point of no return
+
+4. UX Intent Doc Alignment
+
+Confirm alignment with:
+
+Scenario ≠ Deal
+
+Exploration before obligation
+
+Identity continuity without commitment
+
+If any auth surface contradicts these, it must be corrected.
+
+✅ Acceptance Criteria
+
+This ticket is complete when:
+
+ All auth-related copy has been reviewed
+
+ Any commitment-leaning language is removed or softened
+
+ No new UX scope is introduced
+
+ Sprint 2 UX Intent Doc is fully honored
+
+📦 Deliverable
+
+One of the following outcomes must be recorded in the ticket:
+
+✅ Approved as-is
+
+✏️ Approved with minor copy changes (list exact changes)
+
+❌ Rejected due to semantic drift (explain why)
+
+No screenshots or verbose commentary required unless helpful.
+
+⚠️ Common Failure Modes (Reject If Seen)
+
+Auth framed as a “next step” toward a deal
+
+Language implying seriousness or eligibility
+
+UX that pressures users to complete anything
+
+“Sign up to get started” copy without context
+
+🧠 Governor’s Note
+
+This ticket exists to ensure Sprint 2 increases trust without increasing obligation.
+
+If auth feels heavier than exploration, the sprint has failed its UX intent — even if the code works.
