@@ -1,28 +1,63 @@
-AGENTIC-403
-Controlled Function — buyer_counter_proposal()
-Intent Freeze
+# AGENTIC-403  
+## Controlled Function — buyer_counter_proposal() (Sprint 4)
+
+---
+
+## Intent Freeze
 
 Buyer counters must create a new version.
 
 Never mutate existing version rows.
 
-Scope Classification
-Category	Classification
-DB Function	NEW
-State Machine	EXTEND
-Authorization	ENFORCE
-Audit	EXTEND
-Preconditions
+All counters must:
+- Insert a new deal_versions row
+- Preserve lineage via parent_version_id
+- Transition status using transition_deal_status(...)
+- Emit attributable metadata
 
-deal exists
+No direct writes to binding fields are permitted.
 
-actor_user_id exists
+---
 
-actor role validated server-side
+## Scope Classification
 
-deal not withdrawn
+| Category | Classification |
+|----------|---------------|
+| DB Function | NEW |
+| State Machine | EXTEND |
+| Authorization | ENFORCE |
+| Audit | EXTEND |
+| Schema | USE EXISTING (AGENTIC-402) |
 
-Function Skeleton
+---
+
+## Preconditions
+
+- deal exists
+- actor_user_id exists
+- actor has role = BUYER
+- deal.status = AUTHORIZED_BY_HOMEOWNER (Sprint 4 locked eligibility rule)
+- deal not PAUSED_BY_HOMEOWNER
+- deal not WITHDRAWN_BY_HOMEOWNER
+- function executes inside a transaction
+- deal row must be locked FOR UPDATE
+
+---
+
+## Constitutional Invariants
+
+- No silent mutation
+- No updates to existing deal_versions rows
+- parent_version_id must equal the locked current_version_id
+- All state changes must use transition_deal_status(...)
+- transition_deal_status requires:
+  (p_deal_id, p_new_status, p_actor_user_id, p_version_id, p_metadata)
+
+---
+
+## Function Definition (Authoritative Skeleton)
+
+```sql
 CREATE OR REPLACE FUNCTION buyer_counter_proposal(
     p_deal_id UUID,
     p_actor_user_id UUID,
@@ -34,19 +69,29 @@ AS $$
 DECLARE
     v_current_version UUID;
     v_new_version UUID;
+    v_status deal_status;
 BEGIN
 
-    -- Role validation
+    -- Validate role (replace with your real assertion function if different)
     PERFORM assert_user_role(p_actor_user_id, 'BUYER');
 
-    -- Lock deal row
-    SELECT current_version_id
-    INTO v_current_version
+    -- Lock deal row and capture baseline
+    SELECT current_version_id, status
+    INTO v_current_version, v_status
     FROM deals
     WHERE id = p_deal_id
     FOR UPDATE;
 
-    -- Insert new version
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Deal does not exist';
+    END IF;
+
+    -- Enforce eligibility rule (Sprint 4 locked to AUTHORIZED_BY_HOMEOWNER)
+    IF v_status <> 'AUTHORIZED_BY_HOMEOWNER' THEN
+        RAISE EXCEPTION 'Deal not eligible for counter';
+    END IF;
+
+    -- Insert new immutable version
     INSERT INTO deal_versions (
         deal_id,
         parent_version_id,
@@ -65,40 +110,18 @@ BEGIN
     )
     RETURNING id INTO v_new_version;
 
-    -- Transition status
+    -- Transition state using verified Sprint 3 primitive
     PERFORM transition_deal_status(
         p_deal_id,
         'COUNTERED',
-        p_actor_user_id
+        p_actor_user_id,
+        v_new_version,
+        jsonb_build_object(
+            'action', 'buyer_counter_proposal',
+            'parent_version_id', v_current_version,
+            'new_version_id', v_new_version
+        )
     );
-
-    -- Audit log
-    INSERT INTO audit_log (...)
-    VALUES (...);
 
 END;
 $$;
-
-Concurrency Guard
-
-FOR UPDATE ensures no race overwrites current_version_id.
-
-Verification Commands
-SELECT buyer_counter_proposal('deal-uuid', 'buyer-uuid', '{"price": 450000}');
-
-SELECT parent_version_id
-FROM deal_versions
-WHERE deal_id = 'deal-uuid'
-ORDER BY created_at DESC;
-
-Evidence Checklist
-
-Two concurrent counters create two versions
-
-No direct writes to deals.current_version_id
-
-Audit event emitted
-
-Exit Criteria
-
-Counters versioned. No mutation pathway.
