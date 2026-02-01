@@ -59,7 +59,7 @@ No direct writes to binding fields are permitted.
 ## Function Definition (Authoritative Skeleton)
 
 ```sql
-CREATE OR REPLACE FUNCTION buyer_counter_proposal(
+CREATE OR REPLACE FUNCTION public.buyer_counter_proposal(
     p_deal_id UUID,
     p_actor_user_id UUID,
     p_proposed_terms JSONB
@@ -73,8 +73,8 @@ DECLARE
     v_status public.deal_status;
 BEGIN
 
-    -- Validate role (replace with your real assertion function if different)
-    PERFORM assert_user_role(p_actor_user_id, 'BUYER');
+    -- Deal-scoped role validation (matches Sprint 3 model)
+    PERFORM public.assert_deal_role(p_deal_id, p_actor_user_id, 'BUYER');
 
     -- Lock deal row and capture baseline
     SELECT current_version_id, status
