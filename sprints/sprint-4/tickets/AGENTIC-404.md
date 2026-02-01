@@ -56,7 +56,7 @@ Buyer acceptance binds buyer intent only.
 ## Function Definition (Authoritative Skeleton)
 
 ```sql
-CREATE OR REPLACE FUNCTION buyer_accept_proposal(
+CREATE OR REPLACE FUNCTION public.buyer_accept_proposal(
     p_deal_id UUID,
     p_actor_user_id UUID
 )
@@ -68,8 +68,8 @@ DECLARE
     v_current_version UUID;
 BEGIN
 
-    -- Validate role (replace with your real assertion function if different)
-    PERFORM assert_user_role(p_actor_user_id, 'BUYER');
+    -- Deal-scoped role validation (matches Sprint 3 model)
+    PERFORM public.assert_deal_role(p_deal_id, p_actor_user_id, 'BUYER');
 
     -- Lock deal row and capture the authoritative version being accepted
     SELECT status, current_version_id
