@@ -11,6 +11,7 @@ Buyer acceptance binds buyer intent only.
 - Does not restrict homeowner withdrawal or pause (Sprint 5+ concern)
 - Must not mutate deal_versions
 - Must use controlled transition pathway with explicit version_id + metadata
+- Must respect the existing strict transition matrix in transition_deal_status
 
 ---
 
@@ -30,12 +31,11 @@ Buyer acceptance binds buyer intent only.
 
 - deal exists
 - actor_user_id exists
-- actor has role = BUYER
-- deal.status = AUTHORIZED_BY_HOMEOWNER
+- actor has role = BUYER (must exist in deal_user_roles for deal)
+- deal.status = PROPOSAL_READY (locked to match current transition matrix)
 - deal not PAUSED_BY_HOMEOWNER
 - deal not WITHDRAWN_BY_HOMEOWNER
-- acceptance applies to the current authoritative version:
-  `deals.current_version_id`
+- acceptance applies to the current authoritative version: deals.current_version_id
 - function executes inside a transaction
 - deal row must be locked FOR UPDATE
 
@@ -49,6 +49,7 @@ Buyer acceptance binds buyer intent only.
 - transition_deal_status requires:
   (p_deal_id, p_new_status, p_actor_user_id, p_version_id, p_metadata)
 - All intent must be explicit via metadata `action`
+- transition_deal_status blocks no-op transitions; idempotency must be handled here
 
 ---
 
@@ -63,7 +64,7 @@ RETURNS VOID
 LANGUAGE plpgsql
 AS $$
 DECLARE
-    v_status deal_status;
+    v_status public.deal_status;
     v_current_version UUID;
 BEGIN
 
@@ -72,8 +73,8 @@ BEGIN
 
     -- Lock deal row and capture the authoritative version being accepted
     SELECT status, current_version_id
-    INTO v_status, v_current_version
-    FROM deals
+      INTO v_status, v_current_version
+    FROM public.deals
     WHERE id = p_deal_id
     FOR UPDATE;
 
@@ -81,15 +82,22 @@ BEGIN
         RAISE EXCEPTION 'Deal does not exist';
     END IF;
 
-    -- Eligibility check
-    IF v_status <> 'AUTHORIZED_BY_HOMEOWNER' THEN
-        RAISE EXCEPTION 'Deal not eligible for acceptance';
+    -- Idempotency: transition_deal_status blocks no-op transitions
+    IF v_status = 'ACCEPTED_BY_BUYER'::public.deal_status THEN
+        RETURN;
+    END IF;
+
+    -- Eligibility check (must match transition_deal_status matrix)
+    -- Matrix permits: PROPOSAL_READY -> ACCEPTED_BY_BUYER
+    IF v_status <> 'PROPOSAL_READY'::public.deal_status THEN
+        RAISE EXCEPTION 'Deal not eligible for acceptance (status=%)', v_status
+          USING errcode = 'P0001';
     END IF;
 
     -- Transition state using verified Sprint 3 primitive
-    PERFORM transition_deal_status(
+    PERFORM public.transition_deal_status(
         p_deal_id,
-        'ACCEPTED_BY_BUYER',
+        'ACCEPTED_BY_BUYER'::public.deal_status,
         p_actor_user_id,
         v_current_version,
         jsonb_build_object(
