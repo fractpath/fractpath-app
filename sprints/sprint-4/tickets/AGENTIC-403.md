@@ -10,10 +10,11 @@ Buyer counters must create a new version.
 Never mutate existing version rows.
 
 All counters must:
+
 - Insert a new deal_versions row
 - Preserve lineage via parent_version_id
 - Transition status using transition_deal_status(...)
-- Emit attributable metadata
+- Emit attributable metadata via transition metadata (and actor_role added by transition_deal_status)
 
 No direct writes to binding fields are permitted.
 
@@ -35,8 +36,8 @@ No direct writes to binding fields are permitted.
 
 - deal exists
 - actor_user_id exists
-- actor has role = BUYER
-- deal.status = AUTHORIZED_BY_HOMEOWNER (Sprint 4 locked eligibility rule)
+- actor has role = BUYER (must exist in deal_user_roles for deal)
+- deal.status = PROPOSED (locked to match current transition matrix)
 - deal not PAUSED_BY_HOMEOWNER
 - deal not WITHDRAWN_BY_HOMEOWNER
 - function executes inside a transaction
@@ -69,7 +70,7 @@ AS $$
 DECLARE
     v_current_version UUID;
     v_new_version UUID;
-    v_status deal_status;
+    v_status public.deal_status;
 BEGIN
 
     -- Validate role (replace with your real assertion function if different)
@@ -77,8 +78,8 @@ BEGIN
 
     -- Lock deal row and capture baseline
     SELECT current_version_id, status
-    INTO v_current_version, v_status
-    FROM deals
+      INTO v_current_version, v_status
+    FROM public.deals
     WHERE id = p_deal_id
     FOR UPDATE;
 
@@ -86,13 +87,14 @@ BEGIN
         RAISE EXCEPTION 'Deal does not exist';
     END IF;
 
-    -- Enforce eligibility rule (Sprint 4 locked to AUTHORIZED_BY_HOMEOWNER)
-    IF v_status <> 'AUTHORIZED_BY_HOMEOWNER' THEN
-        RAISE EXCEPTION 'Deal not eligible for counter';
+    -- Enforce eligibility rule (must match transition_deal_status matrix)
+    IF v_status <> 'PROPOSED'::public.deal_status THEN
+        RAISE EXCEPTION 'Deal not eligible for counter (status=%)', v_status
+          USING errcode = 'P0001';
     END IF;
 
     -- Insert new immutable version
-    INSERT INTO deal_versions (
+    INSERT INTO public.deal_versions (
         deal_id,
         parent_version_id,
         created_by_role,
@@ -111,9 +113,10 @@ BEGIN
     RETURNING id INTO v_new_version;
 
     -- Transition state using verified Sprint 3 primitive
-    PERFORM transition_deal_status(
+    -- Matrix permits: PROPOSED -> COUNTERED
+    PERFORM public.transition_deal_status(
         p_deal_id,
-        'COUNTERED',
+        'COUNTERED'::public.deal_status,
         p_actor_user_id,
         v_new_version,
         jsonb_build_object(
