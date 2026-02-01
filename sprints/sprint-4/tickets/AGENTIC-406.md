@@ -11,7 +11,7 @@ Sprint 4 requires a constitution-safe pathway to update binding fields:
 - version authorization markers on `deal_versions` (e.g., `authorized_at`)
 - supersession (deauthorize prior authorized version)
 
-This function is the **only** approved mechanism in Sprint 4 to:
+This function is the **only approved mechanism** in Sprint 4 to:
 
 - authorize a target `deal_versions` row
 - deauthorize any prior authorized version for the deal
@@ -78,7 +78,7 @@ No direct updates to binding fields outside controlled functions.
 **Effects**
 - Locks the deal row.
 - Identifies the prior authorized version (if any) for this deal.
-- Deauthorizes prior authorized version.
+- Deauthorizes prior authorized version (if any).
 - Authorizes the requested version.
 - Updates deals.current_version_id to p_version_id through guarded pathway.
 - Inserts audit events into deal_activity_log (or equivalent):
@@ -93,7 +93,13 @@ No direct updates to binding fields outside controlled functions.
 
 ## Implementation Notes (Guard Bypass Mechanism)
 
-Your environment already uses a guard mechanism for status updates:
+### Verified
+Your `guard_deal_current_version_update()` already supports a config allowlist:
+
+- allowed when `current_setting('app.allow_deal_current_version_update', true) = 'true'`
+- otherwise blocks any change to deals.current_version_id
+
+Therefore this function MUST set that flag immediately before updating current_version_id:
 
 ```sql
-PERFORM set_config('app.allow_deal_status_update', 'true', true);
+PERFORM set_config('app.allow_deal_current_version_update', 'true', true);
