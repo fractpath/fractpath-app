@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "predev": "node scripts/check-env.mjs",
+    "predev": "node scripts/check-env.mjs && bash scripts/smoke.sh",
     "prebuild": "node scripts/check-env.mjs",
     "smoke": "bash scripts/smoke.sh"
   },
