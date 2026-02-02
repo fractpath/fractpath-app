@@ -3,12 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "bash -lc 'next dev -H 0.0.0.0 -p ${PORT:-3000}'",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "predev": "node scripts/check-env.mjs",
+    "prebuild": "node scripts/check-env.mjs",
+    "smoke": "bash scripts/smoke.sh"
   },
   "dependencies": {
+    "@supabase/auth-helpers-nextjs": "^0.15.0",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.93.3",
     "next": "16.1.6",
@@ -21,6 +25,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "dotenv": "^17.2.3",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "typescript": "^5"

@@ -4,7 +4,7 @@ expertMode = true
 
 [nix]
 channel = "stable-25_05"
-packages = ["gh"]
+packages = ["gh", "lsof"]
 
 [workflows]
 runButton = "Project"
@@ -35,6 +35,10 @@ localPort = 3000
 externalPort = 3001
 
 [[ports]]
+localPort = 3001
+externalPort = 3002
+
+[[ports]]
 localPort = 5000
 externalPort = 80
 
@@ -45,3 +49,9 @@ externalPort = 3000
 [deployment]
 deploymentTarget = "static"
 publicDir = "."
+
+[userenv]
+
+[userenv.shared]
+NEXT_PUBLIC_SUPABASE_URL = "https://onacakmynvzcvbqenjaf.supabase.co"
+NEXT_PUBLIC_SUPABASE_ANON_KEY = "sb_publishable_XuVCGsDl-5dWbmgp8FlYmA_F57-IAIc"
