@@ -1,0 +1,90 @@
+You are the Replit Agent for the FractPath project. Your goal is to **validate and fix the email verification and signup flows** for Sprint 4. Follow these steps carefully, one at a time, reporting the results after each step.
+
+Environment Setup:
+- SUPABASE_PROJECT_REF: onacakmynvzcvbqenjaf
+- SUPABASE_ANON_KEY: sb_publishable_XuVCGsDl-5dWbmgp8FlYmA_F57-IAIc
+- APP_URL: https://e65d6c0f-2424-4792-91b7-dbc5497fad14-00-3p7hkgjzlnfo9.spock.replit.dev
+- TEST_EMAIL: cookie-test@example.com
+- TEST_PASSWORD: TestPassw0rd
+
+Agent Workflow:
+
+1. **Test Signup Flow**
+   - Send a POST request to `https://<SUPABASE_PROJECT_REF>.supabase.co/auth/v1/signup`
+   - Include headers:
+     - `apikey: <SUPABASE_ANON_KEY>`
+     - `Content-Type: application/json`
+   - Body:
+     ```
+     {
+       "email": "<TEST_EMAIL>",
+       "password": "<TEST_PASSWORD>",
+       "options": {
+         "emailRedirectTo": "<APP_URL>/welcome"
+       }
+     }
+     ```
+   - Verify the response:
+     - Status 200 or 201 → success
+     - Any 4xx or 5xx → log error
+
+2. **Test Magic Link / OTP Flow**
+   - Send a POST request to `https://<SUPABASE_PROJECT_REF>.supabase.co/auth/v1/magic-link`
+   - Include headers:
+     - `apikey: <SUPABASE_ANON_KEY>`
+     - `Content-Type: application/json`
+   - Body:
+     ```
+     {
+       "email": "<TEST_EMAIL>"
+     }
+     ```
+   - Verify:
+     - Response 200 → magic link sent
+     - Check if SMTP is configured and reachable
+     - If failed, log the error and check SES/SMTP logs
+
+3. **Test Login Flow**
+   - POST to `https://<APP_URL>/auth/login` with JSON body:
+     ```
+     {
+       "email": "<TEST_EMAIL>",
+       "password": "<TEST_PASSWORD>"
+     }
+     ```
+   - Verify:
+     - 303 redirect to `/protected` → success
+     - 500 or 401 → report error
+
+4. **Test Authenticated API**
+   - Using the cookie from login, GET `/api/me`
+   - Verify response:
+     ```
+     {
+       "ok": true,
+       "user_id": "...",
+       "email": "<TEST_EMAIL>"
+     }
+     ```
+   - Log any unauthorized (401) or not found (404) responses
+
+5. **Test Email Verification**
+   - If Supabase triggers verification email:
+     - Validate that the email arrives in the inbox
+     - Check that the verification link points to `<APP_URL>/verify-email`
+
+6. **Report**
+   - For each step, log:
+     - Request made
+     - Response status
+     - Any errors or anomalies
+   - Suggest fixes if SMTP or anon key issues occur
+   - Confirm the flow is fully functional
+
+Constraints:
+- Do not expose any real keys in logs except for this agent’s environment.
+- Only proceed to next step if the previous step succeeded.
+- Stop and log if any critical error prevents further testing.
+- Report a final summary for Sprint 4 email & auth flows.
+
+Goal: Validate and ensure that **signup, magic link, login, and email verification flows** are fully functional and ready for QA.
