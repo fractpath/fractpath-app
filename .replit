@@ -1,10 +1,10 @@
-modules = ["web", "nodejs-20"]
+modules = ["nodejs-20", "python-3.11", "web"]
 [agent]
 expertMode = true
 
 [nix]
 channel = "stable-25_05"
-packages = ["gh", "lsof"]
+packages = ["gh", "lsof", "nano"]
 
 [workflows]
 runButton = "Project"
@@ -35,10 +35,6 @@ localPort = 3000
 externalPort = 3001
 
 [[ports]]
-localPort = 3001
-externalPort = 3002
-
-[[ports]]
 localPort = 5000
 externalPort = 80
 
@@ -54,4 +50,6 @@ publicDir = "."
 
 [userenv.shared]
 NEXT_PUBLIC_SUPABASE_URL = "https://onacakmynvzcvbqenjaf.supabase.co"
-NEXT_PUBLIC_SUPABASE_ANON_KEY = "sb_publishable_XuVCGsDl-5dWbmgp8FlYmA_F57-IAIc"
+NEXT_PUBLIC_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9uYWNha215bnZ6Y3ZicWVuamFmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMzUyMzAsImV4cCI6MjA4NDkxMTIzMH0.SoIrVUxTfAn4AcaeuK25S3NcgldCoS5Z8r96DW9eoIQ"
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9uYWNha215bnZ6Y3ZicWVuamFmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMzUyMzAsImV4cCI6MjA4NDkxMTIzMH0.SoIrVUxTfAn4AcaeuK25S3NcgldCoS5Z8r96DW9eoIQ"
+SUPABASE_URL = "https://onacakmynvzcvbqenjaf.supabase.co"

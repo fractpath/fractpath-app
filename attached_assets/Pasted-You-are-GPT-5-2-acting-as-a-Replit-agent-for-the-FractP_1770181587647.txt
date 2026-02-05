@@ -1,0 +1,84 @@
+You are GPT-5.2 acting as a Replit agent for the FractPath project. Your task is to execute all remaining Sprint 4 tickets **fully autonomously**, creating scaffolds, route handlers, page components, PRs, and test artifacts without manual terminal interaction. Follow these instructions exactly.
+
+---
+
+### Context
+
+1. Project structure:
+- Next.js App Router (`src/app`) with route folders: auth, me, my-scenarios, login, signup, protected, reset-password, update-password
+- Supabase backend with auth already working (user `cookie-test@example.com` / `TestPassw0rd`)
+- Replit preview URL: `https://e65d6c0f-2424-4792-91b7-dbc5497fad14-00-3p7hkgjzlnfo9.spock.replit.dev/`
+- GitHub repository connected
+
+2. Completed:
+- Phase A–C (dev server, Supabase connectivity, login/auth flows) ✅
+
+3. Goals:
+- Implement remaining Sprint 4 features, including protected pages, My-Scenarios, signup/onboarding, reset/update password flows
+- Automate scaffolds, route handlers, client components, PRs, and basic QA checks
+
+---
+
+### Agent Instructions (step-by-step)
+
+For each ticket in the Sprint 4 backlog:
+
+1. **Read ticket from GitHub**:
+   - Pull title, description, constraints, and acceptance criteria
+
+2. **Create branch**:
+   - Name: `sprint4/<ticket-title-slug>`  
+   - Checkout from `main` or `dev` branch
+
+3. **Scaffold code**:
+   - Determine route folder or component needed (`page.tsx`, `route.ts`)  
+   - Add minimal client component if page needs UI (`ComponentClient.tsx`)  
+   - If API needed: add route handler calling Supabase (auth, fetch scenarios, update password, etc.)  
+   - Include placeholder data for dev/test
+
+4. **Wire auth if needed**:
+   - Use `createSupabaseRouteClient` for API routes  
+   - Add server-side check for cookies  
+   - Redirect unauthorized users to `/login/` (with trailing slash)
+
+5. **Add tests**:
+   - Generate curl commands to verify API endpoint returns 200 + correct JSON  
+   - Generate browser QA instructions using Replit preview URL
+
+6. **Commit + PR**:
+   - Commit scaffold and any auto-generated tests  
+   - Push branch to GitHub  
+   - Open PR titled: `DH4: <ticket-title>`  
+   - Include description: ticket summary + automated test instructions
+
+7. **Validate**:
+   - Confirm branch builds locally in Replit  
+   - Confirm endpoints return expected responses using generated curl commands
+
+8. **Repeat for all remaining Sprint 4 tickets**:
+   - `/protected` page & auth flow  
+   - `/my-scenarios` page + API integration  
+   - `/signup` onboarding + validation  
+   - `/reset-password` + `/update-password` flows  
+   - Any other Sprint 4 ticket in GitHub backlog
+
+---
+
+### Output Requirements
+
+- For each ticket processed, print:
+  1. Branch name
+  2. Scaffold files created
+  3. API routes created (if any)
+  4. curl test commands
+  5. Browser QA instructions
+
+- Do **not** execute manual terminal commands outside Replit agents.  
+- Use Replit preview URL for browser instructions.  
+- Use existing Supabase setup (`cookie-test@example.com`) for test users.  
+- Ensure all code compiles locally and passes minimal fetch tests before opening PR.  
+
+---
+
+Begin with the first ticket in the backlog and continue automatically until all Sprint 4 tickets are scaffolded and PRs are open.  
+

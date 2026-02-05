@@ -1,66 +1,71 @@
 "use client";
 
-import { useSession } from "@/lib/useSession";
-import { createClient } from "@/lib/supabase/client";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+
+type Me =
+  | { ok: true; user_id: string; email: string | null }
+  | { ok: false; error: string };
 
 export function AuthHeader() {
-  const { user, isLoading, error } = useSession();
-  const router = useRouter();
+  const [me, setMe] = useState<Me | null>(null);
 
-  async function handleSignOut() {
-    try {
-      const supabase = createClient();
-      await supabase.auth.signOut();
-      router.refresh();
-    } catch {
-      // Ignore if not configured
-    }
-  }
+  useEffect(() => {
+    let cancelled = false;
 
-  if (isLoading) {
-    return <div style={{ fontSize: 14, color: "#666" }}>Loading...</div>;
-  }
+    fetch("/api/me", { credentials: "include" })
+      .then((r) => r.json())
+      .then((data: Me) => {
+        if (!cancelled) setMe(data);
+      })
+      .catch(() => {
+        if (!cancelled) setMe({ ok: false, error: "Unknown" });
+      });
 
-  if (error) {
-    return null;
-  }
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  if (user) {
+  if (me?.ok) {
     return (
-      <div style={{ display: "flex", alignItems: "center", gap: 16, fontSize: 14 }}>
-        <span style={{ color: "#666" }}>{user.email}</span>
-        <button
-          onClick={handleSignOut}
-          style={{
-            padding: "6px 12px",
-            borderRadius: 6,
-            border: "1px solid #ccc",
-            background: "#fff",
-            cursor: "pointer",
-          }}
-        >
-          Sign out
-        </button>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <span style={{ fontSize: 13, opacity: 0.85 }}>
+          Signed in{me.email ? ` as ${me.email}` : ""}
+        </span>
+
+        <form method="post" action="/auth/logout">
+          <button
+            type="submit"
+            style={{
+              padding: "8px 10px",
+              borderRadius: 10,
+              border: "1px solid rgba(0,0,0,0.15)",
+              cursor: "pointer",
+              fontWeight: 600,
+              background: "white",
+            }}
+          >
+            Log out
+          </button>
+        </form>
       </div>
     );
   }
 
+  // Logged out (or loading) → link to /login (NOT /auth/login)
   return (
-    <Link
+    <a
       href="/login"
       style={{
-        padding: "6px 12px",
-        borderRadius: 6,
-        border: "1px solid #ccc",
-        background: "#fff",
+        padding: "8px 10px",
+        borderRadius: 10,
+        border: "1px solid rgba(0,0,0,0.15)",
         textDecoration: "none",
-        color: "#111",
-        fontSize: 14,
+        fontWeight: 600,
+        color: "inherit",
       }}
     >
-      Sign in
-    </Link>
+      Log in
+    </a>
   );
 }
