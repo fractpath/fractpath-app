@@ -37,9 +37,15 @@ src/
 │   └── useSession.ts         # React session hook
 └── middleware.ts             # Next.js middleware
 
+tickets/
+├── README.md                 # Ticket index and conventions
+├── APP/                      # Product feature tickets (APP-001 through APP-013)
+└── OPS/                      # Ops/infrastructure tickets (OPS-001, OPS-003)
+
 docs/
-├── app/
-│   └── APP-001-secure-portal-onboarding.md  # Ticket for dashboard
+├── README.md                 # Documentation index
+├── ENV-CONTRACT.md           # Env var contract
+├── runbook/dev.md            # Developer runbook
 └── sprint4-test-commands.md
 ```
 
