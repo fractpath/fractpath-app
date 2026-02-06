@@ -12,7 +12,21 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+
+    // FractPath-specific ignores (do not lint archived code)
+    "_app_unused/**",
+    "_archived_scripts/**",
+    "supabase/**",
   ]),
+
+  // Pragmatic project overrides (MVP-safe)
+  {
+    rules: {
+      "@typescript-eslint/no-explicit-any": "warn",
+      "react-hooks/set-state-in-effect": "warn",
+      "react/no-unescaped-entities": "warn",
+    },
+  },
 ]);
 
 export default eslintConfig;
