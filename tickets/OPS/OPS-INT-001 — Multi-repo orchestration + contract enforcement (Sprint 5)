@@ -1,0 +1,138 @@
+# OPS-INT-001 — Multi-repo orchestration + contract enforcement (Sprint 5)
+
+## Sprint
+Sprint 0 (alignment-only) → governs Sprint 5 execution
+
+## Objective
+Define the authoritative orchestration rules, execution order, and guardrails for Sprint 5 across the following repositories:
+
+- `fractpath-calculator-widget`
+- `fractpath-marketing`
+- `fractpath-app`
+
+This ticket prevents cross-repo drift, silent contract mutation, and agent overreach by locking **who does what, when, and under which constraints**.
+
+## Scope
+This is a **meta-level orchestration ticket**.
+It does not introduce features or code.
+It governs **how Sprint 5 agents are allowed to operate**.
+
+## Repos in Scope
+
+### 1) fractpath-calculator-widget (Canonical)
+Owns:
+- All calculator math and persona logic
+- DraftSnapshot production
+- ShareSummary production
+- Widget UI surface (mode-aware)
+- Public interface defined by locked contract
+
+Does NOT own:
+- Email capture
+- API calls
+- Routing
+- Persistence
+- Deal creation
+
+Canonical tickets:
+- WGT-INT-001 — Lock widget public interface
+- WGT-031 — Widget gating semantics
+- WGT-030 — Widget UI surface + mode behavior
+- WGT-020 — Share semantics
+- WGT-040 — Draft snapshot schema + stability guarantees
+- WGT-050 — Contract versioning + deprecation policy
+
+### 2) fractpath-marketing (Host / Pre-auth)
+Owns:
+- Widget embedding via tight package import
+- Persona framing and marketing copy around widget
+- Email capture gating
+- Lead creation
+- Marketing share email delivery
+- Redirect to app resume flow
+
+Does NOT own:
+- Calculator math
+- DraftSnapshot schema
+- Draft-token minting
+- Deal creation
+- Authenticated access
+
+Canonical tickets:
+- MKT-004 — Calculator UI + gating (blur → save & continue)
+- MKT-006 — Lead + share API routes (draft token minting, share email)
+
+### 3) fractpath-app (Authoritative System)
+Owns:
+- Draft-token minting and redemption
+- Authentication and authorization
+- Deal creation and persistence
+- Resume flows from marketing
+- Permissioned sharing of real deals
+
+Does NOT own:
+- Calculator math
+- Marketing lead capture UX
+- Marketing email composition
+
+Canonical tickets:
+- APP-INT-001 — Resume draft token into deal (to be created)
+- Auth, deal, and permission subsystems
+
+## Sprint 5 Execution Order (Mandatory)
+
+Agents must execute in the following order:
+
+1. **Widget agents**
+   - Implement behavior strictly per WGT tickets
+   - Must not reference marketing or app internals
+   - Output must conform to locked public interface
+
+2. **Marketing agents**
+   - Embed widget as a package
+   - Wire callbacks to marketing APIs
+   - Must not reimplement calculator logic
+   - Must treat widget outputs as canonical
+
+3. **App agents**
+   - Implement draft-token minting and redemption
+   - Resume DraftSnapshot into authenticated deal context
+   - Enforce permissions and access control
+
+No agent may proceed if a dependency repo is not complete.
+
+## Contract Enforcement Rules
+
+- `docs/architecture/integration-contract.md` is canonical.
+- Widget public interface is locked via WGT-INT-001.
+- Any breaking change requires:
+  - explicit version bump
+  - coordinated update across repos
+  - update to WGT-050 (versioning policy)
+
+## Hard Prohibitions (No Silent Mutation)
+Agents must NOT:
+- Add or infer fields to DraftSnapshot or ShareSummary
+- Change widget outputs without contract change
+- Duplicate calculator math outside widget
+- Create real deals pre-auth
+- Bypass draft-token lifecycle
+
+Violations require rollback and contract review.
+
+## Agent Prompt Requirements (Sprint 5)
+Every agent prompt must:
+- Reference this OPS-INT-001 ticket
+- Reference the relevant repo-specific tickets
+- Explicitly state what the agent is NOT allowed to change
+
+## Acceptance Criteria
+- All Sprint 5 agents run in the defined order.
+- No cross-repo boundary violations occur.
+- Draft tokens cleanly bridge marketing → app.
+- Widget remains the single source of calculator truth.
+- No silent contract or schema mutation.
+
+## Notes
+This ticket is the **governor** of Sprint 5.
+If there is ambiguity between tickets, this ticket wins.
