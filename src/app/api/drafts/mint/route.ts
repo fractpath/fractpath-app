@@ -26,33 +26,22 @@ export async function POST(request: NextRequest) {
     return jsonError("Invalid JSON body", 400);
   }
 
-  const email =
-    typeof body?.email === "string" ? body.email.trim() : "";
+  const email = typeof body?.email === "string" ? body.email.trim() : "";
   if (!email || !EMAIL_RE.test(email)) {
     return jsonError("Valid email is required", 400);
   }
 
-  if (
-    body?.snapshot === undefined ||
-    body?.snapshot === null
-  ) {
+  if (body?.snapshot === undefined || body?.snapshot === null) {
     return jsonError("snapshot is required", 400);
   }
 
+  // Treat snapshot as OPAQUE: do not read/derive any fields.
   const snapshot = body.snapshot;
 
-  const contractVersion =
-    typeof snapshot?.contract_version === "string"
-      ? snapshot.contract_version
-      : null;
-  const schemaVersion =
-    typeof snapshot?.schema_version === "string"
-      ? snapshot.schema_version
-      : null;
-
   const token = randomBytes(32).toString("hex");
-
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const expiresAt = new Date(
+    Date.now() + 7 * 24 * 60 * 60 * 1000,
+  ).toISOString();
 
   try {
     const supabase = createServiceClient();
@@ -60,8 +49,6 @@ export async function POST(request: NextRequest) {
     const { error } = await (supabase.from("draft_tokens") as any).insert({
       token,
       snapshot_json: snapshot,
-      contract_version: contractVersion,
-      schema_version: schemaVersion,
       expires_at: expiresAt,
       source: "marketing",
     });
