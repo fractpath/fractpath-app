@@ -1,0 +1,122 @@
+You are my AI agent implementing Sprint 5 in the **fractpath-app** repository (Next.js App Router + Supabase). You MUST follow OPS-INT-001 and APP-INT-001. Do NOT guess. If any contract detail is missing, STOP and report what is missing.
+
+# Context (Sprint 0 is locked)
+- Sprint 0 contracts/tickets are frozen under tag: `sprint-0-locked`
+- You are working on branch: `sprint-5-app-exec`
+- Auth baseline is LOCKED. Do NOT modify:
+  - src/app/api/me/route.ts
+  - src/app/auth/callback/route.ts
+  - src/app/auth/login/route.ts
+  - src/app/auth/logout/route.ts
+  - src/app/auth/resend-confirmation/route.ts
+  - src/app/auth/signup/route.ts
+  - src/app/me/page.tsx
+
+# Repos + Ownership (OPS-INT-001)
+- Widget (canonical math + persona logic) lives elsewhere; app must never implement calculator math.
+- Marketing owns lead capture + marketing share email; app must not implement marketing share email.
+- App owns draft-token minting + redemption, auth/permissions, and deal creation post-auth.
+
+# Goal (APP-INT-001)
+Implement the authoritative bridge: marketing proto-state → authenticated deal state.
+Marketing will call app to mint a draft token referencing an opaque DraftSnapshot.
+Users will land on `/resume?token=...` and the app will redeem into an authenticated, permissioned deal context.
+
+# Non-negotiables
+- Treat DraftSnapshot as an OPAQUE JSON payload (store and forward; do not infer fields).
+- No real deal is created pre-auth.
+- Token redemption must be deterministic, auditable, and fail-closed.
+- No silent mutation: do not add/assume fields; do not “repair” payloads.
+- If token is invalid/expired, do not create anything.
+- Keep changes minimal and scoped to Sprint 5.
+
+# Deliverables
+
+## A) Supabase migration (new tables only)
+Create a NEW migration in `supabase/migrations/` (do not modify existing migration):
+- Table: `draft_tokens`
+  - id uuid primary key default gen_random_uuid()
+  - token text unique not null
+  - snapshot_json jsonb not null   -- opaque widget DraftSnapshot
+  - contract_version text null     -- optional metadata, do not require
+  - schema_version text null       -- optional metadata, do not require
+  - created_at timestamptz not null default now()
+  - expires_at timestamptz not null
+  - redeemed_at timestamptz null
+  - redeemed_by_user_id uuid null  -- references auth.users(id) if desired
+  - source text not null default 'marketing'
+- Indexes:
+  - unique(token)
+  - index(expires_at)
+- RLS: enable RLS and add policies:
+  - INSERT: allow service role only (or server-side only pattern used in this repo)
+  - SELECT/UPDATE: allow service role only
+  (Use the same security pattern already used in this repo’s existing tables. If uncertain, STOP and ask.)
+
+## B) API route: POST `/api/drafts/mint`
+Create: `src/app/api/drafts/mint/route.ts`
+Behavior:
+- Accept JSON body: `{ email: string, snapshot: any }`
+- Validate:
+  - email present and basic format check
+  - snapshot present (do not inspect schema)
+- Mint opaque `token` (high-entropy random; not guessable)
+- Persist `draft_tokens` row with:
+  - token
+  - snapshot_json (as-is)
+  - expires_at (default 7 days from now)
+  - source='marketing'
+  - contract_version/schema_version if present inside snapshot at top-level ONLY (optional; do not require)
+- Return JSON: `{ ok: true, token: string, expires_at: string }`
+- Failure: `{ ok:false, error:string }` with correct HTTP status
+- Security:
+  - This endpoint is called from marketing server route; it must be protected against abuse.
+  - Implement basic rate limiting by IP (in-memory map is acceptable for now) and fail-closed.
+  - Do NOT require auth for mint (marketing is pre-auth), but do not expose sensitive info.
+
+## C) App route: `/resume`
+Create: `src/app/resume/page.tsx` and any minimal helpers needed.
+Behavior:
+- Read query param `token`
+- If missing token: render error (no redirects)
+- If user is NOT authenticated:
+  - Redirect to existing login flow (DO NOT change auth routes)
+  - Preserve token across auth redirect (e.g., via `next` param or cookie)
+  - After login, user returns to `/resume?token=...`
+- If authenticated:
+  - Redeem token:
+    - Validate exists, not expired, not redeemed (idempotent re-entry allowed ONLY if redeemed_by_user_id matches current user; otherwise fail)
+    - Mark redeemed_at and redeemed_by_user_id
+  - Create a new “deal” record OR attach snapshot to an existing draft deal:
+    - Use the existing data model in this repo (likely `fractpath_scenarios` or `deals` under `src/app/api/deals`)
+    - IMPORTANT: If no deal model exists that fits, create a minimal new table `deals` ONLY if necessary; prefer using existing.
+    - Persist snapshot_json as opaque on the deal/scenario record (jsonb column).
+  - Redirect user into the authenticated deal/scenario view (existing route if present; otherwise create minimal `/my-scenarios` linkage).
+- Failure modes (explicit, fail-closed):
+  - invalid token
+  - expired token
+  - already redeemed by another user
+  - database error
+  - contract version mismatch (if provided): show error, do not continue
+
+## D) Minimal tests / verification
+- Add lightweight unit tests where feasible (or minimal runtime assertions) to confirm:
+  - token generation is high-entropy and unique
+  - mint stores snapshot without mutation
+  - redeem prevents cross-user reuse
+- Ensure `npm run build` succeeds.
+
+# Stop conditions (must obey)
+STOP and report if:
+- You cannot identify the correct existing deal/scenario persistence model to attach snapshot to.
+- You would need to modify locked auth baseline routes.
+- RLS/security pattern in this repo is unclear.
+- You are forced to interpret DraftSnapshot schema beyond “opaque JSON”.
+
+# Output requirements
+- Implement the code and migration in this repo (no pseudo-code).
+- Keep diffs minimal and well-scoped.
+- Summarize changes and list files changed at the end.
+- Do not claim “complete” until build passes.
+
+Proceed now.
