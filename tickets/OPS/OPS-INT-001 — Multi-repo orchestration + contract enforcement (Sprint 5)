@@ -19,7 +19,7 @@ It governs **how Sprint 5 agents are allowed to operate**.
 
 ## Repos in Scope
 
-### 1) fractpath-calculator-widget (Canonical)
+### 1) fractpath-calculator-widget (Canonical Compute Layer)
 Owns:
 - All calculator math and persona logic
 - DraftSnapshot production
@@ -60,9 +60,10 @@ Does NOT own:
 
 Canonical tickets:
 - MKT-004 — Calculator UI + gating (blur → save & continue)
-- MKT-006 — Lead + share API routes (draft token minting, share email)
+- MKT-006 — Lead + share API routes
+- MKT-INT-001 — Tight widget embed via locked interface
 
-### 3) fractpath-app (Authoritative System)
+### 3) fractpath-app (Authoritative System of Record)
 Owns:
 - Draft-token minting and redemption
 - Authentication and authorization
@@ -76,12 +77,12 @@ Does NOT own:
 - Marketing email composition
 
 Canonical tickets:
-- APP-INT-001 — Resume draft token into deal (to be created)
-- Auth, deal, and permission subsystems
+- APP-INT-001 — Resume draft token into authenticated deal
+- Core auth, deal, and permission subsystems
 
 ## Sprint 5 Execution Order (Mandatory)
 
-Agents must execute in the following order:
+Agents must execute **strictly in the following order**:
 
 1. **Widget agents**
    - Implement behavior strictly per WGT tickets
@@ -99,7 +100,10 @@ Agents must execute in the following order:
    - Resume DraftSnapshot into authenticated deal context
    - Enforce permissions and access control
 
-No agent may proceed if a dependency repo is not complete.
+### Hard Stop Rule
+If a dependency repo is incomplete, inconsistent with contract, or failing tests:
+- **Downstream agents must not run**
+- The sprint halts until the dependency is corrected
 
 ## Contract Enforcement Rules
 
@@ -108,31 +112,41 @@ No agent may proceed if a dependency repo is not complete.
 - Any breaking change requires:
   - explicit version bump
   - coordinated update across repos
-  - update to WGT-050 (versioning policy)
+  - update governed by WGT-050
+  - acknowledgement in OPS coordination
 
 ## Hard Prohibitions (No Silent Mutation)
 Agents must NOT:
-- Add or infer fields to DraftSnapshot or ShareSummary
-- Change widget outputs without contract change
-- Duplicate calculator math outside widget
+- Add, remove, or infer fields in DraftSnapshot or ShareSummary
+- Change widget outputs without a contract change
+- Duplicate calculator math outside the widget
 - Create real deals pre-auth
-- Bypass draft-token lifecycle
+- Bypass the draft-token lifecycle
+- “Fix” or normalize payloads outside contract rules
 
-Violations require rollback and contract review.
+## Violation & Rollback Policy
+If an agent violates any prohibition:
+1) All affected changes must be reverted
+2) The contract version remains unchanged
+3) A correction must be made under the existing contract
+4) If correction is impossible, Sprint 5 is paused pending contract review
+
+No partial acceptance is allowed.
 
 ## Agent Prompt Requirements (Sprint 5)
-Every agent prompt must:
-- Reference this OPS-INT-001 ticket
-- Reference the relevant repo-specific tickets
-- Explicitly state what the agent is NOT allowed to change
+Every Sprint 5 agent prompt must:
+- Explicitly reference **OPS-INT-001**
+- Reference the repo-specific tickets it implements
+- List **what the agent is not allowed to change**
+- Treat this ticket as the final arbiter in conflicts
 
 ## Acceptance Criteria
-- All Sprint 5 agents run in the defined order.
-- No cross-repo boundary violations occur.
-- Draft tokens cleanly bridge marketing → app.
-- Widget remains the single source of calculator truth.
-- No silent contract or schema mutation.
+- Agents run only in the defined order
+- Cross-repo boundaries are respected
+- Draft tokens cleanly bridge marketing → app
+- Widget remains the sole calculator authority
+- No silent contract, schema, or semantic mutation occurs
 
 ## Notes
 This ticket is the **governor** of Sprint 5.
-If there is ambiguity between tickets, this ticket wins.
+If there is ambiguity between tickets, **this ticket wins**.
