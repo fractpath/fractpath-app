@@ -1,10 +1,16 @@
+// src/app/deal/[dealId]/page.tsx
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ShareDealCard } from "@/components/ShareDealCard";
 
 type PageProps = {
-  params: { dealId: string };
+  params: { dealId?: string };
   searchParams?: Record<string, string | string[] | undefined>;
 };
 
@@ -17,7 +23,61 @@ function getParam(
   return Array.isArray(v) ? (v[0] ?? null) : v;
 }
 
+function isUuid(v: string | undefined): v is string {
+  return (
+    typeof v === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      v,
+    )
+  );
+}
+
+type DealRow = Record<string, any>;
+
+async function loadDealByIdOrDealId(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  dealId: string,
+): Promise<{
+  deal: DealRow | null;
+  debug: { tried: string[]; errors: Array<{ key: string; message: string }> };
+}> {
+  const debug = {
+    tried: [] as string[],
+    errors: [] as Array<{ key: string; message: string }>,
+  };
+
+  // Try deals.id first
+  debug.tried.push("deals.id");
+  const byId = await supabase
+    .from("deals")
+    .select("*")
+    .eq("id", dealId)
+    .maybeSingle();
+
+  if (byId.data) return { deal: byId.data as DealRow, debug };
+  if (byId.error) debug.errors.push({ key: "deals.id", message: byId.error.message });
+
+  // Fall back to deals.deal_id (common schema pattern)
+  debug.tried.push("deals.deal_id");
+  const byDealId = await supabase
+    .from("deals")
+    .select("*")
+    .eq("deal_id", dealId)
+    .maybeSingle();
+
+  if (byDealId.data) return { deal: byDealId.data as DealRow, debug };
+  if (byDealId.error) debug.errors.push({ key: "deals.deal_id", message: byDealId.error.message });
+
+  return { deal: null, debug };
+}
+
 export default async function DealPage({ params, searchParams }: PageProps) {
+  // HARD FAIL FAST: never let Supabase see "undefined" for a UUID
+  if (!isUuid(params.dealId)) {
+    redirect("/me");
+  }
+  const dealId = params.dealId;
+
   const supabase = await createClient();
 
   const {
@@ -25,61 +85,57 @@ export default async function DealPage({ params, searchParams }: PageProps) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect(`/login?returnTo=${encodeURIComponent(`/deal/${params.dealId}`)}`);
+    redirect(`/login?returnTo=${encodeURIComponent(`/deal/${dealId}`)}`);
   }
 
   const mode = getParam(searchParams, "mode");
   const isSharedMode = mode === "shared";
 
-  const grant = await supabase
-    .from("deal_access_grants")
-    .select("role")
-    .eq("deal_id", params.dealId)
-    .eq("user_id", user.id)
-    .maybeSingle();
+  /**
+   * 1) Load deal (tolerant key lookup)
+   */
+  const { deal, debug } = await loadDealByIdOrDealId(supabase, dealId);
 
-  if (!grant.data?.role) {
+  if (!deal) {
     return (
       <main className="mx-auto max-w-3xl p-6">
         <h1 className="text-xl font-semibold">Access denied</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           You don’t have access to this deal (or it may no longer exist).
         </p>
-        <div className="mt-4">
-          <Link className="text-sm underline" href="/me">
-            Go to my account
-          </Link>
-        </div>
-      </main>
-    );
-  }
 
-  const role = grant.data.role as "OWNER" | "VIEWER";
-  const readOnly = role === "VIEWER" || isSharedMode;
-
-  const dealRes = await supabase
-    .from("deals")
-    .select("*")
-    .eq("id", params.dealId)
-    .maybeSingle();
-
-  if (dealRes.error || !dealRes.data) {
-    return (
-      <main className="mx-auto max-w-3xl p-6">
-        <h1 className="text-xl font-semibold">Deal unavailable</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          This deal can’t be loaded. It may have been deleted, or your access
-          may have changed.
-        </p>
-
-        {dealRes.error ? (
-          <div className="mt-4 rounded-md border p-3 text-sm">
-            <div className="font-medium">Details</div>
-            <div className="mt-1 text-muted-foreground break-words">
-              {dealRes.error.message}
+        {/* Always show lightweight debug here until this is fixed */}
+        <div className="mt-4 rounded-md border p-3 text-sm">
+          <div className="font-medium">Debug</div>
+          <div className="mt-1 text-muted-foreground break-words">
+            <div>
+              <span className="font-medium text-foreground">dealId param:</span>{" "}
+              {dealId}
             </div>
+            <div className="mt-1">
+              <span className="font-medium text-foreground">userId:</span>{" "}
+              {user.id}
+            </div>
+            <div className="mt-2">
+              <span className="font-medium text-foreground">tried:</span>{" "}
+              {debug.tried.join(" → ")}
+            </div>
+            {debug.errors.length ? (
+              <div className="mt-2">
+                <div className="font-medium text-foreground">errors:</div>
+                <ul className="mt-1 list-disc pl-5">
+                  {debug.errors.map((e, i) => (
+                    <li key={i}>
+                      <span className="font-medium">{e.key}:</span> {e.message}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <div className="mt-2">No errors returned; query returned no rows.</div>
+            )}
           </div>
-        ) : null}
+        </div>
 
         <div className="mt-4">
           <Link className="text-sm underline" href="/me">
@@ -90,7 +146,28 @@ export default async function DealPage({ params, searchParams }: PageProps) {
     );
   }
 
-  const deal = dealRes.data as Record<string, any>;
+  /**
+   * 2) Determine role
+   * - OWNER if creator
+   * - Otherwise check grants
+   */
+  let role: "OWNER" | "VIEWER" =
+    deal.created_by === user.id ? "OWNER" : "VIEWER";
+
+  if (role !== "OWNER") {
+    const grantRes = await supabase
+      .from("deal_access_grants")
+      .select("role")
+      .eq("deal_id", dealId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (grantRes.data?.role === "OWNER" || grantRes.data?.role === "VIEWER") {
+      role = grantRes.data.role;
+    }
+  }
+
+  const readOnly = role === "VIEWER" || isSharedMode;
 
   return (
     <main className="mx-auto max-w-3xl p-6">
@@ -113,8 +190,8 @@ export default async function DealPage({ params, searchParams }: PageProps) {
       <div className="mt-4 rounded-md border p-4 text-sm">
         <div className="grid gap-2">
           <div>
-            <span className="font-medium">Deal ID:</span>{" "}
-            <span className="break-words">{params.dealId}</span>
+            <span className="font-medium">Deal ID (param):</span>{" "}
+            <span className="break-words">{dealId}</span>
           </div>
           <div>
             <span className="font-medium">Mode:</span> {mode ?? "(none)"}
@@ -128,7 +205,7 @@ export default async function DealPage({ params, searchParams }: PageProps) {
 
       {role === "OWNER" && !readOnly ? (
         <div className="mt-6">
-          <ShareDealCard dealId={params.dealId} />
+          <ShareDealCard dealId={dealId} />
         </div>
       ) : null}
 
