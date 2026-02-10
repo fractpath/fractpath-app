@@ -1,313 +1,234 @@
-TICKET APP-004 — Documents + manual contract upload + title partner handoff
-Ticket ID
+# APP-004 — Documents + manual contract upload + title/appraisal handoff (MVP)
 
-APP-004
+## Sprint
+Sprint 0 (alignment-only rewrite) → Sprint 5 (implementation)
 
-Title
+## Objective
+Add the minimum document and workflow infrastructure required to move a deal from:
 
-Document placeholders, manual contract upload, and title/appraisal handoff (MVP)
+TERMS_SHAPING → PRE_CONTRACT → CONTRACTED_MANUAL
 
-Objective
+while preserving:
+- an auditable record of all documents
+- clear operational “what’s next” visibility for parties and ops
+- safe, permissioned access to sensitive files
+- a manual-first handoff path to title/appraisal partners
 
-Add the minimum document and workflow infrastructure so a deal can move from TERMS_SHAPING → PRE_CONTRACT → CONTRACTED_MANUAL while preserving:
+This ticket makes the portal feel contract-ready without automating signing or title work.
 
-an auditable record of documents
+---
 
-a clear “what’s next” checklist for each party
+## Non-goals
+- No automated PDF generation
+- No e-sign integration (Dropbox Sign later)
+- No payments
+- No automated title/appraisal APIs
+- No OCR or document parsing
 
-a safe handoff to title/appraisal partners (manual-first)
+---
 
-controlled access to sensitive files (only after CONNECTED)
+## Preconditions
+- APP-001..003 complete
+- Deals exist and can reach CONNECTED
+- Deal events audit log exists
+- Admin role (or admin-only routes) exists
 
-This ticket makes the portal feel “real” for contract execution even if signing remains manual/off-platform.
+---
 
-Non-goals
+## Core Design Principles
+- **Documents are immutable references** (no silent edits)
+- **Access is staged and permissioned** (unlocked only after CONNECTED)
+- **Manual ops are first-class** (explicit steps + logging)
+- **Evidence drives status** (documents unlock lifecycle progression)
 
-No automated PDF generation
+---
 
-No e-sign integration (Dropbox Sign later)
+## A) Document Data Model
 
-No payments
-
-No automated title API integrations
-
-No OCR or parsing of appraisal PDFs
-
-Preconditions
-
-APP-001..003 complete
-
-Deals exist and reach CONNECTED
-
-Deal events audit log exists
-
-Basic admin role exists (or admin-only routes exist)
-
-Core Design Principles (important)
-
-Documents are immutable references
-
-Access is permissioned and staged (gated until CONNECTED)
-
-Manual operations are first-class (clear steps + logging)
-
-Implementation Requirements
-A) Document data model
-
-Create documents model/table:
+Create `documents` table/model with:
 
 Required fields:
+- `id` (uuid)
+- `deal_id`
+- `uploaded_by_user_id` (nullable for system/admin)
+- `doc_type` (enum/text)
+- `file_name`
+- `file_storage_path` (or opaque storage key)
+- `mime_type`
+- `size_bytes`
+- `visibility` (enum: `ADMIN_ONLY` | `PARTIES_AFTER_CONNECTED`)
+- `status` (enum: `UPLOADED` | `REVIEWED` | `SUPERSEDED`)
+- `created_at`
 
-id (uuid)
-
-deal_id
-
-uploaded_by_user_id (nullable if system/admin)
-
-doc_type (enum/text)
-
-file_name
-
-file_storage_path (or URL)
-
-mime_type
-
-size_bytes
-
-visibility (enum: ADMIN_ONLY | PARTIES_AFTER_CONNECTED)
-
-status (enum: UPLOADED | REVIEWED | SUPERSEDED)
-
-created_at
-
-Doc types (MVP list):
-
-TERMS_SUMMARY (human-readable)
-
-APPRAISAL (PDF)
-
-TITLE_REPORT (PDF)
-
-SIGNED_CONTRACT (PDF)
-
-DISCLOSURES (PDF)
-
-OTHER
+### Doc types (MVP allowlist)
+- `TERMS_SUMMARY`
+- `APPRAISAL`
+- `TITLE_REPORT`
+- `SIGNED_CONTRACT`
+- `DISCLOSURES`
+- `OTHER`
 
 Rules:
+- Document rows are never edited.
+- Updates = new row + prior row marked `SUPERSEDED`.
 
-Document rows are not edited; if updated, mark prior as SUPERSEDED and add a new row.
+---
 
-B) File storage approach (MVP)
+## B) File Storage (MVP-Safe)
 
-Use a secure file storage system compatible with your stack:
-
-(Preferred if using Supabase later): Supabase Storage buckets
-
-Otherwise: a simple private bucket approach
+Use private storage compatible with the app stack.
 
 Requirements:
+- Files are **not public**
+- Access requires:
+  - authenticated user
+  - deal participant OR admin
+- Use short-lived signed URLs or authenticated proxy download
+- Never issue perpetual public URLs
 
-Files are not public
+---
 
-Access requires:
+## C) Deal Workspace — Documents Tab
 
-authenticated user
+Add a **Documents** tab to `/deals/[id]`.
 
-participant in the deal OR admin
+It must display:
+- document list with:
+  - type
+  - uploaded date
+  - uploaded by (admin vs participant)
+  - status badge
+  - gated view/download action
 
-Avoid “signed URLs that never expire”
+### Visibility rules
+- **Before CONNECTED**
+  - Admin sees `ADMIN_ONLY` documents
+  - Parties see:
+    > “Documents unlock after both parties join.”
+- **After CONNECTED**
+  - Parties can see documents with `PARTIES_AFTER_CONNECTED`
 
-C) Deal workspace — Documents tab
+---
 
-Add a new tab to /deals/[id]:
+## D) Admin Upload Workflow (Required)
 
-Documents
+Admin-only UI to upload documents:
 
-It must show:
+- upload file
+- select `doc_type`
+- set `visibility`
+- submit
 
-list of documents with:
+On upload:
+- create document record
+- emit deal_event:
+  - `DOCUMENT_UPLOADED`
+  - payload includes: `doc_type`, `file_name`, `visibility`
 
-type
+---
 
-uploaded date
-
-uploaded by (admin vs participant)
-
-status badge
-
-download/view action gated by permissions
-
-Visibility rules:
-
-Before CONNECTED:
-
-only ADMIN_ONLY docs visible to admin
-
-parties see “Documents unlock after both parties join”
-
-After CONNECTED:
-
-parties can see documents with visibility=PARTIES_AFTER_CONNECTED
-
-D) Admin upload workflow (MVP)
-
-Admin-only ability to upload documents into a deal.
-
-Must support:
-
-upload file
-
-choose doc type
-
-set visibility:
-
-admin only
-
-parties after connected
-
-Upon upload:
-
-create document record
-
-create deal event:
-
-DOCUMENT_UPLOADED
-
-payload includes doc_type + file_name + visibility
-
-E) Party upload workflow (optional for MVP, recommended for appraisal)
-
-Allow parties to upload only specific document types:
-
-Homeowner can upload: APPRAISAL, OTHER
-
-Buyer can upload: OTHER
-
-Realtor: none for MVP
-
-This is optional but useful to reduce email back-and-forth.
+## E) Party Upload Workflow (Optional but Recommended)
 
 If implemented:
 
-Uploads from parties default to ADMIN_ONLY until reviewed
-
-Admin can re-upload or mark as REVIEWED (no direct edit; create event log)
-
-F) Contract status checklist (manual-first UX)
-
-In /deals/[id] Overview, add a simple checklist component:
-
-Example checklist items (role-aware display):
-
-✅ Both parties connected
-
-⬜ Appraisal requested / received
-
-⬜ Title search initiated
-
-⬜ Terms confirmed
-
-⬜ Contract sent for signature
-
-⬜ Signed contract uploaded
-
-⬜ Title/lien recorded (manual confirmation)
-
-This is not automation; it’s operational clarity.
-
-Update checklist based on:
-
-deal status
-
-existence of key doc types (e.g., SIGNED_CONTRACT present)
-
-admin toggles (if needed)
-
-G) Title partner handoff record (structured notes)
-
-Create a deal_partners model/table (or embed as structured fields on deal) to store:
-
-partner type: TITLE, APPRAISAL, LEGAL
-
-partner name (e.g., Eagle Title of Annapolis)
-
-contact email
-
-status (e.g., “intro sent”, “in progress”, “completed”)
-
-notes
-
-This supports scale later without needing APIs.
-
-Log events when updated:
-
-PARTNER_ASSIGNED
-
-PARTNER_STATUS_UPDATED
-
-H) Deal status transitions (admin-only)
-
-Add admin-only ability to move deal between these statuses:
-
-TERMS_SHAPING → PRE_CONTRACT
-
-PRE_CONTRACT → CONTRACTED_MANUAL
+- Homeowner may upload: `APPRAISAL`, `OTHER`
+- Buyer may upload: `OTHER`
+- Realtor: none (MVP)
 
 Rules:
+- Party uploads default to `ADMIN_ONLY`
+- Admin may later re-upload or mark reviewed (no edits)
 
-CONTRACTED_MANUAL requires:
+Each upload emits `DOCUMENT_UPLOADED`.
 
-a SIGNED_CONTRACT document exists (or explicit admin override with logged reason)
+---
 
-Every status change logs:
+## F) Contract Status Checklist (Manual-First UX)
 
-STATUS_CHANGED event including from/to + reason string
+Add a simple checklist to `/deals/[id]` → Overview.
 
-Acceptance Criteria (Definition of Done)
+Example items (role-aware display):
+- ✅ Both parties connected
+- ⬜ Appraisal received
+- ⬜ Title search initiated
+- ⬜ Terms confirmed
+- ⬜ Contract sent for signature
+- ⬜ Signed contract uploaded
+- ⬜ Title/lien recorded (manual confirmation)
 
-Documents model exists and is used
+Checklist updates based on:
+- deal status
+- presence of key document types
+- admin toggles (if needed)
 
-Admin can upload documents to a deal
+This is **operational clarity**, not automation.
 
-Parties can view documents after CONNECTED (per visibility rules)
+---
 
-Deal workspace shows a Documents tab
+## G) Title / Appraisal Partner Handoff (Structured Record)
 
-Upload actions create audit events
+Create `deal_partners` table/model (or equivalent structured storage):
 
-Deal checklist appears and updates based on doc presence/status
+Fields:
+- `id`
+- `deal_id`
+- `partner_type` (TITLE | APPRAISAL | LEGAL)
+- `partner_name`
+- `contact_email`
+- `status` (e.g., INTRO_SENT | IN_PROGRESS | COMPLETED)
+- `notes`
+- `created_at`
 
-Title/appraisal partner assignment is recorded and visible to admin (and optionally to parties)
+Emit deal_events:
+- `PARTNER_ASSIGNED`
+- `PARTNER_STATUS_UPDATED`
 
-Admin can move deal to CONTRACTED_MANUAL with signed contract evidence
+---
 
-Vercel build succeeds; no console errors
+## H) Deal Status Transitions (Admin-Only)
 
-QA Checklist
+Admin-only controls to move:
+- `TERMS_SHAPING → PRE_CONTRACT`
+- `PRE_CONTRACT → CONTRACTED_MANUAL`
 
- Unauthorized users cannot access files
+Rules:
+- `CONTRACTED_MANUAL` requires:
+  - a `SIGNED_CONTRACT` document exists
+  - OR explicit admin override with logged reason
 
- Participants cannot see documents before CONNECTED
+Every transition emits:
+- `STATUS_CHANGED`
+- payload includes: `from`, `to`, `reason`
 
- Superceded documents are not deleted; they remain in history
+---
 
- Audit log shows uploads and status changes
+## Acceptance Criteria (Definition of Done)
+- Documents model exists and is enforced as immutable
+- Admin can upload documents to a deal
+- Parties can view documents only after CONNECTED (per visibility)
+- Documents tab renders correctly
+- Uploads and status changes create audit events
+- Checklist reflects document presence and deal status
+- Partner handoff records are stored and visible to admin
+- Admin can move deal to CONTRACTED_MANUAL with evidence
+- Vercel build succeeds
 
- Mobile Documents tab is usable
+---
 
-Deliverables
+## QA Checklist
+- Unauthorized users cannot access files
+- Parties cannot see gated documents before CONNECTED
+- Superceded documents remain accessible for audit
+- Audit log records uploads and status changes
+- Mobile Documents tab is usable
 
-documents table/model + storage bucket rules
+---
 
-deal workspace Documents tab UI
-
-admin upload UI (minimal)
-
-optional party upload UI (if included)
-
-deal checklist UX
-
-partner assignment record + UI
-
-status transition controls (admin-only) + event logging
+## Deliverables
+- `documents` table/model + private storage rules
+- Documents tab UI
+- Admin upload UI
+- (Optional) party upload UI
+- Deal checklist UX
+- Partner assignment records + UI
+- Admin-only status transition controls + audit logging
