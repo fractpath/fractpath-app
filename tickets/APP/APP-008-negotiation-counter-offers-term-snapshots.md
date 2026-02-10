@@ -1,383 +1,275 @@
-TICKET APP-008 — Negotiation UI (counter-offer forms + versioned term snapshots)
-Ticket ID
+# APP-008 — Negotiation workspace (counter-offers + snapshot branching)
 
-APP-008
+## Sprint
+Sprint 0 (alignment-only rewrite) → Sprint 5 (implementation)
 
-Title
+## Objective
+Create a **structured, snapshot-driven negotiation experience** inside the Deal Workspace so Buyer and Homeowner can:
 
-Negotiation workspace: counter-offers, versioned term snapshots, and controlled acceptance
+- propose terms using a guided, non-legalese form
+- review a clean, human-readable **Terms Sheet Summary**
+- counter-offer with **controlled, explicit changes**
+- preserve a complete, immutable version history
+- reach an **agreed terms** state that feeds pre-contract execution later
 
-Objective
+This is a core FractPath differentiator: **term shaping without contract churn**.
 
-Create a structured, “gamified” negotiation experience inside a Deal Workspace so Buyer and Homeowner can:
+---
 
-propose terms using a guided form (not legalese)
+## Non-Goals
+- No e-signature
+- No PDF generation
+- No payment automation
+- No in-app chat or messaging
+- No secondary investor participation (placeholders only)
 
-see a clean human-readable term summary
+---
 
-counter-offer with controlled changes
+## Preconditions
+- APP-002 — Calculator snapshot persistence + versioning
+- APP-003 — Deal workspace + participants
+- APP-004 — Document scaffolding exists
+- Deal status includes `TERMS_SHAPING` / `PRE_CONTRACT`
+- Admin role exists
 
-keep a complete version history (no silent edits)
+---
 
-reach an “agreed terms” state that feeds contract execution later
+## Core Design Principles (Locked)
+1) **Immutable versions**
+   - every proposal or counter creates a new version
+2) **Small surface area**
+   - only a defined set of term fields are editable
+3) **Human-readable first**
+   - users interact with summaries, not raw schemas
+4) **Controlled acceptance**
+   - acceptance locks a version; no silent edits
+5) **Snapshot alignment**
+   - negotiated terms reference calculator snapshots where applicable
+6) **No leakage**
+   - contact info and sensitive details remain gated per APP-003
 
-This is the core UX differentiator: no long contract review for small changes.
+---
 
-Non-goals
+## A) Canonical Terms Object (Schema)
 
-No e-sign
-
-No PDF generation
-
-No payment automation tied to acceptance
-
-No in-app chat (terms-only negotiation)
-
-No secondary investor participation (leave placeholders only)
-
-Preconditions
-
-APP-002 scenario persistence + versioning exists
-
-APP-003 deal workspace exists
-
-APP-004 documents exist
-
-APP-005 ledger exists (not used here)
-
-Deal status includes TERMS_SHAPING / PRE_CONTRACT
-
-Admin-only deal initiation is in place
-
-Core Design Principles (important)
-
-Immutable versions: every offer/counter is a new snapshot
-
-Small surface area: only allow edits to a defined set of term fields
-
-Human-readable first: users see a clean “Term Sheet Summary”
-
-Controlled acceptance: acceptance locks the version and advances status
-
-No leakage: contact info remains gated until CONNECTED (already true)
-
-Implementation Requirements
-A) Define the “Terms Object” (schema)
-
-Create a canonical terms schema to be used everywhere.
+Create a canonical terms schema used **only for negotiation**, distinct from
+calculator snapshots.
 
 File:
-src/lib/termsSchema.ts
+`src/lib/termsSchema.ts`
 
-Represent as JSON (with types) containing:
+### Minimum MVP Fields
 
-Minimum MVP fields:
+#### Property
+- `property_value_basis` (`appraisal | avm | manual`)
+- `starting_value_sv` (number)
+- `appreciation_assumption_g` (number)
 
-Property
+#### Funding
+- `upfront_amount` (number)
+- `monthly_amount` (number)
+- `monthly_count` (number)
 
-property_value_basis (enum: appraisal | avm | manual)
+#### Equity Mechanics
+- `equity_vests_immediately` (boolean; default true)
+- `equity_pricing_method` (enum; MVP: `percent_of_fmv_per_payment`)
 
-starting_value_sv (number)
+#### Settlement / Timing
+- `cpw_start_year`
+- `cpw_end_year`
+- `tf_early`
+- `tf_late`
+- `floor_multiplier_fm`
+- `ceiling_multiplier_cm`
 
-appreciation_assumption_g (number)
+#### Fees (Display-only in MVP)
+- `platform_fee_upfront`
+- `servicing_fee_monthly`
+- `exit_fee_pct`
 
-Funding
+#### Realtor (Optional)
+- `realtor_referral_flat`
+- `realtor_share_platform`
+- `realtor_share_servicing`
+- `realtor_share_exit`
 
-upfront_amount (number)
+#### Notes
+- `special_terms_notes` (short text)
 
-monthly_amount (number)
+**Rules**
+- Fields are optional at schema level
+- UI enforces required fields for a valid proposal
+- Schema changes require versioning discipline (WGT-050)
 
-monthly_count (number)
+---
 
-Equity mechanics
+## B) Terms Versioning Model (Deal-Scoped)
 
-equity_vests_immediately (boolean; default true)
+Create `deal_term_versions` table/model.
 
-equity_pricing_method (enum: “percent_of_fmv_per_payment” as current model)
+### Fields
+- `id` (uuid)
+- `deal_id`
+- `version` (int, starts at 1)
+- `status` (`DRAFT | PROPOSED | COUNTERED | ACCEPTED | SUPERSEDED`)
+- `proposed_by_user_id`
+- `proposed_by_role`
+- `terms_json` (canonical terms schema)
+- `computed_json` (derived scenario outputs)
+- `summary_markdown` (human-readable)
+- `message` (short rationale text)
+- `created_at`
+- `parent_version_id` (nullable)
 
-Settlement
+### Immutability Rules
+- No updates after insert
+- Counter = new row with `parent_version_id`
+- Version increments monotonically per deal
 
-cpw_start_year
+---
 
-cpw_end_year
+## C) Negotiation UI (Deal Workspace)
 
-tf_early
+Add a **Terms** tab to `/deals/[id]`.
 
-tf_late
+### Terms Tab Contents
+- **Current Terms Card**
+  - latest `deal_term_versions` entry
+  - key terms + computed highlights
+  - floors / caps / timing notes
+  - Early / Standard / Late outcomes
+- **Version History**
+  - link to full history view
 
-floor_multiplier_fm
+### Role-Gated Actions
+- Buyer / Homeowner (when `TERMS_SHAPING`):
+  - `Propose terms` (if none exist)
+  - `Counter-offer` (if version exists)
+  - `Accept` (only if last version proposed by the other party)
+- Admin:
+  - may propose/counter on behalf of parties (optional)
+  - may advance deal status
 
-ceiling_multiplier_cm
+---
 
-Fees (display only for now)
+## D) Guided Propose / Counter Form (No Legalese)
 
-platform_fee_upfront (number)
+Route:
+`/deals/[id]/terms/new`
 
-servicing_fee_monthly (number)
+### Form Requirements
+- Grouped sections matching schema
+- Simple sliders / inputs where possible
+- Inline explanations (microcopy)
+- “Review summary” step before submit
 
-exit_fee_pct (number)
+### On Submit
+- Create new `deal_term_versions` row
+- Status:
+  - first version → `PROPOSED`
+  - counter → `COUNTERED`
+- Log `deal_event`: `TERMS_VERSION_CREATED`
+- Optional email notification hook (APP-007)
 
-Realtor (optional fields)
+---
 
-realtor_referral_flat
+## E) Acceptance Flow (Safe, Admin-Gated)
 
-realtor_share_platform
+### Default MVP (Recommended)
+When a party clicks **Accept**:
+1) Confirm modal:
+   - “You’re accepting version X”
+   - “This locks terms for pre-contract steps”
+2) On confirm:
+   - mark version as `ACCEPTED_PENDING_ADMIN`
+   - log `deal_event`: `TERMS_ACCEPTED`
+3) Admin reviews and confirms:
+   - mark version `ACCEPTED`
+   - mark prior versions `SUPERSEDED`
+   - transition deal status → `PRE_CONTRACT`
 
-realtor_share_servicing
+This avoids accidental lock-in.
 
-realtor_share_exit
+---
 
-Notes
+## F) Human-Readable Term Sheet Summary
 
-special_terms_notes (short text)
+Auto-generate `summary_markdown` for every version.
+
+Must include:
+- **At a glance** (SV, upfront, monthly, horizon)
+- Settlement window + incentive explanation
+- Floors / caps explanation
+- Early / Standard / Late outcome table
+- Fees itemization (if present)
+
+This summary is the future source for:
+- contract templates
+- PDFs
+- title partner handoff briefs
+
+---
+
+## G) Computation Integration (Derived, Stored)
+
+On version creation:
+- Compute and store in `computed_json`:
+  - vested equity over time
+  - paid-to-date amounts
+  - FMV at Early / Standard / Late
+  - floor / cap bounds
+  - settlement outcomes per scenario
 
 Rules:
+- Reuse calculator library logic where possible
+- Store outputs at creation time
+- Never recompute silently later
 
-All fields are optional unless required for calculation; enforce required fields in UI.
+---
 
-B) Terms versioning model (deal-scoped)
+## H) Version History View
 
-Create deal_term_versions table/model:
-
-Fields:
-
-id (uuid)
-
-deal_id
-
-version (int, starts at 1)
-
-status (enum: DRAFT | PROPOSED | COUNTERED | ACCEPTED | SUPERSEDED)
-
-proposed_by_user_id
-
-proposed_by_role
-
-terms_json (the canonical schema)
-
-computed_json (calculated outputs: equity %, ISA scenarios, etc.)
-
-summary_markdown (human-readable summary)
-
-created_at
-
-parent_version_id (nullable; for lineage)
-
-message (short text: “I’m proposing X because…”)
-
-Immutability rules:
-
-No updates to terms_json after insert
-
-New counter = new version row
-
-C) Negotiation UI in Deal Workspace
-
-Add a new tab to /deals/[id]:
-
-Terms
-
-It includes:
-
-Current terms card
-
-Shows latest deal_term_versions entry
-
-Displays:
-
-key terms
-
-computed highlights
-
-floor/cap notes
-
-early/standard/late scenario outcomes
-
-“Version history” link
-
-Action buttons (role-gated)
-
-If user is Buyer or Homeowner and deal status is TERMS_SHAPING:
-
-“Propose terms” (if no version yet)
-
-“Counter-offer” (if version exists)
-
-“Accept” (if last version proposed by the other party)
-
-Admin:
-
-can propose/counter on behalf of parties (optional)
-
-can move deal status if accepted
-
-D) Guided “Propose / Counter” form (no legalese)
-
-Create modal or page:
-/deals/[id]/terms/new
-
-Form requirements:
-
-grouped sections matching the schema
-
-“simple slider” feel where possible (but input fields ok for MVP)
-
-inline explanations (microcopy)
-
-“Review summary” step before submit
-
-On submit:
-
-create new deal_term_versions row with status:
-
-if first: PROPOSED
-
-if counter: COUNTERED
-
-log deal_event:
-
-TERMS_VERSION_CREATED
-
-optional: email notification (APP-007 hooks)
-
-E) Acceptance flow (locks the deal terms)
-
-When a party clicks Accept:
-
-Confirm modal:
-
-“You’re accepting version X”
-
-“This will lock terms for pre-contract steps”
-
-On confirm:
-
-mark accepted version status to ACCEPTED
-
-mark all previous versions to SUPERSEDED (by creating admin/system events or updating statuses only if allowed)
-
-update deal status to PRE_CONTRACT (admin-controlled if you want; MVP: allow acceptance to request admin review)
-
-Log deal_event:
-
-TERMS_ACCEPTED with version id
-
-MVP safe approach (recommended):
-
-acceptance sets:
-
-terms_accepted_pending_admin = true
-
-admin then clicks “Confirm acceptance” to transition to PRE_CONTRACT
-This avoids parties accidentally locking terms.
-
-Default to this safe approach unless you say otherwise.
-
-F) Human-readable “Term Sheet Summary”
-
-Auto-generate a readable summary (Markdown) for each version.
-
-Include:
-
-“At a glance” block (SV, upfront, monthly, horizon)
-
-settlement window and incentive explanation
-
-floors/caps explanation
-
-a 3-scenario outcome table (Early/Standard/Late)
-
-fees itemization (if present)
-
-This summary is what later becomes:
-
-contract template input
-
-PDF source
-
-title partner handoff brief
-
-G) Computation integration
-
-When a terms version is created, compute and store:
-
-vested equity over time
-
-IBA paid to date (based on schedule)
-
-FMV at early/standard/late
-
-UIA, TF, floor/cap bounds
-
-ISA settlement per scenario
-
-Store this in computed_json.
-
-This should reuse your existing calculator library logic where possible.
-
-H) Version history view
-
-Add:
-/deals/[id]/terms/history
+Route:
+`/deals/[id]/terms/history`
 
 Display:
+- version timeline (v1 → v2 → v3)
+- proposer + role
+- timestamp
+- status badge
+- expandable summary
 
-version timeline (v1 → v2 → v3)
+Old versions are **read-only forever**.
 
-who proposed each
+---
 
-timestamp
+## Acceptance Criteria (Definition of Done)
+- Deal has a Terms tab
+- Buyer/Homeowner can propose and counter via guided form
+- Each proposal creates a new immutable version
+- Version history is visible
+- Acceptance flow locks a version (admin-confirmed)
+- Computed scenario outputs are stored per version
+- No silent mutation of terms
+- Deal events record all key actions
+- UX feels like “term shaping,” not contract review
 
-status badge
+---
 
-“View summary” expand/collapse
+## QA Checklist
+- Counter-offer increments version and links parent
+- User cannot accept their own proposal
+- Accepted version cannot be edited
+- Deal cannot move to PRE_CONTRACT without acceptance
+- Summary text is readable and consistent
+- Mobile UX works (modals usable)
 
-No editing of old versions.
+---
 
-Acceptance Criteria (Definition of Done)
-
-Deal has a Terms tab
-
-Buyer/Homeowner can propose and counter-offer via guided form
-
-Each proposal creates a new immutable version row
-
-Version history is visible
-
-Acceptance flow locks a version (with admin confirmation if using safe approach)
-
-Computed scenario outputs appear in each term version
-
-No silent mutation of terms
-
-Deal events record every key action
-
-UX reads like “term shaping”, not contract law
-
-QA Checklist
-
- Counter-offer increments version and links parent
-
- User cannot accept their own proposed version
-
- Accepted version cannot be changed
-
- Deal can’t move to PRE_CONTRACT without accepted version (or pending admin confirm)
-
- Version summary is readable and consistent
-
- Mobile is usable (modal doesn’t break)
-
-Deliverables
-
-termsSchema.ts
-
-deal_term_versions table/model
-
-Deal Terms tab + form + history page
-
-Acceptance flow (safe mode recommended)
-
-Computed outputs generation and storage
-
-Events logging for terms negotiation
+## Deliverables
+- `termsSchema.ts`
+- `deal_term_versions` model
+- Terms tab UI + form + history view
+- Safe acceptance flow
+- Computed output storage
+- Deal events logging for negotiation
