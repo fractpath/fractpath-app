@@ -14,7 +14,13 @@ type RedeemState =
 
 export default function ResumePage() {
   return (
-    <Suspense fallback={<main style={{ maxWidth: 480, margin: "80px auto", padding: "0 16px" }}><p>Loading...</p></main>}>
+    <Suspense
+      fallback={
+        <main style={{ maxWidth: 480, margin: "80px auto", padding: "0 16px" }}>
+          <p>Loading...</p>
+        </main>
+      }
+    >
       <ResumeContent />
     </Suspense>
   );
@@ -45,7 +51,7 @@ function ResumeContent() {
       if (!user) {
         setState({ status: "redirecting-login" });
         document.cookie = `fractpath_draft_token=${encodeURIComponent(token!)};path=/;max-age=3600;SameSite=Lax`;
-        router.push("/login");
+        router.push("/login?returnTo=/resume");
         return;
       }
 
@@ -70,13 +76,20 @@ function ResumeContent() {
           return;
         }
 
-        document.cookie = "fractpath_draft_token=;path=/;max-age=0";
+        // clear token cookie once redeemed
+        document.cookie =
+          "fractpath_draft_token=;path=/;max-age=0;SameSite=Lax";
+
+        const redirectUrl = data.redirect_url || `/deal/${data.deal_id}`;
 
         setState({
           status: "success",
           dealId: data.deal_id,
-          redirectUrl: data.redirect_url || `/deal/${data.deal_id}`,
+          redirectUrl,
         });
+
+        // Immediately navigate to the deal page
+        router.replace(redirectUrl);
       } catch {
         if (!cancelled) {
           setState({
@@ -99,9 +112,7 @@ function ResumeContent() {
 
       {state.status === "no-token" && (
         <div>
-          <h1 style={{ fontSize: "1.5rem", fontWeight: 700 }}>
-            Missing Token
-          </h1>
+          <h1 style={{ fontSize: "1.5rem", fontWeight: 700 }}>Missing Token</h1>
           <p style={{ color: "#666", marginTop: 8 }}>
             No draft token was provided. Please use the link from your scenario
             email to continue.
@@ -134,27 +145,10 @@ function ResumeContent() {
 
       {state.status === "success" && (
         <div>
-          <h1 style={{ fontSize: "1.5rem", fontWeight: 700 }}>
-            Deal Created
-          </h1>
+          <h1 style={{ fontSize: "1.5rem", fontWeight: 700 }}>Redirecting…</h1>
           <p style={{ color: "#666", marginTop: 8 }}>
-            Your scenario has been imported and your deal workspace is ready.
+            Your deal workspace is ready. Taking you there now.
           </p>
-          <button
-            onClick={() => router.push(state.redirectUrl)}
-            style={{
-              marginTop: 16,
-              padding: "10px 24px",
-              background: "#111",
-              color: "#fff",
-              border: "none",
-              borderRadius: 6,
-              cursor: "pointer",
-              fontSize: "1rem",
-            }}
-          >
-            Go to Deal
-          </button>
         </div>
       )}
 

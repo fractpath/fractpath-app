@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import crypto from "crypto";
+
+function jsonError(message: string, status = 400) {
+  return NextResponse.json({ ok: false, error: message }, { status });
+}
 
 function base64Url(bytes: Buffer) {
   return bytes
@@ -10,78 +15,89 @@ function base64Url(bytes: Buffer) {
     .replace(/=+$/g, "");
 }
 
-function getShareBaseUrl() {
-  // SHARE_CONTINUE_URL=https://app.fractpath.com/share
-  return process.env.SHARE_CONTINUE_URL ?? "https://app.fractpath.com/share";
+function isUuid(v: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 }
 
 export async function POST(
   request: NextRequest,
-  context: { params: Promise<{ dealId: string }> }
+  context: { params: Promise<{ dealId: string }> },
 ) {
   const { dealId } = await context.params;
 
-  const supabase = await createClient();
+  if (!isUuid(dealId)) {
+    return jsonError("Invalid deal ID", 400);
+  }
 
+  const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return jsonError("Unauthorized", 401);
   }
 
   let body: any;
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return jsonError("Invalid JSON body", 400);
   }
 
   const toEmail = String(body?.toEmail ?? "").trim();
   if (!toEmail || !toEmail.includes("@")) {
-    return NextResponse.json({ error: "Valid toEmail is required" }, { status: 400 });
+    return jsonError("Valid toEmail is required", 400);
   }
 
-  // OWNER gate
-  const grant = await supabase
-    .from("deal_access_grants")
-    .select("role")
-    .eq("deal_id", dealId)
-    .eq("user_id", user.id)
+  const service = createServiceClient();
+
+  const { data: deal, error: dealError } = await (service.from("deals") as any)
+    .select("id, owner_user_id")
+    .eq("id", dealId)
     .maybeSingle();
 
-  if (grant.error) {
-    return NextResponse.json({ error: grant.error.message }, { status: 400 });
+  if (dealError || !deal) {
+    return jsonError("Deal not found", 404);
   }
 
-  if (grant.data?.role !== "OWNER") {
-    return NextResponse.json({ error: "Forbidden (OWNER only)" }, { status: 403 });
+  let isOwner = deal.owner_user_id === user.id;
+
+  if (!isOwner) {
+    const { data: grant } = await (service.from("deal_access_grants") as any)
+      .select("role")
+      .eq("deal_id", dealId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (grant?.role === "OWNER") {
+      isOwner = true;
+    }
+  }
+
+  if (!isOwner) {
+    return jsonError("Forbidden (OWNER only)", 403);
   }
 
   const token = base64Url(crypto.randomBytes(32));
-  const shareUrl = `${getShareBaseUrl()}?t=${encodeURIComponent(token)}`;
 
-  const insert = await supabase.from("deal_share_tokens").insert({
+  const { error: insertError } = await (service.from("deal_share_tokens") as any).insert({
     token,
     deal_id: dealId,
+    to_email: toEmail,
     created_by: user.id,
   });
 
-  if (insert.error) {
-    return NextResponse.json({ error: insert.error.message }, { status: 400 });
+  if (insertError) {
+    console.error("deal_share_tokens insert error:", insertError.message);
+    return jsonError("Failed to create share link", 500);
   }
 
-  // Send email via existing /api/share (non-fatal if it fails)
-  try {
-    await fetch(new URL("/api/share", request.url), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ toEmail, shareUrl, dealId }),
-    });
-  } catch {
-    // ignore
-  }
+  const origin = request.headers.get("x-forwarded-host")
+    ? `https://${request.headers.get("x-forwarded-host")}`
+    : request.headers.get("origin") || new URL(request.url).origin;
+
+  const shareUrl = `${origin}/share?t=${encodeURIComponent(token)}`;
 
   return NextResponse.json({ ok: true, shareUrl });
 }

@@ -1,7 +1,7 @@
 # FractPath
 
 ## Overview
-FractPath is a minimal homeowner intake application built with Next.js. It collects exploratory scenario information and sends a deterministic, non-binding scenario summary to HubSpot for internal sales follow-up. The portal includes Supabase authentication with role-based onboarding (Homeowner, Buyer, Realtor), a dashboard, and a deal resume flow that bridges marketing DraftSnapshots into authenticated deals with immutable calculator snapshots.
+FractPath is a minimal homeowner intake application built with Next.js. It collects exploratory scenario information and sends a deterministic, non-binding scenario summary to HubSpot for internal sales follow-up. The portal includes Supabase authentication with role-based onboarding (Homeowner, Buyer, Realtor), a dashboard, a deal resume flow that bridges marketing DraftSnapshots into authenticated deals with immutable calculator snapshots, and a share-link flow for read-only deal viewing.
 
 ## Project Structure
 ```
@@ -12,6 +12,8 @@ src/
 │   ├── signup/page.tsx       # Sign up page with role selection
 │   ├── dashboard/page.tsx    # User dashboard (role-specific)
 │   ├── resume/page.tsx       # Draft token → Deal redemption page
+│   ├── deal/[dealId]/page.tsx # Deal view (OWNER/VIEWER, read-only shared)
+│   ├── share/page.tsx        # Share token → VIEWER grant → redirect to deal
 │   ├── protected/page.tsx    # Auth-gated page (legacy)
 │   ├── my-scenarios/page.tsx # User scenarios list
 │   ├── reset-password/page.tsx # Password reset request
@@ -29,36 +31,45 @@ src/
 │       ├── scenario/route.ts # GET/POST scenarios (legacy pre-deal)
 │       ├── me/route.ts       # Current user info (LOCKED)
 │       ├── deals/
-│       │   └── resume/route.ts # POST: resume DraftSnapshot → Deal + Snapshot v1
+│       │   ├── resume/route.ts       # POST: resume DraftSnapshot → Deal + Snapshot v1
+│       │   └── [dealId]/
+│       │       └── share/route.ts    # POST: create share link (OWNER only)
 │       └── drafts/
 │           ├── mint/route.ts   # POST: mint draft token (pre-auth)
 │           └── redeem/route.ts # POST: redeem token → scenario (legacy)
 ├── components/
-│   └── AuthHeader.tsx        # Sign in/out header
+│   ├── AuthHeader.tsx        # Sign in/out header
+│   └── ShareDealCard.tsx     # Share deal form (client component)
 ├── lib/
 │   ├── supabase/
 │   │   ├── client.ts         # Browser Supabase client
 │   │   ├── server.ts         # Server Supabase client (anon)
 │   │   ├── service.ts        # Service-role Supabase client
+│   │   ├── admin.ts          # Admin/service-role client (alternate)
 │   │   └── middleware.ts     # Session refresh
 │   ├── draftSnapshot.ts      # DraftSnapshot v1 validation + hash verification
 │   ├── rateLimit.ts          # In-memory IP rate limiter
 │   ├── useSession.ts         # React session hook
 │   └── __tests__/
 │       ├── draftToken.test.ts              # Token generation tests (5 tests)
-│       └── draftSnapshotValidation.test.ts # Snapshot validation tests (12 tests)
+│       ├── draftSnapshotValidation.test.ts # Snapshot validation tests (12 tests)
+│       └── shareRoute.test.ts             # Share route validation tests (9 tests)
 └── middleware.ts             # Next.js middleware
 
 supabase/
 └── migrations/
     ├── 20260131_agentic_005_fractpath_scenarios.sql
     ├── 20260209_sprint5_draft_tokens.sql
-    └── 20260210_app_int_001_deals_snapshots_events.sql
+    ├── 20260210_app_int_001_deals_snapshots_events.sql
+    ├── 20260210_create_deal_with_owner_grant.sql
+    ├── 20260210_rls_deals_owner_viewer.sql
+    ├── 20260210_share_access_grants_tokens.sql
+    └── 20260210_rls_snapshots_events_viewer.sql
 
 tickets/
 ├── README.md                 # Ticket index and conventions
-├── APP/                      # Product feature tickets (APP-001 through APP-013)
-└── OPS/                      # Ops/infrastructure tickets (OPS-001, OPS-003)
+├── APP/                      # Product feature tickets
+└── OPS/                      # Ops/infrastructure tickets
 
 docs/
 ├── README.md                 # Documentation index
@@ -79,7 +90,7 @@ Required for authentication:
 - `SUPABASE_URL` - Same as above (for server-side)
 - `SUPABASE_ANON_KEY` - Same as above (for server-side)
 
-Required for deal resume flow:
+Required for deal resume + share flows:
 - `SUPABASE_SERVICE_ROLE_KEY` - Supabase service role key (SECRET, never expose to browser)
 
 ## Domain Model
@@ -89,6 +100,15 @@ Required for deal resume flow:
 - Deals are created via POST /api/deals/resume only
 - Calculator snapshots are append-only, immutable, versioned
 - Deal events provide audit trail (DEAL_CREATED, CALCULATOR_SNAPSHOT_CREATED)
+
+### Share Link Flow
+- Owner clicks "Share" → POST /api/deals/[dealId]/share → returns shareUrl
+- shareUrl = /share?t={token}
+- Recipient opens shareUrl → /share page validates token
+- If not authenticated → sign-in/signup links with returnTo preservation
+- If authenticated → VIEWER grant created → redirect to /deal/{id}?mode=shared
+- Recipient sees: read-only banner, VIEWER role, Snapshot v1, Deal events
+- No deal math recompute, no snapshot mutation, no write access
 
 ### DraftSnapshot v1 Contract
 - schema_version: "1"
@@ -101,9 +121,27 @@ Required for deal resume flow:
 - Validation: schema_version check, required fields, hash integrity
 - No recomputation, no normalization beyond schema validation
 
+### Access Control
+- `deal_access_grants` table: (deal_id, user_id, role)
+- Roles: OWNER, VIEWER
+- RLS: deals SELECT via grant; UPDATE/DELETE OWNER only
+- calculator_snapshots and deal_events: SELECT via grant on parent deal
+- deal_share_tokens: service-role only (deny all anon/authenticated)
+
 ## Sprint Status
 
-### APP-INT-001 — Resume DraftSnapshot into Deal (Current)
+### APP-SHARE-001 — Share Link Produces VIEWER Read-Only (Current)
+- [x] Migration: deal_access_grants + deal_share_tokens tables
+- [x] Migration: RLS for calculator_snapshots + deal_events (SELECT via grant)
+- [x] POST /api/deals/[dealId]/share — owner only, creates share token, returns local shareUrl
+- [x] /share page — validates token, handles auth, creates VIEWER grant, redirects to deal
+- [x] Deal page shows read-only banner, Snapshot v1, Deal events for VIEWERs
+- [x] Tests: 9 share route validation tests (all passing)
+- [x] npm run build passes
+- [ ] Run migrations on Supabase
+- [ ] End-to-end manual QA
+
+### APP-INT-001 — Resume DraftSnapshot into Deal (Complete)
 - [x] Supabase migration: deals, calculator_snapshots, deal_events tables with RLS
 - [x] DraftSnapshot v1 validation (schema_version, required fields, hash checks)
 - [x] POST /api/deals/resume — auth, validate, atomic redeem, deal+snapshot+events
@@ -112,10 +150,6 @@ Required for deal resume flow:
 - [x] Atomic token redemption with row-count guard
 - [x] Audit events: DEAL_CREATED, CALCULATOR_SNAPSHOT_CREATED
 - [x] Tests: 12 validation tests + 5 token tests (all passing)
-- [x] npm run build passes
-- [ ] Run migration on Supabase
-- [ ] Add SUPABASE_SERVICE_ROLE_KEY to environment
-- [ ] End-to-end manual QA
 
 ### Sprint 5 - Draft Token Bridge (Complete)
 - [x] draft_tokens table with RLS (service-role only)

@@ -43,6 +43,51 @@ async function findExistingDeal(
   };
 }
 
+async function getOrCreateDeal(params: {
+  service: ReturnType<typeof createServiceClient>;
+  userId: string;
+  sourceRef: string;
+}) {
+  const { service, userId, sourceRef } = params;
+
+  // 1) Fast path: already exists
+  const existing = await (service.from("deals") as any)
+    .select("id, created_at")
+    .eq("owner_user_id", userId)
+    .eq("source_ref", sourceRef)
+    .limit(1)
+    .maybeSingle();
+
+  if (existing?.data?.id) return existing.data;
+
+  // 2) Try create (explicit mode)
+  const inserted = await (service.from("deals") as any)
+    .insert({
+      owner_user_id: userId,
+      status: "IMPORTED",
+      created_from: "marketing_resume",
+      source_ref: sourceRef,
+      mode: "app",
+    })
+    .select("id, created_at")
+    .single();
+
+  if (inserted?.data?.id) return inserted.data;
+
+  // 3) Fallback: fetch again (covers race conditions)
+  const refetch = await (service.from("deals") as any)
+    .select("id, created_at")
+    .eq("owner_user_id", userId)
+    .eq("source_ref", sourceRef)
+    .limit(1)
+    .maybeSingle();
+
+  if (refetch?.data?.id) return refetch.data;
+
+  const msg = inserted?.error?.message || "Unknown deal creation error";
+  throw new Error(`Failed to create or locate deal: ${msg}`);
+}
+
 export async function POST(request: NextRequest) {
   const authClient = await createClient();
   const {
@@ -102,7 +147,6 @@ export async function POST(request: NextRequest) {
 
     if (draft.redeemed_at && draft.redeemed_by_user_id === user.id) {
       const existing = await findExistingDeal(service, user.id, sourceRef);
-
       if (existing) {
         return NextResponse.json({
           ok: true,
@@ -113,10 +157,66 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      return jsonError(
-        "Draft redeemed but deal could not be located. Please contact support.",
-        500,
-      );
+      const deal = await getOrCreateDeal({
+        service,
+        userId: user.id,
+        sourceRef,
+      });
+
+      const { data: existingSnap } = await (
+        service.from("calculator_snapshots") as any
+      )
+        .select("version")
+        .eq("deal_id", deal.id)
+        .order("version", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const snapVersion = existingSnap?.version ?? null;
+
+      if (snapVersion == null) {
+        const { data: calcSnap, error: snapError } = await (
+          service.from("calculator_snapshots") as any
+        )
+          .insert({
+            deal_id: deal.id,
+            version: 1,
+            source: "marketing_resume",
+            inputs_json: snapshot.inputs,
+            results_json: snapshot.result,
+            calculator_schema_version: snapshot.calculator_schema_version,
+            engine_version: snapshot.engine_version,
+            inputs_hash: snapshot.inputs_hash,
+            result_hash: snapshot.result_hash,
+            parent_snapshot_id: null,
+            created_by: user.id,
+          })
+          .select("id, version")
+          .single();
+
+        if (snapError || !calcSnap) {
+          return jsonError(
+            "Draft redeemed and deal exists, but calculator snapshot is missing and could not be created.",
+            500,
+          );
+        }
+
+        return NextResponse.json({
+          ok: true,
+          deal_id: deal.id,
+          snapshot_version: calcSnap.version,
+          redirect_url: `/deal/${deal.id}`,
+          idempotent: true,
+        });
+      }
+
+      return NextResponse.json({
+        ok: true,
+        deal_id: deal.id,
+        snapshot_version: snapVersion,
+        redirect_url: `/deal/${deal.id}`,
+        idempotent: true,
+      });
     }
 
     const { data: updated, error: updateError } = await (
@@ -136,9 +236,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (!updated || updated.length === 0) {
-      const { data: refetched } = await (
-        service.from("draft_tokens") as any
-      )
+      const { data: refetched } = await (service.from("draft_tokens") as any)
         .select("redeemed_by_user_id")
         .eq("id", draft.id)
         .single();
@@ -154,27 +252,30 @@ export async function POST(request: NextRequest) {
             idempotent: true,
           });
         }
+
+        const deal = await getOrCreateDeal({
+          service,
+          userId: user.id,
+          sourceRef,
+        });
+
+        return NextResponse.json({
+          ok: true,
+          deal_id: deal.id,
+          snapshot_version: 1,
+          redirect_url: `/deal/${deal.id}`,
+          idempotent: true,
+        });
       }
 
       return jsonError("Token already redeemed by another user", 409);
     }
 
-    const { data: deal, error: dealError } = await (
-      service.from("deals") as any
-    )
-      .insert({
-        owner_user_id: user.id,
-        status: "IMPORTED",
-        created_from: "marketing_resume",
-        source_ref: sourceRef,
-      })
-      .select("id, created_at")
-      .single();
-
-    if (dealError || !deal) {
-      console.error("deal insert error:", dealError?.message);
-      return jsonError("Failed to create deal", 500);
-    }
+    const deal = await getOrCreateDeal({
+      service,
+      userId: user.id,
+      sourceRef,
+    });
 
     const { data: calcSnap, error: snapError } = await (
       service.from("calculator_snapshots") as any

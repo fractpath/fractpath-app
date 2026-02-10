@@ -20,11 +20,40 @@ export interface ValidationResult {
 export interface ValidationError {
   ok: false;
   error: string;
-  code: "INVALID_SCHEMA_VERSION" | "MISSING_FIELD" | "HASH_MISMATCH" | "INVALID_TYPE";
+  code:
+    | "INVALID_SCHEMA_VERSION"
+    | "MISSING_FIELD"
+    | "HASH_MISMATCH"
+    | "INVALID_TYPE";
+}
+
+function stableStringify(value: unknown): string {
+  // Primitives + null
+  if (value === null) return "null";
+  const t = typeof value;
+  if (t === "string") return JSON.stringify(value);
+  if (t === "number") return Number.isFinite(value as number) ? String(value) : "null";
+  if (t === "boolean") return value ? "true" : "false";
+
+  // Arrays preserve order
+  if (Array.isArray(value)) {
+    return `[${value.map((v) => stableStringify(v)).join(",")}]`;
+  }
+
+  // Objects: sort keys lexicographically
+  if (t === "object") {
+    const obj = value as Record<string, unknown>;
+    const keys = Object.keys(obj).sort();
+    const parts = keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`);
+    return `{${parts.join(",")}}`;
+  }
+
+  // Functions/undefined/symbol etc. are not valid JSON; treat as null
+  return "null";
 }
 
 function canonicalHash(obj: unknown): string {
-  const json = JSON.stringify(obj);
+  const json = stableStringify(obj);
   return createHash("sha256").update(json).digest("hex");
 }
 
@@ -32,13 +61,21 @@ export function validateDraftSnapshotV1(
   payload: unknown,
 ): ValidationResult | ValidationError {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    return { ok: false, error: "Payload must be a JSON object", code: "INVALID_TYPE" };
+    return {
+      ok: false,
+      error: "Payload must be a JSON object",
+      code: "INVALID_TYPE",
+    };
   }
 
   const p = payload as Record<string, unknown>;
 
   if (typeof p.schema_version !== "string") {
-    return { ok: false, error: "schema_version is required and must be a string", code: "MISSING_FIELD" };
+    return {
+      ok: false,
+      error: "schema_version is required and must be a string",
+      code: "MISSING_FIELD",
+    };
   }
 
   if (!SUPPORTED_SCHEMA_VERSIONS.includes(p.schema_version as any)) {
@@ -49,19 +86,37 @@ export function validateDraftSnapshotV1(
     };
   }
 
-  const requiredStringFields = ["engine_version", "calculator_schema_version", "inputs_hash", "result_hash"] as const;
+  const requiredStringFields = [
+    "engine_version",
+    "calculator_schema_version",
+    "inputs_hash",
+    "result_hash",
+  ] as const;
+
   for (const field of requiredStringFields) {
     if (typeof p[field] !== "string" || (p[field] as string).trim().length === 0) {
-      return { ok: false, error: `${field} is required and must be a non-empty string`, code: "MISSING_FIELD" };
+      return {
+        ok: false,
+        error: `${field} is required and must be a non-empty string`,
+        code: "MISSING_FIELD",
+      };
     }
   }
 
   if (!p.inputs || typeof p.inputs !== "object" || Array.isArray(p.inputs)) {
-    return { ok: false, error: "inputs is required and must be a JSON object", code: "MISSING_FIELD" };
+    return {
+      ok: false,
+      error: "inputs is required and must be a JSON object",
+      code: "MISSING_FIELD",
+    };
   }
 
   if (!p.result || typeof p.result !== "object" || Array.isArray(p.result)) {
-    return { ok: false, error: "result is required and must be a JSON object", code: "MISSING_FIELD" };
+    return {
+      ok: false,
+      error: "result is required and must be a JSON object",
+      code: "MISSING_FIELD",
+    };
   }
 
   const computedInputsHash = canonicalHash(p.inputs);

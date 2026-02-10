@@ -4,12 +4,13 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
 type PageProps = {
-  // Normalize at runtime (prod sometimes delivers promise-like objects)
   searchParams?: SearchParams | Promise<SearchParams>;
 };
 
@@ -18,25 +19,11 @@ function firstParam(v: string | string[] | undefined): string | null {
   return Array.isArray(v) ? (v[0] ?? null) : v;
 }
 
-function friendlyTokenError(message: string) {
-  const m = (message || "").toLowerCase();
-
-  if (m.includes("expired")) return "This share link has expired.";
-  if (m.includes("not found") || m.includes("invalid") || m.includes("token"))
-    return "This share link is invalid.";
-
-  return "We couldn’t open that share link. It may be invalid.";
-}
-
 function isLikelyExpired(row: Record<string, any>): boolean {
-  // Optional columns; only enforce if present
   const now = Date.now();
-
   const expiresAt = row.expires_at ? Date.parse(row.expires_at) : NaN;
   if (!Number.isNaN(expiresAt) && now > expiresAt) return true;
-
   if (row.revoked_at) return true;
-
   return false;
 }
 
@@ -57,9 +44,6 @@ export default async function SharePage({ searchParams }: PageProps) {
 
   const admin = createAdminClient();
 
-  /**
-   * 1) Resolve token → deal_id without consuming it
-   */
   const tokenRes = await admin
     .from("deal_share_tokens")
     .select("*")
@@ -67,11 +51,12 @@ export default async function SharePage({ searchParams }: PageProps) {
     .maybeSingle();
 
   if (tokenRes.error || !tokenRes.data) {
-    const msg = friendlyTokenError(tokenRes.error?.message ?? "");
     return (
       <main className="mx-auto max-w-xl p-6">
         <h1 className="text-lg font-semibold">Unable to open shared deal</h1>
-        <p className="mt-2 text-sm text-muted-foreground">{msg}</p>
+        <p className="mt-2 text-sm text-muted-foreground">
+          This share link is invalid or has expired.
+        </p>
         <p className="mt-4 text-sm">
           If you believe this is a mistake, ask the deal owner to send a new
           share link.
@@ -109,73 +94,68 @@ export default async function SharePage({ searchParams }: PageProps) {
 
   const dealId = String(tokenRow.deal_id);
 
-  /**
-   * 2) Load deal via ADMIN client (incognito-safe, read-only)
-   */
-  const dealRes = await admin
-    .from("deals")
-    .select("id, property_address, created_at, status")
-    .eq("id", dealId)
-    .maybeSingle();
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  if (dealRes.error || !dealRes.data) {
+  if (!user) {
     return (
       <main className="mx-auto max-w-xl p-6">
-        <h1 className="text-lg font-semibold">Unable to open shared deal</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          The deal could not be loaded.
-        </p>
+        <div className="mb-4 rounded-md border p-3">
+          <div className="text-sm font-medium">Read-only shared deal</div>
+          <div className="mt-1 text-sm text-muted-foreground">
+            Sign in or create an account to view this deal.
+          </div>
+        </div>
+
+        <div className="mt-6 flex gap-4">
+          <Link
+            className="rounded-md border px-4 py-2 text-sm"
+            href={`/login?returnTo=${encodeURIComponent(`/share?t=${t}`)}`}
+          >
+            Sign in
+          </Link>
+          <Link
+            className="rounded-md border px-4 py-2 text-sm"
+            href={`/signup?returnTo=${encodeURIComponent(`/share?t=${t}`)}`}
+          >
+            Create an account
+          </Link>
+        </div>
       </main>
     );
   }
 
-  const deal = dealRes.data;
+  const { data: existingGrant } = await admin
+    .from("deal_access_grants")
+    .select("id, role")
+    .eq("deal_id", dealId)
+    .eq("user_id", user.id)
+    .maybeSingle();
 
-  return (
-    <main className="mx-auto max-w-3xl p-6">
-      <div className="mb-4 rounded-md border p-3">
-        <div className="text-sm font-medium">Read-only shared deal</div>
-        <div className="mt-1 text-sm text-muted-foreground">
-          You can view this deal, but you can’t make changes.
-        </div>
-      </div>
+  if (!existingGrant) {
+    const { error: grantError } = await admin
+      .from("deal_access_grants")
+      .insert({
+        deal_id: dealId,
+        user_id: user.id,
+        role: "VIEWER",
+        created_by: tokenRow.created_by,
+      });
 
-      <div className="flex items-baseline justify-between gap-4">
-        <h1 className="text-xl font-semibold">Deal</h1>
-        <div className="text-sm text-muted-foreground">
-          Status:{" "}
-          <span className="font-medium text-foreground">{deal.status}</span>
-        </div>
-      </div>
+    if (grantError) {
+      return (
+        <main className="mx-auto max-w-xl p-6">
+          <h1 className="text-lg font-semibold">Unable to open shared deal</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            We couldn&apos;t grant access to this deal. Please try again or ask
+            the deal owner to resend the share link.
+          </p>
+        </main>
+      );
+    }
+  }
 
-      <div className="mt-4 rounded-md border p-4 text-sm">
-        <div className="grid gap-2">
-          <div>
-            <span className="font-medium">Deal ID:</span>{" "}
-            <span className="break-words">{deal.id}</span>
-          </div>
-          <div>
-            <span className="font-medium">Property:</span>{" "}
-            <span className="break-words">{deal.property_address}</span>
-          </div>
-          <div>
-            <span className="font-medium">Created:</span>{" "}
-            <span className="break-words">{deal.created_at}</span>
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-6 flex gap-4">
-        <Link
-          className="text-sm underline"
-          href={`/login?returnTo=${encodeURIComponent(`/share?t=${t}`)}`}
-        >
-          Sign in
-        </Link>
-        <Link className="text-sm underline" href="/signup">
-          Create an account
-        </Link>
-      </div>
-    </main>
-  );
+  redirect(`/deal/${dealId}?mode=shared`);
 }

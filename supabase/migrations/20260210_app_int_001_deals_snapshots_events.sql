@@ -2,7 +2,17 @@
 -- The authoritative resume flow: DraftSnapshot → Deal + Snapshot v1
 
 -- ============================================================
--- 1. deals
+-- 0. Shared: append-only guard (used by snapshots + events)
+-- ============================================================
+create or replace function public.no_update_delete()
+returns trigger language plpgsql as $$
+begin
+  raise exception 'Append-only table: updates/deletes are not allowed';
+end;
+$$;
+
+-- ============================================================
+-- 1. deals (service-role only for Sprint 5)
 -- ============================================================
 create table if not exists public.deals (
   id            uuid primary key default gen_random_uuid(),
@@ -10,8 +20,7 @@ create table if not exists public.deals (
   status        text not null default 'IMPORTED',
   created_from  text not null,
   source_ref    text null,
-  created_at    timestamptz not null default now(),
-  updated_at    timestamptz not null default now()
+  created_at    timestamptz not null default now()
 );
 
 create index if not exists idx_deals_owner
@@ -22,57 +31,30 @@ create index if not exists idx_deals_source_ref
 
 alter table public.deals enable row level security;
 
+-- Sprint 5: no RLS policies at all (service role bypasses RLS; everyone else denied).
+-- If you later want authenticated reads, add explicit SELECT policies in a future ticket.
 drop policy if exists "deals_select_own" on public.deals;
-create policy "deals_select_own"
-  on public.deals for select
-  using (auth.uid() = owner_user_id);
-
 drop policy if exists "deals_deny_anon_insert" on public.deals;
-create policy "deals_deny_anon_insert"
-  on public.deals for insert
-  with check (false);
-
 drop policy if exists "deals_deny_anon_update" on public.deals;
-create policy "deals_deny_anon_update"
-  on public.deals for update
-  using (false);
-
 drop policy if exists "deals_deny_anon_delete" on public.deals;
-create policy "deals_deny_anon_delete"
-  on public.deals for delete
-  using (false);
-
--- updated_at trigger
-create or replace function public.set_deals_updated_at()
-returns trigger language plpgsql as $$
-begin
-  new.updated_at = now();
-  return new;
-end;
-$$;
-
-drop trigger if exists trg_deals_set_updated_at on public.deals;
-create trigger trg_deals_set_updated_at
-  before update on public.deals
-  for each row execute function public.set_deals_updated_at();
 
 -- ============================================================
 -- 2. calculator_snapshots (append-only, immutable)
 -- ============================================================
 create table if not exists public.calculator_snapshots (
-  id                       uuid primary key default gen_random_uuid(),
-  deal_id                  uuid not null references public.deals(id) on delete cascade,
-  version                  integer not null default 1,
-  source                   text not null,
-  inputs_json              jsonb not null,
-  results_json             jsonb not null,
+  id                        uuid primary key default gen_random_uuid(),
+  deal_id                   uuid not null references public.deals(id) on delete cascade,
+  version                   integer not null default 1,
+  source                    text not null,
+  inputs_json               jsonb not null,
+  results_json              jsonb not null,
   calculator_schema_version text not null,
-  engine_version           text not null,
-  inputs_hash              text not null,
-  result_hash              text not null,
-  parent_snapshot_id       uuid null references public.calculator_snapshots(id),
-  created_by               uuid not null references auth.users(id),
-  created_at               timestamptz not null default now()
+  engine_version            text not null,
+  inputs_hash               text not null,
+  result_hash               text not null,
+  parent_snapshot_id        uuid null references public.calculator_snapshots(id),
+  created_by                uuid not null references auth.users(id),
+  created_at                timestamptz not null default now()
 );
 
 create unique index if not exists idx_calculator_snapshots_deal_version
@@ -80,25 +62,22 @@ create unique index if not exists idx_calculator_snapshots_deal_version
 
 alter table public.calculator_snapshots enable row level security;
 
+-- Sprint 5: no policies (service role only; everyone else denied).
 drop policy if exists "calculator_snapshots_deny_anon_select" on public.calculator_snapshots;
-create policy "calculator_snapshots_deny_anon_select"
-  on public.calculator_snapshots for select
-  using (false);
-
 drop policy if exists "calculator_snapshots_deny_anon_insert" on public.calculator_snapshots;
-create policy "calculator_snapshots_deny_anon_insert"
-  on public.calculator_snapshots for insert
-  with check (false);
-
 drop policy if exists "calculator_snapshots_deny_anon_update" on public.calculator_snapshots;
-create policy "calculator_snapshots_deny_anon_update"
-  on public.calculator_snapshots for update
-  using (false);
-
 drop policy if exists "calculator_snapshots_deny_anon_delete" on public.calculator_snapshots;
-create policy "calculator_snapshots_deny_anon_delete"
-  on public.calculator_snapshots for delete
-  using (false);
+
+-- Hard immutability: block UPDATE/DELETE at the DB level
+drop trigger if exists trg_calculator_snapshots_no_update on public.calculator_snapshots;
+create trigger trg_calculator_snapshots_no_update
+  before update on public.calculator_snapshots
+  for each row execute function public.no_update_delete();
+
+drop trigger if exists trg_calculator_snapshots_no_delete on public.calculator_snapshots;
+create trigger trg_calculator_snapshots_no_delete
+  before delete on public.calculator_snapshots
+  for each row execute function public.no_update_delete();
 
 -- ============================================================
 -- 3. deal_events (audit log, append-only)
@@ -117,22 +96,19 @@ create index if not exists idx_deal_events_deal
 
 alter table public.deal_events enable row level security;
 
+-- Sprint 5: no policies (service role only; everyone else denied).
 drop policy if exists "deal_events_deny_anon_select" on public.deal_events;
-create policy "deal_events_deny_anon_select"
-  on public.deal_events for select
-  using (false);
-
 drop policy if exists "deal_events_deny_anon_insert" on public.deal_events;
-create policy "deal_events_deny_anon_insert"
-  on public.deal_events for insert
-  with check (false);
-
 drop policy if exists "deal_events_deny_anon_update" on public.deal_events;
-create policy "deal_events_deny_anon_update"
-  on public.deal_events for update
-  using (false);
-
 drop policy if exists "deal_events_deny_anon_delete" on public.deal_events;
-create policy "deal_events_deny_anon_delete"
-  on public.deal_events for delete
-  using (false);
+
+-- Hard immutability: block UPDATE/DELETE at the DB level
+drop trigger if exists trg_deal_events_no_update on public.deal_events;
+create trigger trg_deal_events_no_update
+  before update on public.deal_events
+  for each row execute function public.no_update_delete();
+
+drop trigger if exists trg_deal_events_no_delete on public.deal_events;
+create trigger trg_deal_events_no_delete
+  before delete on public.deal_events
+  for each row execute function public.no_update_delete();

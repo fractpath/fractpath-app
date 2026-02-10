@@ -1,3 +1,4 @@
+import "server-only";
 import { createClient } from "@supabase/supabase-js";
 
 let _serviceClient: ReturnType<typeof createClient> | null = null;
@@ -15,7 +16,10 @@ export function createServiceClient() {
   }
 
   _serviceClient = createClient(url, serviceRoleKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
   });
 
   return _serviceClient;
