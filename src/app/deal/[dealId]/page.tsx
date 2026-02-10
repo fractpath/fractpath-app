@@ -9,16 +9,15 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ShareDealCard } from "@/components/ShareDealCard";
 
+type SearchParams = Record<string, string | string[] | undefined>;
+
 type PageProps = {
   // In some deployments params can be promise-like; normalize at runtime.
   params: { dealId?: string } | Promise<{ dealId?: string }>;
-  searchParams?: Record<string, string | string[] | undefined>;
+  searchParams?: SearchParams | Promise<SearchParams>;
 };
 
-function getParam(
-  searchParams: PageProps["searchParams"],
-  key: string,
-): string | null {
+function getParam(searchParams: SearchParams | undefined, key: string): string | null {
   const v = searchParams?.[key];
   if (!v) return null;
   return Array.isArray(v) ? (v[0] ?? null) : v;
@@ -34,8 +33,10 @@ function isUuid(v: string | undefined): v is string {
 }
 
 export default async function DealPage({ params, searchParams }: PageProps) {
-  // Normalize params to handle both plain object and Promise-like params
+  // Normalize params/searchParams to handle plain object and Promise-like values
   const resolvedParams = await Promise.resolve(params as any);
+  const resolvedSearchParams = await Promise.resolve(searchParams as any);
+
   const dealId = resolvedParams?.dealId as string | undefined;
 
   // HARD FAIL FAST: never let Supabase see invalid UUIDs
@@ -53,7 +54,7 @@ export default async function DealPage({ params, searchParams }: PageProps) {
     redirect(`/login?returnTo=${encodeURIComponent(`/deal/${dealId}`)}`);
   }
 
-  const mode = getParam(searchParams, "mode");
+  const mode = getParam(resolvedSearchParams, "mode");
   const isSharedMode = mode === "shared";
 
   /**
