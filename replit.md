@@ -48,11 +48,14 @@ src/
 │   │   ├── admin.ts          # Admin/service-role client (alternate)
 │   │   └── middleware.ts     # Session refresh
 │   ├── draftSnapshot.ts      # DraftSnapshot v1 validation + hash verification
+│   ├── dealSnapshot.ts       # FullDealSnapshotV1 validation (opaque, no recompute)
+│   ├── dealSnapshotDb.ts     # insertDealSnapshot + getLatestDealSnapshot helpers
 │   ├── rateLimit.ts          # In-memory IP rate limiter
 │   ├── useSession.ts         # React session hook
 │   └── __tests__/
 │       ├── draftToken.test.ts              # Token generation tests (5 tests)
 │       ├── draftSnapshotValidation.test.ts # Snapshot validation tests (12 tests)
+│       ├── dealSnapshotValidation.test.ts  # FullDealSnapshotV1 validation tests (14 tests)
 │       └── shareRoute.test.ts             # Share route validation tests (9 tests)
 └── middleware.ts             # Next.js middleware
 
@@ -64,7 +67,8 @@ supabase/
     ├── 20260210_create_deal_with_owner_grant.sql
     ├── 20260210_rls_deals_owner_viewer.sql
     ├── 20260210_share_access_grants_tokens.sql
-    └── 20260210_rls_snapshots_events_viewer.sql
+    ├── 20260210_rls_snapshots_events_viewer.sql
+    └── 20260210_app_060_deal_snapshots.sql
 
 tickets/
 ├── README.md                 # Ticket index and conventions
@@ -126,9 +130,19 @@ Required for deal resume + share flows:
 - Roles: OWNER, VIEWER
 - RLS: deals SELECT via grant; UPDATE/DELETE OWNER only
 - calculator_snapshots and deal_events: SELECT via grant on parent deal
+- deal_snapshots: SELECT via grant, INSERT OWNER only, UPDATE/DELETE denied (append-only triggers)
 - deal_share_tokens: service-role only (deny all anon/authenticated)
 
 ## Sprint Status
+
+### APP-060 — Persist FullDealSnapshotV1 (Complete)
+- [x] Migration: deal_snapshots table with append-only triggers, indexes, RLS
+- [x] RLS: SELECT via grant (OWNER/VIEWER), INSERT OWNER only, no UPDATE/DELETE
+- [x] FullDealSnapshotV1 validation (contract_version, schema_version, inputs, outputs)
+- [x] Server helpers: insertDealSnapshot + getLatestDealSnapshot
+- [x] Tests: 14 validation tests (all passing)
+- [x] npm run build passes
+- [ ] Run migration on Supabase
 
 ### APP-SHARE-001 — Share Link Produces VIEWER Read-Only (Current)
 - [x] Migration: deal_access_grants + deal_share_tokens tables
