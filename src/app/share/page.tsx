@@ -4,14 +4,12 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
 type PageProps = {
-  // In some deployments this can be promise-like; normalize at runtime.
+  // Normalize at runtime (prod sometimes delivers promise-like objects)
   searchParams?: SearchParams | Promise<SearchParams>;
 };
 
@@ -24,12 +22,22 @@ function friendlyTokenError(message: string) {
   const m = (message || "").toLowerCase();
 
   if (m.includes("expired")) return "This share link has expired.";
-  if (m.includes("max") || m.includes("redemption"))
-    return "This share link has already been used.";
   if (m.includes("not found") || m.includes("invalid") || m.includes("token"))
     return "This share link is invalid.";
 
-  return "We couldn’t open that share link. It may be invalid or already used.";
+  return "We couldn’t open that share link. It may be invalid.";
+}
+
+function isLikelyExpired(row: Record<string, any>): boolean {
+  // Optional columns; only enforce if present
+  const now = Date.now();
+
+  const expiresAt = row.expires_at ? Date.parse(row.expires_at) : NaN;
+  if (!Number.isNaN(expiresAt) && now > expiresAt) return true;
+
+  if (row.revoked_at) return true;
+
+  return false;
 }
 
 export default async function SharePage({ searchParams }: PageProps) {
@@ -47,55 +55,63 @@ export default async function SharePage({ searchParams }: PageProps) {
     );
   }
 
+  const admin = createAdminClient();
+
   /**
-   * 1) Redeem token using ADMIN client (incognito-safe, no session required)
-   * This should return the deal UUID.
+   * 1) Resolve token → deal_id without consuming it
    */
-  let dealId: string | null = null;
-  try {
-    const admin = createAdminClient();
-    const redeemed = await admin.rpc("redeem_deal_share_token", { p_token: t });
-    if (redeemed.error || !redeemed.data) {
-      const msg = friendlyTokenError(redeemed.error?.message ?? "");
-      return (
-        <main className="mx-auto max-w-xl p-6">
-          <h1 className="text-lg font-semibold">Unable to open shared deal</h1>
-          <p className="mt-2 text-sm text-muted-foreground">{msg}</p>
-          <p className="mt-4 text-sm">
-            If you believe this is a mistake, ask the deal owner to send a new
-            share link.
-          </p>
-        </main>
-      );
-    }
-    dealId = redeemed.data as string;
-  } catch {
+  const tokenRes = await admin
+    .from("deal_share_tokens")
+    .select("*")
+    .eq("token", t)
+    .maybeSingle();
+
+  if (tokenRes.error || !tokenRes.data) {
+    const msg = friendlyTokenError(tokenRes.error?.message ?? "");
     return (
       <main className="mx-auto max-w-xl p-6">
         <h1 className="text-lg font-semibold">Unable to open shared deal</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Server misconfigured. Missing service role key.
+        <p className="mt-2 text-sm text-muted-foreground">{msg}</p>
+        <p className="mt-4 text-sm">
+          If you believe this is a mistake, ask the deal owner to send a new
+          share link.
         </p>
       </main>
     );
   }
 
-  /**
-   * 2) OPTIONAL: if recipient is logged in, show canonical deal route in shared mode
-   */
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const tokenRow = tokenRes.data as Record<string, any>;
 
-  if (user) {
-    redirect(`/deal/${dealId}?mode=shared`);
+  if (!tokenRow.deal_id) {
+    return (
+      <main className="mx-auto max-w-xl p-6">
+        <h1 className="text-lg font-semibold">Unable to open shared deal</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          This share link is invalid.
+        </p>
+      </main>
+    );
   }
 
+  if (isLikelyExpired(tokenRow)) {
+    return (
+      <main className="mx-auto max-w-xl p-6">
+        <h1 className="text-lg font-semibold">Unable to open shared deal</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          This share link has expired.
+        </p>
+        <p className="mt-4 text-sm">
+          Ask the deal owner to send a new share link.
+        </p>
+      </main>
+    );
+  }
+
+  const dealId = String(tokenRow.deal_id);
+
   /**
-   * 3) Incognito read-only view (minimal Share MVP)
+   * 2) Load deal via ADMIN client (incognito-safe, read-only)
    */
-  const admin = createAdminClient();
   const dealRes = await admin
     .from("deals")
     .select("id, property_address, created_at, status")
@@ -120,8 +136,7 @@ export default async function SharePage({ searchParams }: PageProps) {
       <div className="mb-4 rounded-md border p-3">
         <div className="text-sm font-medium">Read-only shared deal</div>
         <div className="mt-1 text-sm text-muted-foreground">
-          You can view this deal, but you can’t make changes. To collaborate,
-          sign in and ask the owner to share it with your account.
+          You can view this deal, but you can’t make changes.
         </div>
       </div>
 
@@ -153,9 +168,12 @@ export default async function SharePage({ searchParams }: PageProps) {
       <div className="mt-6 flex gap-4">
         <Link
           className="text-sm underline"
-          href={`/login?returnTo=${encodeURIComponent(`/deal/${deal.id}?mode=shared`)}`}
+          href={`/login?returnTo=${encodeURIComponent(`/share?t=${t}`)}`}
         >
-          Sign in to view in your account
+          Sign in
+        </Link>
+        <Link className="text-sm underline" href="/signup">
+          Create an account
         </Link>
       </div>
     </main>
