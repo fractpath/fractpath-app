@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-"import { createClient } from "@#/lib/supabaseServer";
+import { createClient } from "@#/lib/supabaseServer";
 import crypto from "crypto";
 
 function base64Url(bytes: Buffer) {
@@ -19,12 +19,10 @@ function getShareBaseUrl() {
 export async function POST(
   request: Request,
   context: { params: { dealId: string } }
-)   {
+) {
   const supabase = await createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -36,12 +34,12 @@ export async function POST(
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json( { error: "Invalid JSON body" }, { status: 400 });
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   const toEmail = String(body?.toEmail ?? "").trim();
   if (!toEmail || !toEmail.includes("@")) {
-    return NextResponse.json( { error: "Valid toEmail is required" }, { status: 400 });
+    return NextResponse.json({ error: "Valid toEmail is required" }, { status: 400 });
   }
 
   // OWNER gate
@@ -60,11 +58,9 @@ export async function POST(
     return NextResponse.json( { error: "Forbidden (OWNER only)" }, { status: 403 });
   }
 
-  // Create token (unguessable)
   const token = base64Url(crypto.randomBytes(32));
   const shareUrl = `${getShareBaseUrl()}?t=${encodeURIComponent(token)}`;
 
-  // Insert token row
   const insert = await supabase.from("deal_share_tokens").insert({
     token,
     deal_id: dealId,
@@ -75,8 +71,6 @@ export async function POST(
     return NextResponse.json( { error: insert.error.message }, { status: 400 });
   }
 
-  // Send email via existing /api/share (SES sender)
-  // Non-fatal if email fails: the link is still usable.
   try {
     await fetch(new URL("/api/share", request.url), {
       method: "POST",
@@ -87,5 +81,5 @@ export async function POST(
     // ignore
   }
 
-  return NextResponse.json({ ok: true, shareUrl });
+  return NextResponse.json( { ok: true, shareUrl });
 }
