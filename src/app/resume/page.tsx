@@ -9,7 +9,7 @@ type RedeemState =
   | { status: "no-token" }
   | { status: "redirecting-login" }
   | { status: "redeeming" }
-  | { status: "success"; scenarioId: string }
+  | { status: "success"; dealId: string; redirectUrl: string }
   | { status: "error"; message: string };
 
 export default function ResumePage() {
@@ -52,7 +52,7 @@ function ResumeContent() {
       setState({ status: "redeeming" });
 
       try {
-        const res = await fetch("/api/drafts/redeem", {
+        const res = await fetch("/api/deals/resume", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ token }),
@@ -65,14 +65,18 @@ function ResumeContent() {
         if (!res.ok || !data.ok) {
           setState({
             status: "error",
-            message: data.error || "Failed to redeem token",
+            message: data.error || "Failed to resume scenario",
           });
           return;
         }
 
         document.cookie = "fractpath_draft_token=;path=/;max-age=0";
 
-        setState({ status: "success", scenarioId: data.scenario_id });
+        setState({
+          status: "success",
+          dealId: data.deal_id,
+          redirectUrl: data.redirect_url || `/deal/${data.deal_id}`,
+        });
       } catch {
         if (!cancelled) {
           setState({
@@ -120,10 +124,10 @@ function ResumeContent() {
       {state.status === "redeeming" && (
         <div>
           <h1 style={{ fontSize: "1.5rem", fontWeight: 700 }}>
-            Loading Your Scenario
+            Setting Up Your Deal
           </h1>
           <p style={{ color: "#666", marginTop: 8 }}>
-            Setting up your personalized scenario...
+            Loading your scenario and creating your deal workspace...
           </p>
         </div>
       )}
@@ -131,13 +135,13 @@ function ResumeContent() {
       {state.status === "success" && (
         <div>
           <h1 style={{ fontSize: "1.5rem", fontWeight: 700 }}>
-            Scenario Ready
+            Deal Created
           </h1>
           <p style={{ color: "#666", marginTop: 8 }}>
-            Your scenario has been loaded into your account.
+            Your scenario has been imported and your deal workspace is ready.
           </p>
           <button
-            onClick={() => router.push("/my-scenarios")}
+            onClick={() => router.push(state.redirectUrl)}
             style={{
               marginTop: 16,
               padding: "10px 24px",
@@ -149,7 +153,7 @@ function ResumeContent() {
               fontSize: "1rem",
             }}
           >
-            View My Scenarios
+            Go to Deal
           </button>
         </div>
       )}
@@ -157,7 +161,7 @@ function ResumeContent() {
       {state.status === "error" && (
         <div>
           <h1 style={{ fontSize: "1.5rem", fontWeight: 700, color: "#b91c1c" }}>
-            Unable to Load Scenario
+            Unable to Resume Scenario
           </h1>
           <p style={{ color: "#666", marginTop: 8 }}>{state.message}</p>
           <p style={{ color: "#999", marginTop: 16, fontSize: "0.875rem" }}>

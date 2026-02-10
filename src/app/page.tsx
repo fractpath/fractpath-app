@@ -6,14 +6,21 @@ import { AuthHeader } from "@/components/AuthHeader";
 type CashStructure = "upfront" | "installments" | "both" | "exploring";
 type SaleTimeline = "3-12-months" | "exploring";
 
+type SubmitResponse =
+  | { ok: true; dealId: string }
+  | { ok: false; error: string };
+
 export default function Home() {
   const [email, setEmail] = useState("");
   const [homeAddress, setHomeAddress] = useState("");
   const [equityPct, setEquityPct] = useState("");
-  const [cashStructure, setCashStructure] = useState<CashStructure>("exploring");
+  const [cashStructure, setCashStructure] =
+    useState<CashStructure>("exploring");
   const [saleTimeline, setSaleTimeline] = useState<SaleTimeline>("exploring");
 
-  const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
+  const [status, setStatus] = useState<
+    "idle" | "submitting" | "success" | "error"
+  >("idle");
   const [message, setMessage] = useState("");
 
   async function onSubmit(e: React.FormEvent) {
@@ -25,6 +32,7 @@ export default function Home() {
       const res = await fetch("/api/submit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({
           email,
           homeAddress,
@@ -34,16 +42,23 @@ export default function Home() {
         }),
       });
 
-      const data = (await res.json()) as { ok: boolean; error?: string };
+      const data = (await res.json()) as SubmitResponse;
 
       if (!res.ok || !data.ok) {
         setStatus("error");
-        setMessage(data.error || "Submission failed.");
+        setMessage(!data.ok ? data.error : `HTTP ${res.status}`);
+        return;
+      }
+
+      if (!data.dealId) {
+        setStatus("error");
+        setMessage("Deal was created but no deal ID was returned.");
         return;
       }
 
       setStatus("success");
-      setMessage("Submitted. Thank you.");
+      setMessage("Deal created. Redirecting...");
+      window.location.assign(`/deal/${data.dealId}`);
     } catch {
       setStatus("error");
       setMessage("Submission failed.");
@@ -51,74 +66,71 @@ export default function Home() {
   }
 
   return (
-    <main style={{ maxWidth: 640, margin: "40px auto", padding: 16, fontFamily: "system-ui" }}>
-      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 32 }}>
-        <h1 style={{ fontSize: 28, margin: 0 }}>FractPath — Homeowner Intake</h1>
-        <AuthHeader />
-      </header>
-      <p style={{ marginTop: 0, color: "#444" }}>
-        Share your exploratory scenario. Our team may follow up to discuss options.
-      </p>
+    <main style={{ padding: 24, maxWidth: 720 }}>
+      <AuthHeader />
 
-      <form onSubmit={onSubmit} style={{ display: "grid", gap: 12, marginTop: 24 }}>
+      <h1 style={{ fontSize: 20, fontWeight: 700, marginTop: 16 }}>
+        Create a deal
+      </h1>
+
+      <form
+        onSubmit={onSubmit}
+        style={{ marginTop: 16, display: "grid", gap: 12 }}
+      >
         <label style={{ display: "grid", gap: 6 }}>
-          <span>Email</span>
+          <div>Email</div>
           <input
-            type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            required
             placeholder="you@example.com"
-            style={{ padding: 10, border: "1px solid #ccc", borderRadius: 6 }}
+            style={{ padding: 10, borderRadius: 8, border: "1px solid #ccc" }}
           />
         </label>
 
         <label style={{ display: "grid", gap: 6 }}>
-          <span>Home Address</span>
+          <div>Home address</div>
           <input
             value={homeAddress}
             onChange={(e) => setHomeAddress(e.target.value)}
-            required
-            placeholder="123 Main St, City, State ZIP"
-            style={{ padding: 10, border: "1px solid #ccc", borderRadius: 6 }}
+            placeholder="123 Main St"
+            style={{ padding: 10, borderRadius: 8, border: "1px solid #ccc" }}
           />
         </label>
 
         <label style={{ display: "grid", gap: 6 }}>
-          <span>Estimated Equity Percentage Owned</span>
+          <div>Equity % owned</div>
           <input
             value={equityPct}
             onChange={(e) => setEquityPct(e.target.value)}
-            required
-            inputMode="decimal"
-            placeholder="e.g., 65"
-            style={{ padding: 10, border: "1px solid #ccc", borderRadius: 6 }}
+            placeholder="25"
+            inputMode="numeric"
+            style={{ padding: 10, borderRadius: 8, border: "1px solid #ccc" }}
           />
         </label>
 
         <label style={{ display: "grid", gap: 6 }}>
-          <span>Preferred Cash Structure</span>
+          <div>Preferred cash structure</div>
           <select
             value={cashStructure}
             onChange={(e) => setCashStructure(e.target.value as CashStructure)}
-            style={{ padding: 10, border: "1px solid #ccc", borderRadius: 6 }}
+            style={{ padding: 10, borderRadius: 8, border: "1px solid #ccc" }}
           >
-            <option value="upfront">upfront</option>
-            <option value="installments">installments</option>
-            <option value="both">both</option>
-            <option value="exploring">exploring</option>
+            <option value="exploring">Exploring</option>
+            <option value="upfront">Upfront</option>
+            <option value="installments">Installments</option>
+            <option value="both">Both</option>
           </select>
         </label>
 
         <label style={{ display: "grid", gap: 6 }}>
-          <span>Intended Sale Timeline</span>
+          <div>Intended sale timeline</div>
           <select
             value={saleTimeline}
             onChange={(e) => setSaleTimeline(e.target.value as SaleTimeline)}
-            style={{ padding: 10, border: "1px solid #ccc", borderRadius: 6 }}
+            style={{ padding: 10, borderRadius: 8, border: "1px solid #ccc" }}
           >
+            <option value="exploring">Exploring</option>
             <option value="3-12-months">3–12 months</option>
-            <option value="exploring">just exploring</option>
           </select>
         </label>
 
@@ -127,15 +139,14 @@ export default function Home() {
           disabled={status === "submitting"}
           style={{
             padding: 12,
-            borderRadius: 8,
-            border: "none",
-            background: status === "submitting" ? "#eee" : "#111",
-            color: status === "submitting" ? "#111" : "#fff",
+            borderRadius: 10,
+            border: "1px solid #000",
+            background: status === "submitting" ? "#eee" : "#fff",
             cursor: status === "submitting" ? "not-allowed" : "pointer",
             fontWeight: 600,
           }}
         >
-          {status === "submitting" ? "Sharing..." : "Share My Scenario"}
+          {status === "submitting" ? "Submitting..." : "Create deal"}
         </button>
 
         {status !== "idle" && (
