@@ -49,6 +49,17 @@ export default function DashboardPage() {
   const [user, setUser] = useState<UserData | null>(null);
 
   useEffect(() => {
+    const draftCookie = document.cookie
+      .split("; ")
+      .find((c) => c.startsWith("fractpath_draft_token="));
+    if (draftCookie) {
+      const token = decodeURIComponent(draftCookie.split("=")[1]);
+      if (token) {
+        window.location.href = `/resume?token=${encodeURIComponent(token)}`;
+        return;
+      }
+    }
+
     (async () => {
       try {
         const res = await fetch("/api/me", { credentials: "include" });

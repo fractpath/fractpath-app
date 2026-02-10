@@ -1,0 +1,152 @@
+# OPS-INT-001 — Multi-repo orchestration + contract enforcement (Sprint 5)
+
+## Sprint
+Sprint 0 (alignment-only) → governs Sprint 5 execution
+
+## Objective
+Define the authoritative orchestration rules, execution order, and guardrails for Sprint 5 across the following repositories:
+
+- `fractpath-calculator-widget`
+- `fractpath-marketing`
+- `fractpath-app`
+
+This ticket prevents cross-repo drift, silent contract mutation, and agent overreach by locking **who does what, when, and under which constraints**.
+
+## Scope
+This is a **meta-level orchestration ticket**.
+It does not introduce features or code.
+It governs **how Sprint 5 agents are allowed to operate**.
+
+## Repos in Scope
+
+### 1) fractpath-calculator-widget (Canonical Compute Layer)
+Owns:
+- All calculator math and persona logic
+- DraftSnapshot production
+- ShareSummary production
+- Widget UI surface (mode-aware)
+- Public interface defined by locked contract
+
+Does NOT own:
+- Email capture
+- API calls
+- Routing
+- Persistence
+- Deal creation
+
+Canonical tickets:
+- WGT-INT-001 — Lock widget public interface
+- WGT-031 — Widget gating semantics
+- WGT-030 — Widget UI surface + mode behavior
+- WGT-020 — Share semantics
+- WGT-040 — Draft snapshot schema + stability guarantees
+- WGT-050 — Contract versioning + deprecation policy
+
+### 2) fractpath-marketing (Host / Pre-auth)
+Owns:
+- Widget embedding via tight package import
+- Persona framing and marketing copy around widget
+- Email capture gating
+- Lead creation
+- Marketing share email delivery
+- Redirect to app resume flow
+
+Does NOT own:
+- Calculator math
+- DraftSnapshot schema
+- Draft-token minting
+- Deal creation
+- Authenticated access
+
+Canonical tickets:
+- MKT-004 — Calculator UI + gating (blur → save & continue)
+- MKT-006 — Lead + share API routes
+- MKT-INT-001 — Tight widget embed via locked interface
+
+### 3) fractpath-app (Authoritative System of Record)
+Owns:
+- Draft-token minting and redemption
+- Authentication and authorization
+- Deal creation and persistence
+- Resume flows from marketing
+- Permissioned sharing of real deals
+
+Does NOT own:
+- Calculator math
+- Marketing lead capture UX
+- Marketing email composition
+
+Canonical tickets:
+- APP-INT-001 — Resume draft token into authenticated deal
+- Core auth, deal, and permission subsystems
+
+## Sprint 5 Execution Order (Mandatory)
+
+Agents must execute **strictly in the following order**:
+
+1. **Widget agents**
+   - Implement behavior strictly per WGT tickets
+   - Must not reference marketing or app internals
+   - Output must conform to locked public interface
+
+2. **Marketing agents**
+   - Embed widget as a package
+   - Wire callbacks to marketing APIs
+   - Must not reimplement calculator logic
+   - Must treat widget outputs as canonical
+
+3. **App agents**
+   - Implement draft-token minting and redemption
+   - Resume DraftSnapshot into authenticated deal context
+   - Enforce permissions and access control
+
+### Hard Stop Rule
+If a dependency repo is incomplete, inconsistent with contract, or failing tests:
+- **Downstream agents must not run**
+- The sprint halts until the dependency is corrected
+
+## Contract Enforcement Rules
+
+- `docs/architecture/integration-contract.md` is canonical.
+- Widget public interface is locked via WGT-INT-001.
+- Any breaking change requires:
+  - explicit version bump
+  - coordinated update across repos
+  - update governed by WGT-050
+  - acknowledgement in OPS coordination
+
+## Hard Prohibitions (No Silent Mutation)
+Agents must NOT:
+- Add, remove, or infer fields in DraftSnapshot or ShareSummary
+- Change widget outputs without a contract change
+- Duplicate calculator math outside the widget
+- Create real deals pre-auth
+- Bypass the draft-token lifecycle
+- “Fix” or normalize payloads outside contract rules
+
+## Violation & Rollback Policy
+If an agent violates any prohibition:
+1) All affected changes must be reverted
+2) The contract version remains unchanged
+3) A correction must be made under the existing contract
+4) If correction is impossible, Sprint 5 is paused pending contract review
+
+No partial acceptance is allowed.
+
+## Agent Prompt Requirements (Sprint 5)
+Every Sprint 5 agent prompt must:
+- Explicitly reference **OPS-INT-001**
+- Reference the repo-specific tickets it implements
+- List **what the agent is not allowed to change**
+- Treat this ticket as the final arbiter in conflicts
+
+## Acceptance Criteria
+- Agents run only in the defined order
+- Cross-repo boundaries are respected
+- Draft tokens cleanly bridge marketing → app
+- Widget remains the sole calculator authority
+- No silent contract, schema, or semantic mutation occurs
+
+## Notes
+This ticket is the **governor** of Sprint 5.
+If there is ambiguity between tickets, **this ticket wins**.
