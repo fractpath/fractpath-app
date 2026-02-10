@@ -33,7 +33,8 @@ export default async function ShareLandingPage({
     );
   }
 
-  const supabase = await createSupabasePageClient();
+  const { supabase } = await createSupabasePageClient();
+
   const { data } = await supabase.auth.getUser();
   const user = data?.user ?? null;
 
