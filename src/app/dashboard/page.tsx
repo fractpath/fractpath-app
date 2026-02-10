@@ -42,7 +42,7 @@ const NEXT_STEPS: Record<Persona, string[]> = {
 };
 
 export default async function DashboardPage() {
-  const draftToken = cookies().get("fractpath_draft_token")?.value;
+  const draftToken = (await cookies()).get("fractpath_draft_token")?.value;
   if (draftToken) {
     redirect(`/resume?token=${encodeURIComponent(draftToken)}`);
   }
