@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import crypto from "crypto";
 
@@ -11,24 +11,25 @@ function base64Url(bytes: Buffer) {
 }
 
 function getShareBaseUrl() {
-  // Expected env:
   // SHARE_CONTINUE_URL=https://app.fractpath.com/share
   return process.env.SHARE_CONTINUE_URL ?? "https://app.fractpath.com/share";
 }
 
 export async function POST(
-  request: Request,
-  context: { params: { dealId: string } }
+  request: NextRequest,
+  context: { params: Promise<{ dealId: string }> }
 ) {
+  const { dealId } = await context.params;
+
   const supabase = await createClient();
 
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-
-  const dealId = context.params.dealId;
 
   let body: any;
   try {
@@ -55,7 +56,7 @@ export async function POST(
   }
 
   if (grant.data?.role !== "OWNER") {
-    return NextResponse.json( { error: "Forbidden (OWNER only)" }, { status: 403 });
+    return NextResponse.json({ error: "Forbidden (OWNER only)" }, { status: 403 });
   }
 
   const token = base64Url(crypto.randomBytes(32));
@@ -68,9 +69,10 @@ export async function POST(
   });
 
   if (insert.error) {
-    return NextResponse.json( { error: insert.error.message }, { status: 400 });
+    return NextResponse.json({ error: insert.error.message }, { status: 400 });
   }
 
+  // Send email via existing /api/share (non-fatal if it fails)
   try {
     await fetch(new URL("/api/share", request.url), {
       method: "POST",
@@ -81,5 +83,5 @@ export async function POST(
     // ignore
   }
 
-  return NextResponse.json( { ok: true, shareUrl });
+  return NextResponse.json({ ok: true, shareUrl });
 }
