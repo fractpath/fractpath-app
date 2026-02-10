@@ -82,6 +82,13 @@ Create a calculator snapshot model/table (or equivalent storage) with:
 - Version = max(version for deal_id) + 1
 - Snapshot #1 is always created from DraftSnapshot on resume (APP-INT-001)
 
+### “Current snapshot” rule (pick one; enforce consistently)
+- The deal detail view must render the **current snapshot** by reading:
+  - `deals.current_snapshot_id` (recommended), OR
+  - the latest snapshot by version (if no pointer is stored)
+
+Agents must not implement both approaches simultaneously.
+
 ---
 
 ## B) Snapshot Creation Flows (Authoritative)
@@ -102,10 +109,11 @@ Create a calculator snapshot model/table (or equivalent storage) with:
   - opens input modal
   - edits inputs/assumptions
   - clicks **Apply**
-- Widget computes new result
+- Widget computes new result (client preview)
 - App persists:
   - new snapshot
   - version = prior + 1
+- Server must validate payload against widget schemas (inputs + results).
 - Source = `app_apply`
 
 ### 3) Admin Override (Manual, Rare)
@@ -120,17 +128,17 @@ Create a calculator snapshot model/table (or equivalent storage) with:
 
 ## C) Ownership, Visibility, and Permissions
 - Snapshots belong to a **deal**, not directly to a user
-- Visibility:
-  - Deal owner: read all snapshots
-  - Viewers: read-only access
-  - Admins: read + create admin_override snapshots
-- No snapshot deletion
-- No snapshot editing
+
+### RLS / Access Rules (explicit)
+- Deal owner: read all snapshots; create new snapshots (Apply)
+- Viewers: read-only access to snapshots
+- Admins: read all; create admin_override snapshots
+
+No deletion. No edits.
 
 ---
 
 ## D) Dashboard Updates (User-Facing)
-
 Update `/dashboard` to show **Deals**, not free-floating scenarios.
 
 For each deal:
@@ -144,14 +152,13 @@ For each deal:
 
 Clicking a deal opens:
 - `/deal/[dealId]`
-- renders latest snapshot by default
+- renders current snapshot by default
 
 ---
 
 ## E) Deal Detail View — Snapshot Renderer
-
 The deal detail page must:
-- Render the **latest calculator snapshot** by default
+- Render the **current calculator snapshot** by default
 - Allow switching to older versions (read-only)
 - Show snapshot metadata:
   - version
@@ -216,6 +223,7 @@ No mutation of history.
 - New versions are created instead of edits
 - Resume flow creates snapshot #1
 - In-app Apply creates snapshot N+1
+- Server validates snapshots against widget schemas
 - Users can:
   - view latest snapshot
   - view prior snapshots
