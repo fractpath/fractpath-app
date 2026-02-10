@@ -1,277 +1,237 @@
-TICKET APP-011 — Dashboard analytics + value tracking (equity over time)
-Ticket ID
+# APP-011 — Dashboard analytics + value tracking (snapshot-driven, read-only)
 
-APP-011
+## Sprint
+Sprint 0 (alignment-only rewrite) → Sprint 5 (implementation)
 
-Title
+## Objective
+Provide Buyer, Homeowner, Realtor, and FractPath Admin with **clear, confidence-building analytics**
+that explain *what’s happened so far* and *what different exits would look like today*—without
+introducing new math or editable assumptions.
 
-Dashboard analytics: equity growth, value tracking, and lifecycle insights (read-only)
+The dashboard must answer:
+- how equity has accumulated over time
+- how today’s estimated value compares to accepted terms
+- what Early / Standard / Late exit would look like **as of today**
+- how platform fees and commissions accrue (read-only)
 
-Objective
+This view reinforces long-term value and reduces “what happens next?” anxiety.
 
-Provide Buyer, Homeowner, Realtor, and FractPath Admin with clear, confidence-building analytics that show:
+---
 
-how equity has accumulated over time
+## Non-Goals
+- No real-time market feeds (AVM/Zillow later)
+- No new forecasting logic beyond existing calculator + terms logic
+- No editable assumptions (read-only for MVP)
+- No benchmarking vs other assets
+- No investor marketplace analytics
 
-how current value compares to original terms
+---
 
-what early / standard / late exit would look like today
+## Preconditions
+- APP-002 — Calculator snapshot persistence + versioning
+- APP-008 — Accepted terms exist for some deals
+- APP-005 — Ledger exists (fees, servicing, commissions)
+- Deal status is at least `PRE_CONTRACT` or `ACTIVE`
+  - earlier statuses may show a limited analytics view
 
-how fees and commissions accrue over time (read-only)
+---
 
-This dashboard reinforces the long-term value proposition and reduces “what happens next?” anxiety.
+## Core Design Principles (Locked)
+1) **Read-only, snapshot-driven**
+   - analytics render from accepted terms + stored snapshots
+2) **No surprise math**
+   - show assumptions alongside outputs
+3) **Explain variance**
+   - time, payments, appreciation, fees
+4) **Persona-aware framing**
+   - same numbers, different emphasis
 
-Non-goals
+---
 
-No real-time market feeds (Zillow/AVM later)
+## A) Analytics Data Inputs (Single Source of Truth)
 
-No forecasting beyond existing calculator logic
-
-No editable assumptions (read-only for MVP)
-
-No performance benchmarking vs other assets
-
-No investor marketplace analytics
-
-Preconditions
-
-APP-002 scenario persistence exists
-
-APP-005 ledger exists
-
-APP-008 accepted terms exist for some deals
-
-Deal status is at least ACTIVE or PRE_CONTRACT (dashboard still visible earlier, but limited)
-
-Core Design Principles
-
-Read-only, confidence-first analytics
-
-Grounded in accepted terms + recorded payments
-
-Explain variance clearly (time, value, fees)
-
-No “surprise math” — show inputs alongside outputs
-
-Implementation Requirements
-A) Analytics data inputs (single source of truth)
-
-Analytics must derive only from:
-
-Accepted deal_term_versions
-
-ledger_entries (paid + planned)
-
-Scenario computation logic (already implemented)
-
-Time elapsed since deal start
-
-No new calculation logic should be introduced here—reuse existing formulas.
-
-B) Dashboard sections (Deal Workspace → Analytics tab)
-
-Add a new tab to /deals/[id]:
-
-Analytics
-
-1) Equity Over Time (primary visual)
-
-Chart:
-
-X-axis: time (months or years since start)
-
-Y-axis: equity % owned by Buyer vs Homeowner
-
-Data:
-
-upfront equity
-
-installment-accrued equity
-
-current vested equity
-
-remaining homeowner equity
-
-Annotations:
-
-“You are here” (current date)
-
-CPW start / CPW end markers
-
-2) Value snapshot (today)
-
-Cards showing:
-
-Current estimated FMV
-
-(derived from starting value + appreciation assumption)
-
-Buyer vested equity %
-
-Buyer implied equity value
-
-Homeowner remaining equity value
-
-Microcopy:
-
-“Values shown are estimates based on agreed assumptions. Final value determined at settlement.”
-
-3) Exit scenario comparison (today)
-
-Table with three columns:
-
-Scenario	Buyer Payout	Homeowner Net	Notes
-Early Exit	$	$	Discount applied
-Standard Exit	$	$	Base terms
-Late Exit	$	$	Premium applied
+Analytics must derive **only** from:
+- accepted `deal_term_versions` (APP-008)
+- calculator snapshot data (APP-002)
+- `ledger_entries` (paid + scheduled)
+- elapsed time since deal start
 
 Rules:
+- No new formulas introduced here
+- Reuse existing calculator / terms computation logic
+- Never recompute historical snapshots
 
-FMV is the same across scenarios (same “today” value)
+---
 
-TF only affects payout, not property value
+## B) Dashboard Location
 
-Floors / ceilings visibly applied with badges
+Add an **Analytics** tab to:
+`/deals/[id]`
 
-4) Fees & commissions (read-only)
+This tab is read-only for all roles.
+
+---
+
+## C) Analytics Sections (Required)
+
+### 1) Equity Over Time (Primary Visual)
+**Purpose:** show ownership evolution clearly.
+
+Chart:
+- X-axis: time (months or years since start)
+- Y-axis: equity %
+- Series:
+  - Buyer equity
+  - Homeowner remaining equity
+
+Data sources:
+- upfront equity (if any)
+- installment-accrued equity
+- current vested equity
+
+Annotations:
+- “You are here” (today)
+- CPW start / CPW end markers
+
+Hard rules:
+- Buyer + Homeowner equity must always sum to 100%
+- No equity may exceed 100%
+
+---
+
+### 2) Value Snapshot — *Today*
+**Purpose:** orient the user to “where things stand right now.”
+
+Cards:
+- Current estimated FMV
+  - derived from starting value + agreed appreciation assumption
+- Buyer vested equity %
+- Buyer implied equity value
+- Homeowner remaining equity value
+
+Microcopy:
+> “Values shown are estimates based on agreed assumptions.  
+> Final value is determined at settlement.”
+
+---
+
+### 3) Exit Scenario Comparison — *As of Today*
+**Purpose:** clarify optionality without changing FMV.
+
+Table:
+
+| Scenario | Buyer Payout | Homeowner Net | Notes |
+|--------|--------------|---------------|------|
+| Early  | $            | $             | Discount applied |
+| Standard | $          | $             | Base terms |
+| Late   | $            | $             | Premium applied |
+
+Rules:
+- FMV is identical across scenarios (same “today” value)
+- Timing Factor (TF) affects payout, **not property value**
+- Floors / ceilings must be visibly applied (badges + microcopy)
+
+---
+
+### 4) Fees & Commissions (Read-Only)
+**Purpose:** transparency without friction.
 
 Show:
+- Platform fees paid to date
+- Servicing fees accrued
+- Exit fees (planned)
+- Realtor commissions:
+  - earned to date
+  - projected at exit
 
-Platform fees paid to date
+Realtor emphasis:
+- “Your projected total commission”
 
-Servicing fees accrued
+---
 
-Exit fee (planned)
+### 5) Lifecycle Indicators
+Small, confidence-building indicators:
+- Deal age
+- Time until CPW start / end
+- Last activity timestamp
+- Next expected milestone
 
-Realtor commissions:
+---
 
-earned
+## D) Persona-Specific Emphasis (Same Numbers, Different Framing)
 
-projected at exit
-
-For Realtors:
-
-Highlight “Your projected total commission”
-
-5) Activity + lifecycle indicators
-
-Small indicators:
-
-Deal age
-
-Time until CPW start/end
-
-Last activity
-
-Next expected milestone
-
-C) Persona-specific views
-
-Buyer
-
+### Buyer
 Emphasize:
-
-equity gained
-
-implied purchase price vs FMV
-
-long-term upside
+- equity gained over time
+- implied purchase price vs FMV
+- long-term ownership path
 
 De-emphasize:
+- operational fees not paid by buyer
 
-operational fees not paid by buyer
-
-Homeowner
-
+### Homeowner
 Emphasize:
-
-cash received to date
-
-remaining equity
-
-net proceeds at exit
+- cash received to date
+- remaining equity
+- net proceeds at exit
 
 De-emphasize:
+- buyer upside framing
 
-buyer ROI framing
-
-Realtor
-
+### Realtor
 Emphasize:
+- commission timeline
+- deals in progress
+- total projected earnings
 
-commission timeline
+### Admin
+- full visibility (no suppression)
 
-deals in progress
+---
 
-total projected earnings
+## E) “What Changed?” Explanations
+When values differ from last view:
+- show subtle, inline explanations:
+  - “Equity increased due to monthly contribution.”
+  - “Estimated value increased due to time-based appreciation.”
 
-Admin
+No notifications required yet—clarity only.
 
-Full visibility
+---
 
-D) “What changed?” explanations
-
-When numbers change (e.g., month rollover):
-
-Show a subtle explanation:
-
-“Equity increased due to monthly contribution.”
-“Estimated value increased due to time-based appreciation.”
-
-No notifications required yet—just clarity.
-
-E) Export / sharing (optional MVP-lite)
-
-Optional button:
-
-“Download snapshot (PDF)” → not implemented
+## F) Export / Sharing (MVP-Lite)
+Do **not** implement export yet.
 
 Instead show:
+> “Exporting and reports will be available in a future update.”
 
-“Exporting available in a future update.”
+---
 
-(Do not overbuild.)
+## Acceptance Criteria (Definition of Done)
+- Analytics tab renders in Deal Workspace
+- Equity-over-time chart renders correctly
+- Value snapshot reflects accepted terms + elapsed time
+- Exit scenario table applies TF without changing FMV
+- Fees and commissions aggregate correctly from ledger
+- Persona-specific emphasis is clear
+- No editable fields exposed
+- Mobile view remains readable
 
-Acceptance Criteria (Definition of Done)
+---
 
-Analytics tab exists in Deal Workspace
+## QA Checklist
+- Equity % never exceeds 100%
+- Buyer + Homeowner equity always sum to 100%
+- FMV consistent across exit scenarios
+- Floors / caps visibly applied when binding
+- No NaN / undefined values when deal is early-stage
+- Charts update correctly as time advances
 
-Equity-over-time chart renders correctly
+---
 
-Value snapshot reflects accepted terms + time elapsed
-
-Exit scenario table applies TF without changing FMV
-
-Fees and commissions are correctly aggregated from ledger
-
-Views adapt by persona (copy + emphasis)
-
-No editable fields exposed
-
-Mobile view remains readable
-
-QA Checklist
-
- Equity % never exceeds 100%
-
- Buyer + Homeowner equity always sum to 100%
-
- FMV consistent across exit scenarios
-
- Floor / cap visibly applied when binding
-
- No NaN / undefined values when deal is early-stage
-
- Charts update when time advances
-
-Deliverables
-
-Analytics tab UI
-
-Equity-over-time chart component
-
-Exit scenario comparison table
-
-Fee & commission summary components
-
-Persona-aware copy variants
+## Deliverables
+- Analytics tab UI
+- Equity-over-time chart component
+- Exit scenario comparison table
+- Fees & commission summary components
+- Persona-aware copy variants
