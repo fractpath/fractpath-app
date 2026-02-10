@@ -1,16 +1,14 @@
-"use client";
-
-import { useEffect, useState } from "react";
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
+import { createClient } from "@/lib/supabase/server";
 
 type Persona = "homeowner" | "buyer" | "realtor";
 
-interface UserData {
-  email: string;
-  role: Persona | null;
-  created_at: string | null;
-}
-
-const PERSONA_WELCOME: Record<Persona, { tagline: string; description: string }> = {
+const PERSONA_WELCOME: Record<
+  Persona,
+  { tagline: string; description: string }
+> = {
   homeowner: {
     tagline: "Welcome, Homeowner",
     description: "You're exploring a new way to unlock equity without a loan.",
@@ -43,176 +41,210 @@ const NEXT_STEPS: Record<Persona, string[]> = {
   ],
 };
 
-export default function DashboardPage() {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [user, setUser] = useState<UserData | null>(null);
-
-  useEffect(() => {
-    const draftCookie = document.cookie
-      .split("; ")
-      .find((c) => c.startsWith("fractpath_draft_token="));
-    if (draftCookie) {
-      const token = decodeURIComponent(draftCookie.split("=")[1]);
-      if (token) {
-        window.location.href = `/resume?token=${encodeURIComponent(token)}`;
-        return;
-      }
-    }
-
-    (async () => {
-      try {
-        const res = await fetch("/api/me", { credentials: "include" });
-        if (res.status === 401) {
-          window.location.href = "/login";
-          return;
-        }
-        if (!res.ok) {
-          setError("Failed to load user data");
-          setLoading(false);
-          return;
-        }
-        const data = await res.json();
-        setUser({
-          email: data.email || "",
-          role: data.role || data.user_metadata?.role || null,
-          created_at: data.created_at || null,
-        });
-      } catch (e) {
-        setError("Failed to connect");
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
-  if (loading) {
-    return (
-      <main style={{ maxWidth: 720, margin: "48px auto", padding: "0 16px" }}>
-        <p>Loading...</p>
-      </main>
-    );
+export default async function DashboardPage() {
+  const draftToken = cookies().get("fractpath_draft_token")?.value;
+  if (draftToken) {
+    redirect(`/resume?token=${encodeURIComponent(draftToken)}`);
   }
 
-  if (error || !user) {
-    return (
-      <main style={{ maxWidth: 720, margin: "48px auto", padding: "0 16px" }}>
-        <p style={{ color: "#c00" }}>{error || "Unable to load dashboard"}</p>
-        <a href="/login">Return to login</a>
-      </main>
-    );
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect(`/login?returnTo=${encodeURIComponent("/dashboard")}`);
   }
 
-  const role: Persona = user.role || "homeowner";
+  const role: Persona =
+    (user.user_metadata?.role as Persona | undefined) || "homeowner";
   const welcome = PERSONA_WELCOME[role];
   const steps = NEXT_STEPS[role];
 
-  return (
-    <main style={{ maxWidth: 720, margin: "48px auto", padding: "0 16px", fontFamily: "system-ui, sans-serif" }}>
-      <header style={{ marginBottom: 32, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div>
-          <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0 }}>{welcome.tagline}</h1>
-          <p style={{ margin: "8px 0 0", opacity: 0.7 }}>{welcome.description}</p>
+  const grantsRes = await supabase
+    .from("deal_access_grants")
+    .select("deal_id, role, created_at")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false });
+
+  if (grantsRes.error) {
+    return (
+      <main className="mx-auto max-w-3xl p-6">
+        <div className="flex items-baseline justify-between gap-4">
+          <h1 className="text-xl font-semibold">Dashboard</h1>
+          <div className="text-sm text-muted-foreground">{user.email}</div>
         </div>
-        <form method="post" action="/auth/logout" style={{ margin: 0 }}>
+
+        <div className="mt-6 rounded-md border p-4">
+          <div className="text-sm font-medium">Couldn’t load your deals</div>
+          <div className="mt-2 text-sm text-muted-foreground break-words">
+            {grantsRes.error.message}
+          </div>
+          <div className="mt-4">
+            <Link className="text-sm underline" href="/me">
+              Go to my account
+            </Link>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  const grants = grantsRes.data ?? [];
+  const ownerDealIds = grants
+    .filter((g) => g.role === "OWNER")
+    .map((g) => g.deal_id);
+  const viewerDealIds = grants
+    .filter((g) => g.role === "VIEWER")
+    .map((g) => g.deal_id);
+
+  const dealsRes =
+    grants.length > 0
+      ? await supabase
+          .from("deals")
+          .select("*")
+          .in(
+            "id",
+            grants.map((g) => g.deal_id),
+          )
+      : { data: [], error: null as any };
+
+  const deals = (dealsRes.data ?? []) as Record<string, any>[];
+  const byId = new Map<string, Record<string, any>>();
+  for (const d of deals) byId.set(d.id, d);
+
+  function labelForDeal(dealId: string) {
+    const d = byId.get(dealId);
+    return (
+      d?.title ||
+      d?.name ||
+      d?.address ||
+      d?.property_address ||
+      d?.home_address ||
+      dealId
+    );
+  }
+
+  return (
+    <main className="mx-auto max-w-3xl p-6">
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold">{welcome.tagline}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {welcome.description}
+          </p>
+        </div>
+        <form method="post" action="/auth/logout" className="m-0">
           <button
             type="submit"
-            style={{
-              padding: "8px 16px",
-              borderRadius: 8,
-              border: "1px solid rgba(0,0,0,0.2)",
-              background: "transparent",
-              cursor: "pointer",
-              fontSize: 14,
-            }}
+            className="rounded-md border px-3 py-2 text-sm"
           >
             Sign out
           </button>
         </form>
       </header>
 
-      <div style={{ display: "grid", gap: 24 }}>
-        <section style={{
-          border: "1px solid rgba(0,0,0,0.1)",
-          borderRadius: 12,
-          padding: 20,
-          background: "rgba(0,0,0,0.02)",
-        }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>Your Scenario</h2>
-            <span style={{
-              background: "#e8f5e9",
-              color: "#2e7d32",
-              padding: "4px 10px",
-              borderRadius: 20,
-              fontSize: 12,
-              fontWeight: 600,
-            }}>
-              Scenario saved
+      <div className="mt-6 grid gap-6">
+        <section className="rounded-md border p-4">
+          <div className="flex items-baseline justify-between gap-4">
+            <h2 className="text-sm font-medium">My deals</h2>
+            <span className="text-xs text-muted-foreground">
+              {ownerDealIds.length}
             </span>
           </div>
-          <p style={{ margin: 0, opacity: 0.8, lineHeight: 1.6 }}>
-            We've saved your scenario. A FractPath team member will help refine it with you.
-          </p>
-          <p style={{ margin: "12px 0 0", fontSize: 13, opacity: 0.6 }}>
-            Your scenario details are securely stored and ready for review.
-          </p>
+
+          {ownerDealIds.length === 0 ? (
+            <p className="mt-2 text-sm text-muted-foreground">
+              You don’t have any deals yet.
+            </p>
+          ) : (
+            <ul className="mt-3 space-y-2">
+              {ownerDealIds.map((id) => (
+                <li
+                  key={id}
+                  className="flex items-center justify-between gap-3"
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium truncate">
+                      {labelForDeal(id)}
+                    </div>
+                    <div className="text-xs text-muted-foreground truncate">
+                      {id}
+                    </div>
+                  </div>
+                  <Link className="text-sm underline" href={`/deal/${id}`}>
+                    Open
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
-        <section style={{
-          border: "1px solid rgba(0,0,0,0.1)",
-          borderRadius: 12,
-          padding: 20,
-        }}>
-          <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 16px" }}>What happens next</h2>
-          <ol style={{ margin: 0, paddingLeft: 20, lineHeight: 2 }}>
+        <section className="rounded-md border p-4">
+          <div className="flex items-baseline justify-between gap-4">
+            <h2 className="text-sm font-medium">Shared with me</h2>
+            <span className="text-xs text-muted-foreground">
+              {viewerDealIds.length}
+            </span>
+          </div>
+
+          {viewerDealIds.length === 0 ? (
+            <p className="mt-2 text-sm text-muted-foreground">
+              Nothing has been shared with you yet.
+            </p>
+          ) : (
+            <ul className="mt-3 space-y-2">
+              {viewerDealIds.map((id) => (
+                <li
+                  key={id}
+                  className="flex items-center justify-between gap-3"
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium truncate">
+                      {labelForDeal(id)}
+                    </div>
+                    <div className="text-xs text-muted-foreground truncate">
+                      {id}
+                    </div>
+                  </div>
+                  <Link
+                    className="text-sm underline"
+                    href={`/deal/${id}?mode=shared`}
+                  >
+                    View
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="rounded-md border p-4">
+          <h2 className="text-sm font-medium">What happens next</h2>
+          <ol className="mt-3 list-decimal pl-5 text-sm text-muted-foreground space-y-1">
             {steps.map((step, i) => (
-              <li key={i} style={{ opacity: 0.85 }}>{step}</li>
+              <li key={i}>{step}</li>
             ))}
           </ol>
         </section>
 
-        <section style={{
-          border: "1px solid rgba(0,0,0,0.1)",
-          borderRadius: 12,
-          padding: 20,
-        }}>
-          <h2 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 12px" }}>Need help?</h2>
-          <p style={{ margin: 0, opacity: 0.8 }}>
+        <section className="rounded-md border p-4">
+          <h2 className="text-sm font-medium">Need help?</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
             Our team is here to guide you through every step.
           </p>
           <a
             href="mailto:support@fractpath.com"
-            style={{
-              display: "inline-block",
-              marginTop: 12,
-              padding: "10px 20px",
-              background: "#111",
-              color: "#fff",
-              borderRadius: 8,
-              textDecoration: "none",
-              fontWeight: 600,
-              fontSize: 14,
-            }}
+            className="mt-3 inline-block rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background"
           >
             Contact FractPath
           </a>
         </section>
 
-        <footer style={{
-          marginTop: 16,
-          padding: "16px 0",
-          borderTop: "1px solid rgba(0,0,0,0.08)",
-          fontSize: 12,
-          opacity: 0.5,
-          textAlign: "center",
-        }}>
-          <p style={{ margin: 0 }}>
-            Signed in as {user.email}
-          </p>
-          <p style={{ margin: "8px 0 0" }}>
-            Your data is protected with industry-standard encryption.
-          </p>
+        <footer className="pt-4 border-t text-xs text-muted-foreground text-center">
+          Signed in as {user.email}
         </footer>
       </div>
     </main>
