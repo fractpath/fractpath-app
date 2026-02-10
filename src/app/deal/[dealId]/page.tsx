@@ -4,13 +4,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-import { redirect } from "next/navigation";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ShareDealCard } from "@/components/ShareDealCard";
 
 type PageProps = {
-  params: { dealId?: string };
+  // keep it permissive; we'll normalize at runtime
+  params: { dealId?: string } | Promise<{ dealId?: string }>;
   searchParams?: Record<string, string | string[] | undefined>;
 };
 
@@ -46,7 +47,6 @@ async function loadDealByIdOrDealId(
     errors: [] as Array<{ key: string; message: string }>,
   };
 
-  // Try deals.id first
   debug.tried.push("deals.id");
   const byId = await supabase
     .from("deals")
@@ -55,9 +55,9 @@ async function loadDealByIdOrDealId(
     .maybeSingle();
 
   if (byId.data) return { deal: byId.data as DealRow, debug };
-  if (byId.error) debug.errors.push({ key: "deals.id", message: byId.error.message });
+  if (byId.error)
+    debug.errors.push({ key: "deals.id", message: byId.error.message });
 
-  // Fall back to deals.deal_id (common schema pattern)
   debug.tried.push("deals.deal_id");
   const byDealId = await supabase
     .from("deals")
@@ -66,17 +66,56 @@ async function loadDealByIdOrDealId(
     .maybeSingle();
 
   if (byDealId.data) return { deal: byDealId.data as DealRow, debug };
-  if (byDealId.error) debug.errors.push({ key: "deals.deal_id", message: byDealId.error.message });
+  if (byDealId.error)
+    debug.errors.push({
+      key: "deals.deal_id",
+      message: byDealId.error.message,
+    });
 
   return { deal: null, debug };
 }
 
 export default async function DealPage({ params, searchParams }: PageProps) {
-  // HARD FAIL FAST: never let Supabase see "undefined" for a UUID
-  if (!isUuid(params.dealId)) {
-    redirect("/me");
+  // Normalize params to handle both plain object and Promise-like params
+  const resolvedParams = await Promise.resolve(params as any);
+  const dealIdRaw = resolvedParams?.dealId as unknown;
+
+  // If dealId is missing/invalid, DO NOT redirect (it hides the problem).
+  // Render a debug screen so we can see what's actually coming through in production.
+  if (typeof dealIdRaw !== "string" || !isUuid(dealIdRaw)) {
+    return (
+      <main className="mx-auto max-w-3xl p-6">
+        <h1 className="text-xl font-semibold">Invalid deal route param</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          The server did not receive a valid UUID for <code>dealId</code>.
+        </p>
+
+        <div className="mt-4 rounded-md border p-3 text-sm">
+          <div className="font-medium">Param debug</div>
+          <pre className="mt-2 text-xs overflow-auto">
+            {JSON.stringify(
+              {
+                resolvedParams,
+                dealIdRaw,
+                typeOfDealIdRaw: typeof dealIdRaw,
+                searchParams,
+              },
+              null,
+              2,
+            )}
+          </pre>
+        </div>
+
+        <div className="mt-4 flex gap-4">
+          <Link className="text-sm underline" href="/me">
+            Back to my account
+          </Link>
+        </div>
+      </main>
+    );
   }
-  const dealId = params.dealId;
+
+  const dealId = dealIdRaw;
 
   const supabase = await createClient();
 
@@ -91,9 +130,6 @@ export default async function DealPage({ params, searchParams }: PageProps) {
   const mode = getParam(searchParams, "mode");
   const isSharedMode = mode === "shared";
 
-  /**
-   * 1) Load deal (tolerant key lookup)
-   */
   const { deal, debug } = await loadDealByIdOrDealId(supabase, dealId);
 
   if (!deal) {
@@ -104,7 +140,6 @@ export default async function DealPage({ params, searchParams }: PageProps) {
           You don’t have access to this deal (or it may no longer exist).
         </p>
 
-        {/* Always show lightweight debug here until this is fixed */}
         <div className="mt-4 rounded-md border p-3 text-sm">
           <div className="font-medium">Debug</div>
           <div className="mt-1 text-muted-foreground break-words">
@@ -132,7 +167,9 @@ export default async function DealPage({ params, searchParams }: PageProps) {
                 </ul>
               </div>
             ) : (
-              <div className="mt-2">No errors returned; query returned no rows.</div>
+              <div className="mt-2">
+                No errors returned; query returned no rows.
+              </div>
             )}
           </div>
         </div>
@@ -146,11 +183,6 @@ export default async function DealPage({ params, searchParams }: PageProps) {
     );
   }
 
-  /**
-   * 2) Determine role
-   * - OWNER if creator
-   * - Otherwise check grants
-   */
   let role: "OWNER" | "VIEWER" =
     deal.created_by === user.id ? "OWNER" : "VIEWER";
 
