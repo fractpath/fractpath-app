@@ -6,7 +6,7 @@ export const revalidate = 0;
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createServiceClient } from "@/lib/supabase/service";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -19,17 +19,34 @@ function firstParam(v: string | string[] | undefined): string | null {
   return Array.isArray(v) ? (v[0] ?? null) : v;
 }
 
-function isLikelyExpired(row: Record<string, any>): boolean {
+function isExpired(row: Record<string, any>): boolean {
   const now = Date.now();
   const expiresAt = row.expires_at ? Date.parse(row.expires_at) : NaN;
   if (!Number.isNaN(expiresAt) && now > expiresAt) return true;
-  if (row.revoked_at) return true;
   return false;
+}
+
+function safeErr(e: any) {
+  if (!e) return null;
+  return {
+    message: typeof e.message === "string" ? e.message : undefined,
+    details: typeof e.details === "string" ? e.details : undefined,
+    hint: typeof e.hint === "string" ? e.hint : undefined,
+    code: typeof e.code === "string" ? e.code : undefined,
+    raw: (() => {
+      try {
+        return JSON.parse(JSON.stringify(e));
+      } catch {
+        return String(e);
+      }
+    })(),
+  };
 }
 
 export default async function SharePage({ searchParams }: PageProps) {
   const sp = await Promise.resolve(searchParams as any);
   const t = firstParam(sp?.t);
+  const mode = firstParam(sp?.mode);
 
   if (!t) {
     return (
@@ -42,24 +59,49 @@ export default async function SharePage({ searchParams }: PageProps) {
     );
   }
 
-  const admin = createAdminClient();
+  const service = createServiceClient();
 
-  const tokenRes = await admin
-    .from("deal_share_tokens")
-    .select("*")
+  // Service-role sanity check: draft_tokens is RLS deny-all for client roles.
+  const sanity = await (service.from("draft_tokens") as any)
+    .select("id")
+    .limit(1);
+
+  if (sanity.error) {
+    const se = safeErr(sanity.error);
+    console.error("SERVICE_SANITY_CHECK_FAILED draft_tokens select:", se);
+    return (
+      <main className="mx-auto max-w-xl p-6">
+        <h1 className="text-lg font-semibold">Unable to open shared deal</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Server is not authorized to validate share tokens (service role
+          misconfigured).
+        </p>
+        <div className="mt-4 rounded-md border p-3 text-xs">
+          <div className="font-medium">Details</div>
+          <pre className="mt-2 whitespace-pre-wrap break-words">
+            {JSON.stringify(se, null, 2)}
+          </pre>
+        </div>
+      </main>
+    );
+  }
+
+  // 1) Validate share token row
+  const tokenRes = await (service.from("deal_share_tokens") as any)
+    .select(
+      "token, deal_id, created_by, created_at, expires_at, max_redemptions, redemption_count",
+    )
     .eq("token", t)
     .maybeSingle();
 
   if (tokenRes.error || !tokenRes.data) {
+    const te = safeErr(tokenRes.error);
+    if (tokenRes.error) console.error("deal_share_tokens select error:", te);
     return (
       <main className="mx-auto max-w-xl p-6">
         <h1 className="text-lg font-semibold">Unable to open shared deal</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           This share link is invalid or has expired.
-        </p>
-        <p className="mt-4 text-sm">
-          If you believe this is a mistake, ask the deal owner to send a new
-          share link.
         </p>
       </main>
     );
@@ -78,15 +120,32 @@ export default async function SharePage({ searchParams }: PageProps) {
     );
   }
 
-  if (isLikelyExpired(tokenRow)) {
+  if (isExpired(tokenRow)) {
     return (
       <main className="mx-auto max-w-xl p-6">
         <h1 className="text-lg font-semibold">Unable to open shared deal</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           This share link has expired.
         </p>
-        <p className="mt-4 text-sm">
-          Ask the deal owner to send a new share link.
+      </main>
+    );
+  }
+
+  const max =
+    typeof tokenRow.max_redemptions === "number"
+      ? tokenRow.max_redemptions
+      : null;
+  const used =
+    typeof tokenRow.redemption_count === "number"
+      ? tokenRow.redemption_count
+      : 0;
+
+  if (max != null && used >= max) {
+    return (
+      <main className="mx-auto max-w-xl p-6">
+        <h1 className="text-lg font-semibold">Unable to open shared deal</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          This share link has already been used.
         </p>
       </main>
     );
@@ -94,12 +153,16 @@ export default async function SharePage({ searchParams }: PageProps) {
 
   const dealId = String(tokenRow.deal_id);
 
+  // 2) Require auth
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
   if (!user) {
+    const returnTo = `/share?t=${encodeURIComponent(t)}${
+      mode ? `&mode=${encodeURIComponent(mode)}` : ""
+    }`;
     return (
       <main className="mx-auto max-w-xl p-6">
         <div className="mb-4 rounded-md border p-3">
@@ -112,13 +175,13 @@ export default async function SharePage({ searchParams }: PageProps) {
         <div className="mt-6 flex gap-4">
           <Link
             className="rounded-md border px-4 py-2 text-sm"
-            href={`/login?returnTo=${encodeURIComponent(`/share?t=${t}`)}`}
+            href={`/login?returnTo=${encodeURIComponent(returnTo)}`}
           >
             Sign in
           </Link>
           <Link
             className="rounded-md border px-4 py-2 text-sm"
-            href={`/signup?returnTo=${encodeURIComponent(`/share?t=${t}`)}`}
+            href={`/signup?returnTo=${encodeURIComponent(returnTo)}`}
           >
             Create an account
           </Link>
@@ -127,24 +190,68 @@ export default async function SharePage({ searchParams }: PageProps) {
     );
   }
 
-  const { data: existingGrant } = await admin
-    .from("deal_access_grants")
-    .select("id, role")
+  // 3) Ensure deal exists
+  const dealRes = await (service.from("deals") as any)
+    .select("id, owner_user_id")
+    .eq("id", dealId)
+    .maybeSingle();
+
+  if (dealRes.error || !dealRes.data) {
+    const de = safeErr(dealRes.error);
+    if (dealRes.error) console.error("deals select error:", de);
+    return (
+      <main className="mx-auto max-w-xl p-6">
+        <h1 className="text-lg font-semibold">Unable to open shared deal</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          This deal no longer exists.
+        </p>
+      </main>
+    );
+  }
+
+  const deal = dealRes.data as Record<string, any>;
+  const isOwner = deal.owner_user_id === user.id;
+
+  // 4) Fetch existing grant (NO id column in this table)
+  const grantRes = await (service.from("deal_access_grants") as any)
+    .select("role")
     .eq("deal_id", dealId)
     .eq("user_id", user.id)
     .maybeSingle();
 
-  if (!existingGrant) {
-    const { error: grantError } = await admin
-      .from("deal_access_grants")
-      .insert({
-        deal_id: dealId,
-        user_id: user.id,
-        role: "VIEWER",
-        created_by: tokenRow.created_by,
-      });
+  if (grantRes.error) {
+    const ge = safeErr(grantRes.error);
+    console.error("deal_access_grants select error:", ge);
+    return (
+      <main className="mx-auto max-w-xl p-6">
+        <h1 className="text-lg font-semibold">Unable to open shared deal</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          We couldn&apos;t verify your access. Please try again.
+        </p>
+        <div className="mt-4 rounded-md border p-3 text-xs">
+          <div className="font-medium">Details</div>
+          <pre className="mt-2 whitespace-pre-wrap break-words">
+            {JSON.stringify(ge, null, 2)}
+          </pre>
+        </div>
+      </main>
+    );
+  }
 
-    if (grantError) {
+  const existingGrant = (grantRes.data as Record<string, any> | null) ?? null;
+
+  // 5) Insert VIEWER grant if needed
+  if (!isOwner && !existingGrant) {
+    const ins = await (service.from("deal_access_grants") as any).insert({
+      deal_id: dealId,
+      user_id: user.id,
+      role: "VIEWER",
+      created_by: tokenRow.created_by ?? null,
+    });
+
+    if (ins.error) {
+      const ie = safeErr(ins.error);
+      console.error("deal_access_grants insert error:", ie);
       return (
         <main className="mx-auto max-w-xl p-6">
           <h1 className="text-lg font-semibold">Unable to open shared deal</h1>
@@ -152,8 +259,20 @@ export default async function SharePage({ searchParams }: PageProps) {
             We couldn&apos;t grant access to this deal. Please try again or ask
             the deal owner to resend the share link.
           </p>
+          <div className="mt-4 rounded-md border p-3 text-xs">
+            <div className="font-medium">Details</div>
+            <pre className="mt-2 whitespace-pre-wrap break-words">
+              {JSON.stringify(ie, null, 2)}
+            </pre>
+          </div>
         </main>
       );
+    }
+
+    if (max != null) {
+      await (service.from("deal_share_tokens") as any)
+        .update({ redemption_count: used + 1 })
+        .eq("token", t);
     }
   }
 

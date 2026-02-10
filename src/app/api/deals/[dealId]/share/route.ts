@@ -16,7 +16,9 @@ function base64Url(bytes: Buffer) {
 }
 
 function isUuid(v: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    v,
+  );
 }
 
 export async function POST(
@@ -45,6 +47,8 @@ export async function POST(
     return jsonError("Invalid JSON body", 400);
   }
 
+  // We validate toEmail as an input requirement for the UI/UX,
+  // but we do NOT store it in deal_share_tokens (table has no to_email column).
   const toEmail = String(body?.toEmail ?? "").trim();
   if (!toEmail || !toEmail.includes("@")) {
     return jsonError("Valid toEmail is required", 400);
@@ -52,6 +56,7 @@ export async function POST(
 
   const service = createServiceClient();
 
+  // Verify deal exists + ownership (OWNER-only)
   const { data: deal, error: dealError } = await (service.from("deals") as any)
     .select("id, owner_user_id")
     .eq("id", dealId)
@@ -63,6 +68,7 @@ export async function POST(
 
   let isOwner = deal.owner_user_id === user.id;
 
+  // Optional: treat explicit OWNER grant as owner as well
   if (!isOwner) {
     const { data: grant } = await (service.from("deal_access_grants") as any)
       .select("role")
@@ -70,9 +76,7 @@ export async function POST(
       .eq("user_id", user.id)
       .maybeSingle();
 
-    if (grant?.role === "OWNER") {
-      isOwner = true;
-    }
+    if (grant?.role === "OWNER") isOwner = true;
   }
 
   if (!isOwner) {
@@ -81,15 +85,24 @@ export async function POST(
 
   const token = base64Url(crypto.randomBytes(32));
 
-  const { error: insertError } = await (service.from("deal_share_tokens") as any).insert({
+  // Share tokens should expire. Keep it simple: 7 days.
+  const expiresAt = new Date(
+    Date.now() + 7 * 24 * 60 * 60 * 1000,
+  ).toISOString();
+
+  const { error: insertError } = await (
+    service.from("deal_share_tokens") as any
+  ).insert({
     token,
     deal_id: dealId,
-    to_email: toEmail,
     created_by: user.id,
+    expires_at: expiresAt,
+    max_redemptions: 1,
+    redemption_count: 0,
   });
 
   if (insertError) {
-    console.error("deal_share_tokens insert error:", insertError.message);
+    console.error("deal_share_tokens insert error:", insertError);
     return jsonError("Failed to create share link", 500);
   }
 
@@ -97,7 +110,9 @@ export async function POST(
     ? `https://${request.headers.get("x-forwarded-host")}`
     : request.headers.get("origin") || new URL(request.url).origin;
 
-  const shareUrl = `${origin}/share?t=${encodeURIComponent(token)}`;
+  // Include mode=shared for read-only rendering on deal page.
+  // NOTE: Token redemption happens on /share, which should validate token + expiry.
+  const shareUrl = `${origin}/share?t=${encodeURIComponent(token)}&mode=shared`;
 
   return NextResponse.json({ ok: true, shareUrl });
 }

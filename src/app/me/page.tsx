@@ -38,27 +38,38 @@ export default async function MePage() {
   }
 
   const grants = grantsRes.data ?? [];
-  const ownerDealIds = grants
-    .filter((g) => g.role === "OWNER")
-    .map((g) => g.deal_id);
-  const viewerDealIds = grants
-    .filter((g) => g.role === "VIEWER")
-    .map((g) => g.deal_id);
+  const grantedDealIds = grants.map((g) => g.deal_id).filter(Boolean);
 
-  // Optional: fetch deal rows to show something nicer than UUIDs.
-  // If your deals table doesn’t have "title" or similar columns, we’ll fall back to IDs.
-  //
-  // RLS should allow SELECT if you have a grant row (Step 5 policies).
+  // Fetch canonical deal rows for granted IDs.
+  // IMPORTANT: some grants may reference legacy deals (not present in public.deals).
   const dealsRes =
-    grants.length > 0
-      ? await supabase
-          .from("deals")
-          .select("*")
-          .in(
-            "id",
-            grants.map((g) => g.deal_id),
-          )
+    grantedDealIds.length > 0
+      ? await supabase.from("deals").select("*").in("id", grantedDealIds)
       : { data: [], error: null as any };
+
+  if (dealsRes.error) {
+    return (
+      <main className="mx-auto max-w-3xl p-6">
+        <div className="flex items-baseline justify-between gap-4">
+          <h1 className="text-xl font-semibold">My account</h1>
+          <div className="text-sm text-muted-foreground">{user.email}</div>
+        </div>
+
+        <div className="mt-6 rounded-md border p-4">
+          <h2 className="text-sm font-medium">My deals</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Couldn’t load your deals.
+          </p>
+          <div className="mt-4 rounded-md border p-3 text-sm">
+            <div className="font-medium">Details</div>
+            <div className="mt-1 text-muted-foreground break-words">
+              {dealsRes.error.message}
+            </div>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   const deals = (dealsRes.data ?? []) as Record<string, any>[];
 
@@ -67,7 +78,6 @@ export default async function MePage() {
 
   function labelForDeal(dealId: string) {
     const d = byId.get(dealId);
-    // Try common “label-ish” fields, otherwise fall back to UUID
     return (
       d?.title ||
       d?.name ||
@@ -78,6 +88,26 @@ export default async function MePage() {
     );
   }
 
+  // Split grants into canonical vs legacy/missing (no deal row)
+  const canonicalOwnerIds: string[] = [];
+  const canonicalViewerIds: string[] = [];
+  const missingOwnerIds: string[] = [];
+  const missingViewerIds: string[] = [];
+
+  for (const g of grants) {
+    const id = g.deal_id;
+    if (!id) continue;
+    const existsInCanonical = byId.has(id);
+
+    if (g.role === "OWNER") {
+      if (existsInCanonical) canonicalOwnerIds.push(id);
+      else missingOwnerIds.push(id);
+    } else if (g.role === "VIEWER") {
+      if (existsInCanonical) canonicalViewerIds.push(id);
+      else missingViewerIds.push(id);
+    }
+  }
+
   return (
     <main className="mx-auto max-w-3xl p-6">
       <div className="flex items-baseline justify-between gap-4">
@@ -86,22 +116,22 @@ export default async function MePage() {
       </div>
 
       <div className="mt-6 grid gap-6">
-        {/* My deals */}
+        {/* My deals (canonical only) */}
         <section className="rounded-md border p-4">
           <div className="flex items-baseline justify-between gap-4">
             <h2 className="text-sm font-medium">My deals</h2>
             <span className="text-xs text-muted-foreground">
-              {ownerDealIds.length}
+              {canonicalOwnerIds.length}
             </span>
           </div>
 
-          {ownerDealIds.length === 0 ? (
+          {canonicalOwnerIds.length === 0 ? (
             <p className="mt-2 text-sm text-muted-foreground">
               You don’t have any deals yet.
             </p>
           ) : (
             <ul className="mt-3 space-y-2">
-              {ownerDealIds.map((id) => (
+              {canonicalOwnerIds.map((id) => (
                 <li
                   key={id}
                   className="flex items-center justify-between gap-3"
@@ -121,24 +151,42 @@ export default async function MePage() {
               ))}
             </ul>
           )}
+
+          {missingOwnerIds.length > 0 && (
+            <div className="mt-4 rounded-md border p-3">
+              <div className="text-sm font-medium">Legacy deals</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                These IDs exist in your access list but don’t exist in the new
+                deals table (likely from deals_legacy). They can’t be opened in
+                the new deal view.
+              </div>
+              <ul className="mt-2 space-y-1">
+                {missingOwnerIds.map((id) => (
+                  <li key={id} className="text-xs text-muted-foreground">
+                    {id}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </section>
 
-        {/* Shared with me */}
+        {/* Shared with me (canonical only) */}
         <section className="rounded-md border p-4">
           <div className="flex items-baseline justify-between gap-4">
             <h2 className="text-sm font-medium">Shared with me</h2>
             <span className="text-xs text-muted-foreground">
-              {viewerDealIds.length}
+              {canonicalViewerIds.length}
             </span>
           </div>
 
-          {viewerDealIds.length === 0 ? (
+          {canonicalViewerIds.length === 0 ? (
             <p className="mt-2 text-sm text-muted-foreground">
               Nothing has been shared with you yet.
             </p>
           ) : (
             <ul className="mt-3 space-y-2">
-              {viewerDealIds.map((id) => (
+              {canonicalViewerIds.map((id) => (
                 <li
                   key={id}
                   className="flex items-center justify-between gap-3"
@@ -160,6 +208,23 @@ export default async function MePage() {
                 </li>
               ))}
             </ul>
+          )}
+
+          {missingViewerIds.length > 0 && (
+            <div className="mt-4 rounded-md border p-3">
+              <div className="text-sm font-medium">Legacy shared deals</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                These IDs exist in your access list but don’t exist in the new
+                deals table (likely from deals_legacy).
+              </div>
+              <ul className="mt-2 space-y-1">
+                {missingViewerIds.map((id) => (
+                  <li key={id} className="text-xs text-muted-foreground">
+                    {id}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </section>
       </div>

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 export const SUPPORTED_SCHEMA_VERSIONS = ["1"] as const;
+const DEFAULT_SCHEMA_VERSION: (typeof SUPPORTED_SCHEMA_VERSIONS)[number] = "1";
 
 export interface DraftSnapshotV1 {
   schema_version: string;
@@ -28,19 +29,16 @@ export interface ValidationError {
 }
 
 function stableStringify(value: unknown): string {
-  // Primitives + null
   if (value === null) return "null";
   const t = typeof value;
   if (t === "string") return JSON.stringify(value);
   if (t === "number") return Number.isFinite(value as number) ? String(value) : "null";
   if (t === "boolean") return value ? "true" : "false";
 
-  // Arrays preserve order
   if (Array.isArray(value)) {
     return `[${value.map((v) => stableStringify(v)).join(",")}]`;
   }
 
-  // Objects: sort keys lexicographically
   if (t === "object") {
     const obj = value as Record<string, unknown>;
     const keys = Object.keys(obj).sort();
@@ -48,7 +46,6 @@ function stableStringify(value: unknown): string {
     return `{${parts.join(",")}}`;
   }
 
-  // Functions/undefined/symbol etc. are not valid JSON; treat as null
   return "null";
 }
 
@@ -57,9 +54,27 @@ function canonicalHash(obj: unknown): string {
   return createHash("sha256").update(json).digest("hex");
 }
 
-export function validateDraftSnapshotV1(
-  payload: unknown,
-): ValidationResult | ValidationError {
+function hasLegacyV1Shape(p: Record<string, unknown>): boolean {
+  // Used only to decide whether we can safely default schema_version.
+  // We still validate all fields and hashes below.
+  const requiredStringFields = [
+    "engine_version",
+    "calculator_schema_version",
+    "inputs_hash",
+    "result_hash",
+  ] as const;
+
+  for (const f of requiredStringFields) {
+    if (typeof p[f] !== "string" || (p[f] as string).trim().length === 0) return false;
+  }
+
+  if (!p.inputs || typeof p.inputs !== "object" || Array.isArray(p.inputs)) return false;
+  if (!p.result || typeof p.result !== "object" || Array.isArray(p.result)) return false;
+
+  return true;
+}
+
+export function validateDraftSnapshotV1(payload: unknown): ValidationResult | ValidationError {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return {
       ok: false,
@@ -70,7 +85,15 @@ export function validateDraftSnapshotV1(
 
   const p = payload as Record<string, unknown>;
 
-  if (typeof p.schema_version !== "string") {
+  // Back-compat: older drafts may omit schema_version entirely.
+  // We only default if the payload otherwise looks like a DraftSnapshot v1 object.
+  let schemaVersion: string | null = null;
+
+  if (typeof p.schema_version === "string" && p.schema_version.trim().length > 0) {
+    schemaVersion = p.schema_version;
+  } else if (p.schema_version == null && hasLegacyV1Shape(p)) {
+    schemaVersion = DEFAULT_SCHEMA_VERSION;
+  } else {
     return {
       ok: false,
       error: "schema_version is required and must be a string",
@@ -78,10 +101,10 @@ export function validateDraftSnapshotV1(
     };
   }
 
-  if (!SUPPORTED_SCHEMA_VERSIONS.includes(p.schema_version as any)) {
+  if (!SUPPORTED_SCHEMA_VERSIONS.includes(schemaVersion as any)) {
     return {
       ok: false,
-      error: `Unsupported schema_version: ${p.schema_version}. Supported: ${SUPPORTED_SCHEMA_VERSIONS.join(", ")}`,
+      error: `Unsupported schema_version: ${schemaVersion}. Supported: ${SUPPORTED_SCHEMA_VERSIONS.join(", ")}`,
       code: "INVALID_SCHEMA_VERSION",
     };
   }
@@ -140,7 +163,7 @@ export function validateDraftSnapshotV1(
   return {
     ok: true,
     snapshot: {
-      schema_version: p.schema_version as string,
+      schema_version: schemaVersion,
       inputs: p.inputs as Record<string, unknown>,
       result: p.result as Record<string, unknown>,
       engine_version: p.engine_version as string,
