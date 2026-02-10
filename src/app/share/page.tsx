@@ -8,8 +8,11 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+type SearchParams = Record<string, string | string[] | undefined>;
+
 type PageProps = {
-  searchParams?: Record<string, string | string[] | undefined>;
+  // In some deployments this can be promise-like; normalize at runtime.
+  searchParams?: SearchParams | Promise<SearchParams>;
 };
 
 function firstParam(v: string | string[] | undefined): string | null {
@@ -30,7 +33,8 @@ function friendlyTokenError(message: string) {
 }
 
 export default async function SharePage({ searchParams }: PageProps) {
-  const t = firstParam(searchParams?.t);
+  const sp = await Promise.resolve(searchParams as any);
+  const t = firstParam(sp?.t);
 
   if (!t) {
     return (
@@ -77,23 +81,19 @@ export default async function SharePage({ searchParams }: PageProps) {
   }
 
   /**
-   * 2) OPTIONAL: if recipient is logged in, we can show role info.
-   * If not logged in, we still show read-only view.
+   * 2) OPTIONAL: if recipient is logged in, show canonical deal route in shared mode
    */
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // If logged in, redirect to canonical deal route in shared mode
-  // (so they can see role banner + share card gating etc).
   if (user) {
     redirect(`/deal/${dealId}?mode=shared`);
   }
 
   /**
    * 3) Incognito read-only view (minimal Share MVP)
-   * Keep this simple and investor-demo safe.
    */
   const admin = createAdminClient();
   const dealRes = await admin
