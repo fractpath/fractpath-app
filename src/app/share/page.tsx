@@ -1,13 +1,24 @@
 import { redirect } from "next/navigation";
 
-export default function ShareLandingPage({
+type SP =
+  | Record<string, string | string[] | undefined>
+  | Promise<Record<string, string | string[] | undefined>>;
+
+async function getToken(searchParams: SP): Promise<string> {
+  const sp: any = await searchParams; // supports Next versions where searchParams is a Promise
+  const v = sp?.t;
+  if (Array.isArray(v)) return (v[0] || "").trim();
+  if (typeof v === "string") return v.trim();
+  return "";
+}
+
+export default async function ShareLandingPage({
   searchParams,
 }: {
-  searchParams: { t?: string };
+  searchParams: SP;
 }) {
-  const t = (searchParams?.t || "").trim();
+  const t = await getToken(searchParams);
 
-  // If no token, show a friendly error (we'll improve later).
   if (!t) {
     return (
       <main style={{ maxWidth: 720, margin: "48px auto", padding: "0 16px" }}>
@@ -21,7 +32,6 @@ export default function ShareLandingPage({
     );
   }
 
-  // MVP behavior: require auth first, preserving the token via returnTo.
   const returnTo = `/share?t=${encodeURIComponent(t)}`;
   redirect(`/login?returnTo=${encodeURIComponent(returnTo)}`);
 }
