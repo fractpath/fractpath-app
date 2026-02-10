@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { createClient } from "@/lib/supabaseServer";
+import { createClient } from "@/lib/supabase/server";
 import { ShareDealCard } from "@/components/ShareDealCard";
 
 type PageProps = {
