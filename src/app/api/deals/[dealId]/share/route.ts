@@ -26,15 +26,18 @@ export async function POST(
     body = null;
   }
 
-  // Accept both shapes:
+  // Accept multiple client payload shapes:
+  // - { toEmail: string } (current UI)
   // - { recipientEmail: string } (preferred)
-  // - { email: string } (legacy/client)
+  // - { email: string } (legacy)
   const recipientEmailRaw =
-    typeof body?.recipientEmail === "string"
-      ? body.recipientEmail
-      : typeof body?.email === "string"
-        ? body.email
-        : "";
+    typeof body?.toEmail === "string"
+      ? body.toEmail
+      : typeof body?.recipientEmail === "string"
+        ? body.recipientEmail
+        : typeof body?.email === "string"
+          ? body.email
+          : "";
 
   const recipientEmail = recipientEmailRaw.trim().toLowerCase();
 
