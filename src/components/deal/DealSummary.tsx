@@ -1,29 +1,24 @@
-import type { SnapshotDisplayData } from "@/lib/dealSnapshotDisplay";
-import { buildDealSummaryViewModel } from "@/lib/dealSummaryViewModel";
+import type { DealSummaryViewModel } from "@/lib/dealSummaryViewModel";
 import { DealKpiCard } from "./DealKpiCard";
 import { DealExitTable } from "./DealExitTable";
 import { DealAssumptionsSummary } from "./DealAssumptionsSummary";
 
 interface DealSummaryProps {
-  snapshot: SnapshotDisplayData | null;
+  vm: DealSummaryViewModel;
   snapshotMeta: {
     contractVersion: string;
     schemaVersion: string;
     createdAt: string;
   };
-  dealId: string;
-  isHistorical: boolean;
+  hasSnapshot: boolean;
 }
 
 export function DealSummary({
-  snapshot,
+  vm,
   snapshotMeta,
-  dealId,
-  isHistorical,
+  hasSnapshot,
 }: DealSummaryProps) {
-  const vm = buildDealSummaryViewModel(snapshot, isHistorical);
-
-  if (!snapshot) {
+  if (!hasSnapshot) {
     return (
       <div className="space-y-2">
         <p className="text-sm font-medium">No scenario snapshot saved yet</p>

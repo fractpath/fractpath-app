@@ -42,6 +42,14 @@ FractPath is a Next.js application that utilizes API routes for backend logic an
 - **Counterparty Counter Flow:** COUNTERPARTY users see the calculator widget on latest snapshot view. Submitting creates a snapshot via `/api/deals/[dealId]/snapshot/propose` (COUNTERPARTY-only), then creates a COUNTER deal_version via existing `/api/deals/[dealId]/counter`. VIEWER never sees calculator. Base snapshot ID auto-selected from current view.
 - **Version Timeline Cards:** VERSION entries in the timeline render as styled cards with type-specific color badges (Offer=blue, Counter=purple, Accepted=green, Rejected=red), version number, note, timestamp, and compare link when both snapshots exist. SNAPSHOT and EVENT entries retain original rendering.
 
+**Performance & Stability (APP-085 verified):**
+- Deal query narrowed to `select("id, owner_user_id, mode")` — no unnecessary column serialization.
+- Event payloads excluded from timeline construction (unused by `buildDealTimeline`).
+- DealSummary view model pre-computed server-side and passed as lean props — no raw snapshot data in component props.
+- Fetch limits enforced: snapshots=20, versions=50, events=50.
+- Client/server boundaries verified: DealCalculatorEmbed, ShareDealCard, DealAssumptionsSummary are "use client"; DealSummary, DealKpiCard, DealExitTable, VersionTimelineCard are server components.
+- No circular imports detected. No server-only imports in client components.
+
 ## External Dependencies
 - **Next.js:** React framework for server-side rendering and API routes.
 - **Supabase:** Provides PostgreSQL database, authentication services, and Row Level Security (RLS).

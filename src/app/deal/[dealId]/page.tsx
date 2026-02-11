@@ -9,6 +9,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ShareDealCard } from "@/components/ShareDealCard";
 import { DealSummary } from "@/components/deal/DealSummary";
+import { buildDealSummaryViewModel } from "@/lib/dealSummaryViewModel";
 import { DealCalculatorEmbed } from "@/components/deal/DealCalculatorEmbed";
 import { VersionTimelineCard } from "@/components/deal/VersionTimelineCard";
 import { shouldRenderDealCalculator } from "@/lib/dealCalculatorGating";
@@ -71,7 +72,7 @@ export default async function DealPage({ params, searchParams }: PageProps) {
 
   const dealRes = await supabase
     .from("deals")
-    .select("*")
+    .select("id, owner_user_id, mode")
     .eq("id", dealId)
     .maybeSingle();
 
@@ -119,6 +120,7 @@ export default async function DealPage({ params, searchParams }: PageProps) {
   const selectedSnapshotId = getParam(resolvedSearchParams, "snapshot");
   const { selected: snapshotRow, isLatest } = selectSnapshot(snapshots, selectedSnapshotId);
   const display = extractSnapshotDisplay(snapshotRow);
+  const summaryVm = buildDealSummaryViewModel(display, !isLatest);
 
   const [versionsResult, eventsResult] = await Promise.all([
     getDealVersions(supabase, dealId, 50),
@@ -149,7 +151,7 @@ export default async function DealPage({ params, searchParams }: PageProps) {
       id: e.id,
       event_type: e.event_type,
       created_at: e.created_at,
-      payload: e.payload,
+      payload: null,
     })),
   });
 
@@ -214,14 +216,13 @@ export default async function DealPage({ params, searchParams }: PageProps) {
 
         <div className="mt-4">
           <DealSummary
-            snapshot={display}
+            vm={summaryVm}
             snapshotMeta={{
               contractVersion: display?.contractVersion ?? "\u2014",
               schemaVersion: display?.schemaVersion ?? "\u2014",
               createdAt: display?.createdAt ?? "\u2014",
             }}
-            dealId={dealId}
-            isHistorical={!isLatest}
+            hasSnapshot={!!display}
           />
         </div>
       </section>
