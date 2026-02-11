@@ -4,14 +4,18 @@ import { useState, useCallback, useEffect, useRef } from "react";
 
 interface DealCalculatorEmbedProps {
   dealId: string;
+  role?: string;
+  currentSnapshotId?: string;
 }
 
 export type SaveSnapshotFn = (snapshot: Record<string, unknown>) => Promise<void>;
 
-export function DealCalculatorEmbed({ dealId }: DealCalculatorEmbedProps) {
+export function DealCalculatorEmbed({ dealId, role = "OWNER", currentSnapshotId }: DealCalculatorEmbedProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const isCounterparty = role === "COUNTERPARTY";
 
   const handleSave: SaveSnapshotFn = useCallback(
     async (snapshot: Record<string, unknown>) => {
@@ -19,15 +23,44 @@ export function DealCalculatorEmbed({ dealId }: DealCalculatorEmbedProps) {
       setError(null);
 
       try {
-        const res = await fetch(`/api/deals/${dealId}/snapshot`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ snapshot }),
-        });
+        if (isCounterparty) {
+          const proposeRes = await fetch(`/api/deals/${dealId}/snapshot/propose`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ snapshot }),
+          });
 
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(body.error ?? `Save failed (${res.status})`);
+          if (!proposeRes.ok) {
+            const proposeBody = await proposeRes.json().catch(() => ({}));
+            throw new Error(proposeBody.error ?? `Snapshot propose failed (${proposeRes.status})`);
+          }
+
+          const { snapshot_id } = await proposeRes.json();
+
+          const counterRes = await fetch(`/api/deals/${dealId}/counter`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              proposed_snapshot_id: snapshot_id,
+              base_snapshot_id: currentSnapshotId ?? null,
+            }),
+          });
+
+          if (!counterRes.ok) {
+            const counterBody = await counterRes.json().catch(() => ({}));
+            throw new Error(counterBody.error ?? `Counter creation failed (${counterRes.status})`);
+          }
+        } else {
+          const res = await fetch(`/api/deals/${dealId}/snapshot`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ snapshot }),
+          });
+
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(body.error ?? `Save failed (${res.status})`);
+          }
         }
 
         window.location.href = `/deal/${dealId}`;
@@ -36,7 +69,7 @@ export function DealCalculatorEmbed({ dealId }: DealCalculatorEmbedProps) {
         setSaving(false);
       }
     },
-    [dealId],
+    [dealId, isCounterparty, currentSnapshotId],
   );
 
   useEffect(() => {
@@ -59,11 +92,13 @@ export function DealCalculatorEmbed({ dealId }: DealCalculatorEmbedProps) {
     };
   }, [handleSave, dealId]);
 
+  const roleLabel = isCounterparty ? "Counterparty" : "Owner only";
+
   return (
     <section className="mt-6 rounded-md border p-4">
       <div className="flex items-baseline justify-between gap-4">
         <h2 className="text-base font-semibold">Scenario calculator</h2>
-        <div className="text-xs text-muted-foreground">Owner only</div>
+        <div className="text-xs text-muted-foreground">{roleLabel}</div>
       </div>
 
       {error ? (
@@ -87,9 +122,16 @@ export function DealCalculatorEmbed({ dealId }: DealCalculatorEmbedProps) {
             window.__fractpath_saveSnapshot(snapshot)
           </code>{" "}
           when the user finalises a scenario.
+          {isCounterparty ? (
+            <span className="block mt-1">
+              Submitting will create a counter-proposal for this deal.
+            </span>
+          ) : null}
         </p>
         {saving ? (
-          <p className="mt-3 text-sm font-medium">Saving snapshot…</p>
+          <p className="mt-3 text-sm font-medium">
+            {isCounterparty ? "Submitting counter-proposal…" : "Saving snapshot…"}
+          </p>
         ) : null}
       </div>
     </section>

@@ -29,20 +29,20 @@ test("OWNER + historical → false", () => {
   assert(shouldRenderDealCalculator({ role: "OWNER", isLatest: false }) === false, "should be false");
 });
 
+test("COUNTERPARTY + latest → true", () => {
+  assert(shouldRenderDealCalculator({ role: "COUNTERPARTY", isLatest: true }) === true, "should be true");
+});
+
+test("COUNTERPARTY + historical → false", () => {
+  assert(shouldRenderDealCalculator({ role: "COUNTERPARTY", isLatest: false }) === false, "should be false");
+});
+
 test("VIEWER + latest → false", () => {
   assert(shouldRenderDealCalculator({ role: "VIEWER", isLatest: true }) === false, "should be false");
 });
 
 test("VIEWER + historical → false", () => {
   assert(shouldRenderDealCalculator({ role: "VIEWER", isLatest: false }) === false, "should be false");
-});
-
-test("COUNTERPARTY + latest → false", () => {
-  assert(shouldRenderDealCalculator({ role: "COUNTERPARTY", isLatest: true }) === false, "should be false");
-});
-
-test("COUNTERPARTY + historical → false", () => {
-  assert(shouldRenderDealCalculator({ role: "COUNTERPARTY", isLatest: false }) === false, "should be false");
 });
 
 test("empty role → false", () => {

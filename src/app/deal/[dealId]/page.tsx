@@ -11,6 +11,7 @@ import { ShareDealCard } from "@/components/ShareDealCard";
 import { DealSummary } from "@/components/deal/DealSummary";
 import { DealCalculatorEmbed } from "@/components/deal/DealCalculatorEmbed";
 import { shouldRenderDealCalculator } from "@/lib/dealCalculatorGating";
+import { selectBaseSnapshotId } from "@/lib/counterBaseSnapshot";
 import { getDealSnapshots } from "@/lib/dealSnapshotDb";
 import { getDealVersions } from "@/lib/dealVersionDb";
 import { getDealEvents, buildDealTimeline } from "@/lib/dealTimeline";
@@ -92,7 +93,7 @@ export default async function DealPage({ params, searchParams }: PageProps) {
 
   const deal = dealRes.data as Record<string, any>;
 
-  let role: "OWNER" | "VIEWER" =
+  let role: "OWNER" | "VIEWER" | "COUNTERPARTY" =
     deal.owner_user_id === user.id ? "OWNER" : "VIEWER";
 
   if (role !== "OWNER") {
@@ -103,8 +104,9 @@ export default async function DealPage({ params, searchParams }: PageProps) {
       .eq("user_id", user.id)
       .maybeSingle();
 
-    if (grantRes.data?.role === "OWNER" || grantRes.data?.role === "VIEWER") {
-      role = grantRes.data.role;
+    const grantRole = grantRes.data?.role;
+    if (grantRole === "OWNER" || grantRole === "VIEWER" || grantRole === "COUNTERPARTY") {
+      role = grantRole;
     }
   }
 
@@ -112,6 +114,7 @@ export default async function DealPage({ params, searchParams }: PageProps) {
 
   const snapshotsResult = await getDealSnapshots(supabase, dealId, 20);
   const snapshots = snapshotsResult.ok ? snapshotsResult.snapshots : [];
+  const latestSnapshotId = snapshots.length > 0 ? snapshots[0].id : null;
   const selectedSnapshotId = getParam(resolvedSearchParams, "snapshot");
   const { selected: snapshotRow, isLatest } = selectSnapshot(snapshots, selectedSnapshotId);
   const display = extractSnapshotDisplay(snapshotRow);
@@ -223,7 +226,14 @@ export default async function DealPage({ params, searchParams }: PageProps) {
       </section>
 
       {shouldRenderDealCalculator({ role, isLatest }) ? (
-        <DealCalculatorEmbed dealId={dealId} />
+        <DealCalculatorEmbed
+          dealId={dealId}
+          role={role}
+          currentSnapshotId={selectBaseSnapshotId({
+            selectedSnapshotId: selectedSnapshotId,
+            latestSnapshotId: latestSnapshotId,
+          }) ?? undefined}
+        />
       ) : null}
 
       {snapshots.length > 1 ? (
