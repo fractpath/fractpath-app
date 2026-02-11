@@ -35,7 +35,8 @@ export default async function NewDealPage() {
       ((rpcErr as any)?.code as string) || "unknown",
     );
 
-    redirect(`/dashboard?create=failed&code=${errorCode}`);
+    // Debug marker added
+    redirect(`/dashboard?create=failed&code=${errorCode}&m=rpc_sig_v2`);
   }
 
   redirect(`/deal/${encodeURIComponent(dealId as string)}`);
