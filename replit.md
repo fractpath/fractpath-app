@@ -37,6 +37,63 @@ FractPath is a Next.js application leveraging API routes for backend logic and S
 - **Deal Resume Flow:** Converts marketing drafts into authenticated deals.
 - **Share Deal Functionality:** Allows deal owners to generate read-only share links for others.
 - **Snapshot Ingestion:** Owners can ingest new snapshots for their deals via `/api/deals/[dealId]/snapshot`.
+- **Offer Creation:** Owners can create OFFER deal_versions referencing snapshots via `/api/deals/[dealId]/offer`.
+
+## Project Structure (Key Files)
+
+```
+src/
+├── api/deals/
+│   ├── resume/route.ts                  # POST: resume DraftSnapshot → Deal
+│   └── [dealId]/
+│       ├── share/route.ts               # POST: create share link (OWNER only)
+│       ├── snapshot/route.ts            # POST: owner-only snapshot ingestion
+│       └── offer/route.ts              # POST: create OFFER version (OWNER only)
+├── lib/
+│   ├── dealSnapshot.ts                  # FullDealSnapshotV1 validation
+│   ├── dealSnapshotDb.ts               # insertDealSnapshot + getDealSnapshots helpers
+│   ├── dealSnapshotDisplay.ts          # Pure display + selectSnapshot helpers
+│   ├── dealVersionDb.ts                # getDealVersions + getLatestDealVersion + version_type validation
+│   ├── draftToDealSnapshot.ts          # DraftSnapshotV1 → FullDealSnapshotV1 mapping
+│   └── __tests__/
+│       ├── dealSnapshotValidation.test.ts  # 14 tests
+│       ├── dealSnapshotDisplay.test.ts     # 14 tests (display + selection)
+│       ├── draftToDealSnapshot.test.ts     # 5 tests
+│       ├── snapshotIngestion.test.ts       # 14 tests
+│       ├── dealVersionDb.test.ts           # 15 tests (version_type + ordering)
+│       └── offerRoute.test.ts             # 15 tests (body parsing, ownership, snapshot validation)
+supabase/migrations/
+├── 20260210_app_060_deal_snapshots.sql
+├── 20260211_app_070_deal_versions.sql
+└── (earlier migrations...)
+```
+
+## Sprint Status
+
+### APP-071 — Create offer version endpoint (Complete)
+- [x] POST /api/deals/[dealId]/offer — auth + OWNER-only
+- [x] Body: { proposed_snapshot_id, base_snapshot_id?, note? }
+- [x] Validates snapshot IDs are UUIDs and belong to the same deal
+- [x] Computes version_number monotonically from latest existing version
+- [x] Inserts deal_versions row with version_type=OFFER
+- [x] Logs DEAL_OFFER_CREATED event with snapshot IDs + version_number
+- [x] Returns { ok: true, deal_version_id, version_number } on 201
+- [x] Tests: 15 pure logic tests (UUID, body parsing, snapshot ownership, version numbering)
+- [x] npm run build passes
+
+### APP-070 — Deal versions schema (Complete)
+- [x] Migration: deal_versions table (append-only, immutable)
+- [x] RLS: SELECT via any grant, INSERT OWNER only, no UPDATE/DELETE
+- [x] Helpers: getDealVersions, getLatestDealVersion, isValidVersionType
+- [x] Tests: 15 tests
+
+### APP-063 — Owner-only snapshot ingestion endpoint (Complete)
+- [x] POST /api/deals/[dealId]/snapshot — auth + OWNER-only
+- [x] Tests: 14 tests
+
+### APP-062 — Snapshot history & selection (Complete)
+- [x] Read-only history viewer with URL-based selection
+- [x] Tests: 14 tests
 
 ## External Dependencies
 - **Next.js:** React framework for server-side rendering and API routes.
