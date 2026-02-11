@@ -1,11 +1,11 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
 export async function POST(
-  _req: Request,
-  { params }: { params: { dealId: string } },
+  request: NextRequest,
+  context: { params: Promise<{ dealId: string }> },
 ) {
   const supabase = await createClient();
 
@@ -17,12 +17,11 @@ export async function POST(
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const dealId = params.dealId;
+  const { dealId } = await context.params;
 
-  // Parse body: { recipientEmail: string }
   let body: any = null;
   try {
-    body = await _req.json();
+    body = await request.json();
   } catch {
     body = null;
   }
@@ -32,10 +31,14 @@ export async function POST(
   const recipientEmail = recipientEmailRaw.trim().toLowerCase();
 
   if (!recipientEmail || !recipientEmail.includes("@")) {
-    return NextResponse.json({ error: "invalid recipientEmail" }, { status: 400 });
+    return NextResponse.json(
+      { error: "invalid recipientEmail" },
+      { status: 400 },
+    );
   }
 
-  // Canonical: mint a share token row (DB should handle security via SECURITY DEFINER RPC)
+  // NOTE: This assumes your DB function exists and returns a token string.
+  // If it errors, we surface the DB error code/message safely.
   const { data: token, error: rpcErr } = await supabase.rpc(
     "prepare_proposal_for_outreach",
     {
@@ -56,7 +59,6 @@ export async function POST(
     );
   }
 
-  // Return share URL (client can display / copy)
   const shareUrl = `https://app.fractpath.com/share?t=${encodeURIComponent(
     token as string,
   )}`;
