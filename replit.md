@@ -60,6 +60,7 @@ src/
 │   ├── dealSnapshotDb.ts               # insertDealSnapshot + getDealSnapshots helpers
 │   ├── dealSnapshotDisplay.ts          # Pure display + selectSnapshot helpers
 │   ├── snapshotCompare.ts              # compareSnapshotDisplay pure diff helper
+│   ├── dealTimeline.ts                 # getDealEvents + buildDealTimeline merge/sort helper
 │   ├── dealVersionDb.ts                # getDealVersions + getLatestDealVersion + version_type validation
 │   ├── draftToDealSnapshot.ts          # DraftSnapshotV1 → FullDealSnapshotV1 mapping
 │   └── __tests__/
@@ -71,7 +72,8 @@ src/
 │       ├── offerRoute.test.ts             # 15 tests (body parsing, ownership, snapshot validation)
 │       ├── counterRoute.test.ts          # 13 tests (body parsing, role gating, snapshot validation)
 │       ├── decisionRoute.test.ts        # 21 tests (body parsing, role gating, version validation, duplicate prevention)
-│       └── snapshotCompare.test.ts     # 14 tests (diff logic, missing keys, null handling, nested objects)
+│       ├── snapshotCompare.test.ts     # 14 tests (diff logic, missing keys, null handling, nested objects)
+│       └── dealTimeline.test.ts       # 17 tests (ordering, labeling, links, missing fields)
 supabase/migrations/
 ├── 20260210_app_060_deal_snapshots.sql
 ├── 20260211_app_070_deal_versions.sql
@@ -80,6 +82,17 @@ supabase/migrations/
 ```
 
 ## Sprint Status
+
+### APP-075 — Unified deal timeline (Complete)
+- [x] Server helper: src/lib/dealTimeline.ts — getDealEvents + buildDealTimeline
+- [x] Merges deal_snapshots, deal_versions, deal_events into unified chronological list
+- [x] Sorted by created_at desc, missing dates pushed to end
+- [x] Human-readable labels for all version types and event types
+- [x] Smart links: snapshots → snapshot view, OFFER/COUNTER with both snapshots → compare view
+- [x] Type badges (SNAP/VER/EVT) with color coding
+- [x] Replaces old "Deal events" section on deal detail page
+- [x] Tests: 17 pure logic tests (ordering, missing created_at, type labeling, link construction, subtitles, empty inputs)
+- [x] npm run build passes
 
 ### APP-074 — Read-only snapshot comparison view (Complete)
 - [x] Pure diff helper: src/lib/snapshotCompare.ts — compareSnapshotDisplay(a, b)

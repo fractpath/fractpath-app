@@ -9,6 +9,8 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ShareDealCard } from "@/components/ShareDealCard";
 import { getDealSnapshots } from "@/lib/dealSnapshotDb";
+import { getDealVersions } from "@/lib/dealVersionDb";
+import { getDealEvents, buildDealTimeline } from "@/lib/dealTimeline";
 import {
   extractSnapshotDisplay,
   selectSnapshot,
@@ -113,15 +115,38 @@ export default async function DealPage({ params, searchParams }: PageProps) {
   const { selected: snapshotRow, isLatest } = selectSnapshot(snapshots, selectedSnapshotId);
   const display = extractSnapshotDisplay(snapshotRow);
 
-  // Deal events timeline (read-only)
-  const eventsRes = await supabase
-    .from("deal_events")
-    .select("id, event_type, payload, created_by, created_at")
-    .eq("deal_id", dealId)
-    .order("created_at", { ascending: false })
-    .limit(50);
+  const [versionsResult, eventsResult] = await Promise.all([
+    getDealVersions(supabase, dealId, 50),
+    getDealEvents(supabase, dealId, 50),
+  ]);
+  const versions = versionsResult.ok ? versionsResult.versions : [];
+  const eventRows = eventsResult.ok ? eventsResult.events : [];
 
-  const events = (eventsRes.data ?? []) as Array<Record<string, any>>;
+  const timeline = buildDealTimeline({
+    dealId,
+    snapshots: snapshots.map((s) => ({
+      id: s.id,
+      created_at: s.created_at,
+      contract_version: s.contract_version,
+      schema_version: s.schema_version,
+    })),
+    versions: versions.map((v) => ({
+      id: v.id,
+      created_at: v.created_at,
+      version_number: v.version_number,
+      version_type: v.version_type,
+      proposed_snapshot_id: v.proposed_snapshot_id,
+      base_snapshot_id: v.base_snapshot_id,
+      note: v.note,
+      meta: v.meta,
+    })),
+    events: eventRows.map((e) => ({
+      id: e.id,
+      event_type: e.event_type,
+      created_at: e.created_at,
+      payload: e.payload,
+    })),
+  });
 
   return (
     <main className="mx-auto max-w-3xl p-6">
@@ -321,31 +346,49 @@ export default async function DealPage({ params, searchParams }: PageProps) {
 
       <section className="mt-6 rounded-md border p-4">
         <div className="flex items-baseline justify-between gap-4">
-          <h2 className="text-base font-semibold">Deal events</h2>
-          <div className="text-xs text-muted-foreground">Latest 50</div>
+          <h2 className="text-base font-semibold">Timeline</h2>
+          <div className="text-xs text-muted-foreground">
+            {timeline.length} entr{timeline.length !== 1 ? "ies" : "y"}
+          </div>
         </div>
 
-        {eventsRes.error ? (
+        {timeline.length === 0 ? (
           <p className="mt-3 text-sm text-muted-foreground">
-            Unable to load events.
-          </p>
-        ) : events.length === 0 ? (
-          <p className="mt-3 text-sm text-muted-foreground">
-            No events recorded for this deal.
+            No activity recorded for this deal.
           </p>
         ) : (
-          <div className="mt-4 space-y-3">
-            {events.map((e) => (
-              <div key={e.id} className="rounded-md border p-3">
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <div className="text-sm font-medium">{e.event_type}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {e.created_at}
+          <div className="mt-4 space-y-2">
+            {timeline.map((entry) => (
+              <div
+                key={`${entry.type}-${entry.id}`}
+                className="flex items-start gap-3 rounded-md px-3 py-2 text-xs hover:bg-muted/50"
+              >
+                <span className={`mt-0.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                  entry.type === "VERSION"
+                    ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+                    : entry.type === "SNAPSHOT"
+                      ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                      : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                }`}>
+                  {entry.type === "VERSION" ? "VER" : entry.type === "SNAPSHOT" ? "SNAP" : "EVT"}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-baseline justify-between gap-2">
+                    {entry.href ? (
+                      <Link href={entry.href} className="font-medium underline">
+                        {entry.title}
+                      </Link>
+                    ) : (
+                      <span className="font-medium">{entry.title}</span>
+                    )}
+                    <span className="shrink-0 text-muted-foreground">
+                      {entry.created_at ? new Date(entry.created_at).toLocaleString() : "\u2014"}
+                    </span>
                   </div>
+                  {entry.subtitle ? (
+                    <div className="mt-0.5 text-muted-foreground">{entry.subtitle}</div>
+                  ) : null}
                 </div>
-                <pre className="mt-2 overflow-auto rounded-md bg-muted p-3 text-xs leading-relaxed">
-                  {JSON.stringify(e.payload ?? {}, null, 2)}
-                </pre>
               </div>
             ))}
           </div>
