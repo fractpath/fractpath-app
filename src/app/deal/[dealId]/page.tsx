@@ -9,6 +9,8 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ShareDealCard } from "@/components/ShareDealCard";
 import { DealSummary } from "@/components/deal/DealSummary";
+import { DealCalculatorEmbed } from "@/components/deal/DealCalculatorEmbed";
+import { shouldRenderDealCalculator } from "@/lib/dealCalculatorGating";
 import { getDealSnapshots } from "@/lib/dealSnapshotDb";
 import { getDealVersions } from "@/lib/dealVersionDb";
 import { getDealEvents, buildDealTimeline } from "@/lib/dealTimeline";
@@ -219,6 +221,10 @@ export default async function DealPage({ params, searchParams }: PageProps) {
           />
         </div>
       </section>
+
+      {shouldRenderDealCalculator({ role, isLatest }) ? (
+        <DealCalculatorEmbed dealId={dealId} />
+      ) : null}
 
       {snapshots.length > 1 ? (
         <section className="mt-6 rounded-md border p-4">
