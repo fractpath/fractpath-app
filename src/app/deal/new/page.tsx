@@ -15,28 +15,31 @@ export default async function NewDealPage() {
     redirect("/login?returnTo=/deal/new");
   }
 
-  const { data: dealRow, error: dealErr } = await supabase
-    .from("deals")
-    .insert({
-      owner_user_id: user.id,
-    })
-    .select("id")
-    .single();
+  // Use canonical DB function (RLS-safe)
+  const { data: result, error: rpcErr } = await supabase.rpc(
+    "create_deal_with_owner_grant",
+    {
+      p_owner_user_id: user.id,
+    },
+  );
 
-  if (dealErr || !dealRow?.id) {
+  if (rpcErr || !result) {
     console.error("NEW_DEAL_CREATE_FAILED", {
-      message: dealErr?.message,
-      code: (dealErr as any)?.code,
-      details: (dealErr as any)?.details,
-      hint: (dealErr as any)?.hint,
+      message: rpcErr?.message,
+      code: (rpcErr as any)?.code,
+      details: (rpcErr as any)?.details,
+      hint: (rpcErr as any)?.hint,
     });
 
     const errorCode = encodeURIComponent(
-      ((dealErr as any)?.code as string) || "unknown",
+      ((rpcErr as any)?.code as string) || "unknown",
     );
 
     redirect(`/dashboard?create=failed&code=${errorCode}`);
   }
 
-  redirect(`/deal/${encodeURIComponent(dealRow.id)}`);
+  // Assume function returns the deal id
+  const dealId = result as string;
+
+  redirect(`/deal/${encodeURIComponent(dealId)}`);
 }
