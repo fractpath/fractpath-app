@@ -1,4 +1,4 @@
-import { extractSnapshotDisplay, formatValue, humanLabel } from "../dealSnapshotDisplay";
+import { extractSnapshotDisplay, selectSnapshot, formatValue, humanLabel } from "../dealSnapshotDisplay";
 
 let passed = 0;
 let failed = 0;
@@ -151,6 +151,42 @@ test("formatValue handles various types", () => {
 test("humanLabel converts snake_case to title case", () => {
   assert(humanLabel("home_value") === "Home Value", `got: ${humanLabel("home_value")}`);
   assert(humanLabel("monthly_payment") === "Monthly Payment", `got: ${humanLabel("monthly_payment")}`);
+});
+
+console.log("\n--- selectSnapshot Tests ---\n");
+
+test("selectSnapshot: empty list returns null, isLatest true", () => {
+  const { selected, isLatest } = selectSnapshot([], null);
+  assert(selected === null, "expected null");
+  assert(isLatest === true, "expected isLatest");
+});
+
+test("selectSnapshot: no selectedId returns first (latest)", () => {
+  const items = [{ id: "a" }, { id: "b" }, { id: "c" }];
+  const { selected, isLatest } = selectSnapshot(items, null);
+  assert(selected!.id === "a", `expected a, got ${selected!.id}`);
+  assert(isLatest === true, "expected isLatest");
+});
+
+test("selectSnapshot: selectedId matches first is isLatest=true", () => {
+  const items = [{ id: "a" }, { id: "b" }];
+  const { selected, isLatest } = selectSnapshot(items, "a");
+  assert(selected!.id === "a", "expected a");
+  assert(isLatest === true, "expected isLatest");
+});
+
+test("selectSnapshot: selectedId matches second is isLatest=false", () => {
+  const items = [{ id: "a" }, { id: "b" }, { id: "c" }];
+  const { selected, isLatest } = selectSnapshot(items, "b");
+  assert(selected!.id === "b", `expected b, got ${selected!.id}`);
+  assert(isLatest === false, "expected not isLatest");
+});
+
+test("selectSnapshot: unknown selectedId falls back to latest", () => {
+  const items = [{ id: "a" }, { id: "b" }];
+  const { selected, isLatest } = selectSnapshot(items, "zzz");
+  assert(selected!.id === "a", "expected fallback to a");
+  assert(isLatest === true, "expected isLatest on fallback");
 });
 
 console.log(`\n${passed} passed, ${failed} failed out of ${passed + failed} tests\n`);

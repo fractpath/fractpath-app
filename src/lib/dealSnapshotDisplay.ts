@@ -47,6 +47,33 @@ export function extractSnapshotDisplay(
   };
 }
 
+export interface SnapshotListItem {
+  id: string;
+  created_at: string;
+  contract_version: string;
+  schema_version: string;
+}
+
+export function selectSnapshot<T extends { id: string }>(
+  snapshots: T[],
+  selectedId: string | null,
+): { selected: T | null; isLatest: boolean } {
+  if (snapshots.length === 0) {
+    return { selected: null, isLatest: true };
+  }
+
+  if (!selectedId) {
+    return { selected: snapshots[0], isLatest: true };
+  }
+
+  const found = snapshots.find((s) => s.id === selectedId);
+  if (!found) {
+    return { selected: snapshots[0], isLatest: true };
+  }
+
+  return { selected: found, isLatest: found.id === snapshots[0].id };
+}
+
 export function formatValue(v: unknown): string {
   if (v === null || v === undefined) return "\u2014";
   if (typeof v === "number") return v.toLocaleString("en-US");

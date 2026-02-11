@@ -8,9 +8,10 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ShareDealCard } from "@/components/ShareDealCard";
-import { getLatestDealSnapshot } from "@/lib/dealSnapshotDb";
+import { getDealSnapshots } from "@/lib/dealSnapshotDb";
 import {
   extractSnapshotDisplay,
+  selectSnapshot,
   formatValue,
   humanLabel,
 } from "@/lib/dealSnapshotDisplay";
@@ -106,8 +107,10 @@ export default async function DealPage({ params, searchParams }: PageProps) {
 
   const readOnly = role === "VIEWER" || isSharedMode;
 
-  const snapResult = await getLatestDealSnapshot(supabase, dealId);
-  const snapshotRow = snapResult.ok ? snapResult.snapshot : null;
+  const snapshotsResult = await getDealSnapshots(supabase, dealId, 20);
+  const snapshots = snapshotsResult.ok ? snapshotsResult.snapshots : [];
+  const selectedSnapshotId = getParam(resolvedSearchParams, "snapshot");
+  const { selected: snapshotRow, isLatest } = selectSnapshot(snapshots, selectedSnapshotId);
   const display = extractSnapshotDisplay(snapshotRow);
 
   // Deal events timeline (read-only)
@@ -158,9 +161,26 @@ export default async function DealPage({ params, searchParams }: PageProps) {
         <div className="flex items-baseline justify-between gap-4">
           <h2 className="text-base font-semibold">Scenario snapshot</h2>
           <div className="text-xs text-muted-foreground">
-            Latest saved snapshot (read-only; no recompute)
+            {isLatest
+              ? "Latest saved snapshot (read-only; no recompute)"
+              : "Viewing older snapshot"}
           </div>
         </div>
+
+        {!isLatest && snapshotRow ? (
+          <div className="mt-2 flex items-center justify-between rounded-md bg-muted/50 px-3 py-2">
+            <span className="text-xs text-muted-foreground">
+              You are viewing a previous snapshot from{" "}
+              {new Date(snapshotRow.created_at).toLocaleString()}
+            </span>
+            <Link
+              className="text-xs font-medium underline"
+              href={`/deal/${dealId}${isSharedMode ? "?mode=shared" : ""}`}
+            >
+              Back to latest
+            </Link>
+          </div>
+        ) : null}
 
         {!display ? (
           <div className="mt-3 space-y-2">
@@ -250,6 +270,54 @@ export default async function DealPage({ params, searchParams }: PageProps) {
           </div>
         )}
       </section>
+
+      {snapshots.length > 1 ? (
+        <section className="mt-6 rounded-md border p-4">
+          <div className="flex items-baseline justify-between gap-4">
+            <h2 className="text-base font-semibold">Snapshot history</h2>
+            <div className="text-xs text-muted-foreground">
+              {snapshots.length} snapshot{snapshots.length !== 1 ? "s" : ""}
+            </div>
+          </div>
+
+          <div className="mt-3 space-y-1">
+            {snapshots.map((s, i) => {
+              const isCurrent = snapshotRow?.id === s.id;
+              const modeParam = isSharedMode ? "&mode=shared" : "";
+              const href =
+                i === 0
+                  ? `/deal/${dealId}${isSharedMode ? "?mode=shared" : ""}`
+                  : `/deal/${dealId}?snapshot=${s.id}${modeParam}`;
+
+              return (
+                <Link
+                  key={s.id}
+                  href={href}
+                  className={`flex items-center justify-between gap-3 rounded-md px-3 py-2 text-xs transition-colors ${
+                    isCurrent
+                      ? "bg-primary/10 font-medium"
+                      : "hover:bg-muted/50"
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    {i === 0 ? (
+                      <span className="rounded bg-primary/20 px-1.5 py-0.5 text-[10px] font-medium">
+                        Latest
+                      </span>
+                    ) : null}
+                    <span className="text-muted-foreground">
+                      v{s.contract_version} / s{s.schema_version}
+                    </span>
+                  </span>
+                  <span className="text-muted-foreground">
+                    {new Date(s.created_at).toLocaleString()}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
 
       <section className="mt-6 rounded-md border p-4">
         <div className="flex items-baseline justify-between gap-4">

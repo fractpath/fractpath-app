@@ -68,22 +68,54 @@ export async function insertDealSnapshot(
 
 export interface LatestSnapshotResult {
   ok: true;
-  snapshot: {
-    id: string;
-    deal_id: string;
-    created_by: string;
-    created_at: string;
-    contract_version: string;
-    schema_version: string;
-    input_hash: string | null;
-    output_hash: string | null;
-    snapshot_json: FullDealSnapshotV1;
-  } | null;
+  snapshot: DealSnapshotRow | null;
 }
 
 export interface LatestSnapshotError {
   ok: false;
   error: string;
+}
+
+export type DealSnapshotRow = {
+  id: string;
+  deal_id: string;
+  created_by: string;
+  created_at: string;
+  contract_version: string;
+  schema_version: string;
+  input_hash: string | null;
+  output_hash: string | null;
+  snapshot_json: FullDealSnapshotV1;
+};
+
+export interface DealSnapshotsListResult {
+  ok: true;
+  snapshots: DealSnapshotRow[];
+}
+
+export interface DealSnapshotsListError {
+  ok: false;
+  error: string;
+}
+
+export async function getDealSnapshots(
+  supabase: SupabaseClient,
+  dealId: string,
+  limit = 20,
+): Promise<DealSnapshotsListResult | DealSnapshotsListError> {
+  const { data, error } = await (supabase.from("deal_snapshots") as any)
+    .select(
+      "id, deal_id, created_by, created_at, contract_version, schema_version, input_hash, output_hash, snapshot_json",
+    )
+    .eq("deal_id", dealId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+
+  return { ok: true, snapshots: (data ?? []) as DealSnapshotRow[] };
 }
 
 export async function getLatestDealSnapshot(

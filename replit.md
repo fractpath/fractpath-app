@@ -58,7 +58,7 @@ src/
 │       ├── draftToken.test.ts              # Token generation tests (5 tests)
 │       ├── draftSnapshotValidation.test.ts # Snapshot validation tests (12 tests)
 │       ├── dealSnapshotValidation.test.ts  # FullDealSnapshotV1 validation tests (14 tests)
-│       ├── dealSnapshotDisplay.test.ts    # Snapshot display/rendering logic tests (9 tests)
+│       ├── dealSnapshotDisplay.test.ts    # Snapshot display/rendering + selection tests (14 tests)
 │       ├── draftToDealSnapshot.test.ts   # Draft→Deal snapshot mapping tests (5 tests)
 │       └── shareRoute.test.ts             # Share route validation tests (9 tests)
 └── middleware.ts             # Next.js middleware
@@ -138,6 +138,17 @@ Required for deal resume + share flows:
 - deal_share_tokens: service-role only (deny all anon/authenticated)
 
 ## Sprint Status
+
+### APP-062 — Snapshot history & selection (Complete)
+- [x] getDealSnapshots(dealId, limit=20) helper added
+- [x] selectSnapshot() pure helper for selection logic with fallback to latest
+- [x] Deal page fetches full snapshot list (up to 20)
+- [x] Snapshot history section shows when >1 snapshot exists
+- [x] Selection via ?snapshot=<id> URL param (server-side, no client JS)
+- [x] "Back to latest" link when viewing older snapshot
+- [x] Shared mode preserved in history links
+- [x] Tests: 14 display + selection tests (9 existing + 5 new, all passing)
+- [x] npm run build passes
 
 ### APP-061B — Resume route persists deal_snapshots (Complete)
 - [x] Replaced all calculator_snapshots reads/writes with deal_snapshots
