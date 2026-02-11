@@ -19,6 +19,7 @@ export async function POST(
 
   const { dealId } = await context.params;
 
+  // Parse body (we accept toEmail/recipientEmail/email but don't require it to mint token)
   let body: any = null;
   try {
     body = await request.json();
@@ -26,10 +27,6 @@ export async function POST(
     body = null;
   }
 
-  // Accept multiple client payload shapes:
-  // - { toEmail: string } (current UI)
-  // - { recipientEmail: string } (preferred)
-  // - { email: string } (legacy)
   const recipientEmailRaw =
     typeof body?.toEmail === "string"
       ? body.toEmail
@@ -41,19 +38,12 @@ export async function POST(
 
   const recipientEmail = recipientEmailRaw.trim().toLowerCase();
 
-  if (!recipientEmail || !recipientEmail.includes("@")) {
-    return NextResponse.json(
-      { error: "invalid recipientEmail" },
-      { status: 400 },
-    );
-  }
-
+  // Mint token via SECURITY DEFINER RPC
   const { data: token, error: rpcErr } = await supabase.rpc(
-    "prepare_proposal_for_outreach",
+    "mint_deal_share_token",
     {
       p_deal_id: dealId,
       p_actor_user_id: user.id,
-      p_recipient_email: recipientEmail,
     },
   );
 
@@ -72,5 +62,6 @@ export async function POST(
     token as string,
   )}`;
 
-  return NextResponse.json({ ok: true, token, shareUrl });
+  // Recipient email is optional; we return it for UI confirmation/debug
+  return NextResponse.json({ ok: true, token, shareUrl, recipientEmail });
 }
