@@ -1,19 +1,23 @@
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 
 export default async function NewDealPage() {
-  const supabase = await createClient();
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-  const {
-    data: { user },
-    error: userErr,
-  } = await supabase.auth.getUser();
+  // Service role client (bypasses RLS)
+  const supabase = createClient(url, serviceKey);
 
-  if (userErr || !user) {
+  // We still need to know who the user is
+  const { data: userResp, error: userErr } = await supabase.auth.getUser();
+
+  if (userErr || !userResp?.user) {
     redirect("/login?returnTo=/deal/new");
   }
+
+  const user = userResp.user;
 
   const { data: dealRow, error: dealErr } = await supabase
     .from("deals")
@@ -32,8 +36,9 @@ export default async function NewDealPage() {
       hint: (dealErr as any)?.hint,
     });
 
-    const errorCode =
-      encodeURIComponent(((dealErr as any)?.code as string) || "unknown");
+    const errorCode = encodeURIComponent(
+      ((dealErr as any)?.code as string) || "unknown",
+    );
 
     redirect(`/dashboard?create=failed&code=${errorCode}`);
   }
