@@ -26,8 +26,16 @@ export async function POST(
     body = null;
   }
 
+  // Accept both shapes:
+  // - { recipientEmail: string } (preferred)
+  // - { email: string } (legacy/client)
   const recipientEmailRaw =
-    typeof body?.recipientEmail === "string" ? body.recipientEmail : "";
+    typeof body?.recipientEmail === "string"
+      ? body.recipientEmail
+      : typeof body?.email === "string"
+        ? body.email
+        : "";
+
   const recipientEmail = recipientEmailRaw.trim().toLowerCase();
 
   if (!recipientEmail || !recipientEmail.includes("@")) {
@@ -37,8 +45,6 @@ export async function POST(
     );
   }
 
-  // NOTE: This assumes your DB function exists and returns a token string.
-  // If it errors, we surface the DB error code/message safely.
   const { data: token, error: rpcErr } = await supabase.rpc(
     "prepare_proposal_for_outreach",
     {
