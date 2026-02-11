@@ -51,6 +51,7 @@ src/
 │   ├── dealSnapshot.ts       # FullDealSnapshotV1 validation (opaque, no recompute)
 │   ├── dealSnapshotDb.ts     # insertDealSnapshot + getLatestDealSnapshot helpers
 │   ├── dealSnapshotDisplay.ts # Pure display extraction + formatting helpers
+│   ├── draftToDealSnapshot.ts # DraftSnapshotV1 → FullDealSnapshotV1 mapping
 │   ├── rateLimit.ts          # In-memory IP rate limiter
 │   ├── useSession.ts         # React session hook
 │   └── __tests__/
@@ -58,6 +59,7 @@ src/
 │       ├── draftSnapshotValidation.test.ts # Snapshot validation tests (12 tests)
 │       ├── dealSnapshotValidation.test.ts  # FullDealSnapshotV1 validation tests (14 tests)
 │       ├── dealSnapshotDisplay.test.ts    # Snapshot display/rendering logic tests (9 tests)
+│       ├── draftToDealSnapshot.test.ts   # Draft→Deal snapshot mapping tests (5 tests)
 │       └── shareRoute.test.ts             # Share route validation tests (9 tests)
 └── middleware.ts             # Next.js middleware
 
@@ -136,6 +138,16 @@ Required for deal resume + share flows:
 - deal_share_tokens: service-role only (deny all anon/authenticated)
 
 ## Sprint Status
+
+### APP-061B — Resume route persists deal_snapshots (Complete)
+- [x] Replaced all calculator_snapshots reads/writes with deal_snapshots
+- [x] Resume route uses insertDealSnapshot + getLatestDealSnapshot
+- [x] Pure mapping helper: mapDraftToDealSnapshot (DraftSnapshotV1 → FullDealSnapshotV1)
+- [x] Idempotency preserved: existing deal_snapshot skips duplicate insert
+- [x] Audit event renamed: CALCULATOR_SNAPSHOT_CREATED → DEAL_SNAPSHOT_CREATED
+- [x] Response includes snapshot_id field
+- [x] Tests: 5 mapping tests (all passing)
+- [x] npm run build passes
 
 ### APP-061 — Render deal detail from persisted snapshot only (Complete)
 - [x] Deal page fetches from deal_snapshots via getLatestDealSnapshot

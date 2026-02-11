@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { createClient } from "@/lib/supabase/server";
 import { validateDraftSnapshotV1 } from "@/lib/draftSnapshot";
+import { insertDealSnapshot } from "@/lib/dealSnapshotDb";
+import { getLatestDealSnapshot } from "@/lib/dealSnapshotDb";
+import { mapDraftToDealSnapshot } from "@/lib/draftToDealSnapshot";
 
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
@@ -28,18 +31,13 @@ async function findExistingDeal(
 
   if (!existingDeal?.id) return null;
 
-  const { data: existingSnap } = await (
-    service.from("calculator_snapshots") as any
-  )
-    .select("version")
-    .eq("deal_id", existingDeal.id)
-    .order("version", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const snapResult = await getLatestDealSnapshot(service, existingDeal.id);
+  const hasSnapshot = snapResult.ok && snapResult.snapshot !== null;
 
   return {
     deal_id: existingDeal.id,
-    snapshot_version: existingSnap?.version ?? 1,
+    snapshot_id: snapResult.ok && snapResult.snapshot ? snapResult.snapshot.id : null,
+    has_snapshot: hasSnapshot,
   };
 }
 
@@ -50,7 +48,6 @@ async function getOrCreateDeal(params: {
 }) {
   const { service, userId, sourceRef } = params;
 
-  // 1) Fast path: already exists
   const existing = await (service.from("deals") as any)
     .select("id, created_at")
     .eq("owner_user_id", userId)
@@ -60,7 +57,6 @@ async function getOrCreateDeal(params: {
 
   if (existing?.data?.id) return existing.data;
 
-  // 2) Try create (explicit mode)
   const inserted = await (service.from("deals") as any)
     .insert({
       owner_user_id: userId,
@@ -74,7 +70,6 @@ async function getOrCreateDeal(params: {
 
   if (inserted?.data?.id) return inserted.data;
 
-  // 3) Fallback: fetch again (covers race conditions)
   const refetch = await (service.from("deals") as any)
     .select("id, created_at")
     .eq("owner_user_id", userId)
@@ -86,6 +81,31 @@ async function getOrCreateDeal(params: {
 
   const msg = inserted?.error?.message || "Unknown deal creation error";
   throw new Error(`Failed to create or locate deal: ${msg}`);
+}
+
+async function ensureDealSnapshot(
+  service: ReturnType<typeof createServiceClient>,
+  dealId: string,
+  userId: string,
+  draftSnapshot: ReturnType<typeof mapDraftToDealSnapshot>,
+): Promise<{ snapshot_id: string; created: boolean }> {
+  const existing = await getLatestDealSnapshot(service, dealId);
+  if (existing.ok && existing.snapshot) {
+    return { snapshot_id: existing.snapshot.id, created: false };
+  }
+
+  const result = await insertDealSnapshot(service, dealId, userId, draftSnapshot);
+  if (!result.ok) {
+    if (result.code === "INSERT_FAILED") {
+      const retry = await getLatestDealSnapshot(service, dealId);
+      if (retry.ok && retry.snapshot) {
+        return { snapshot_id: retry.snapshot.id, created: false };
+      }
+    }
+    throw new Error(`Failed to persist deal snapshot: ${result.error}`);
+  }
+
+  return { snapshot_id: result.id, created: true };
 }
 
 export async function POST(request: NextRequest) {
@@ -144,14 +164,16 @@ export async function POST(request: NextRequest) {
 
     const snapshot = validation.snapshot;
     const sourceRef = `draft:${draft.id}`;
+    const dealSnapshot = mapDraftToDealSnapshot(snapshot, draft.contract_version);
 
     if (draft.redeemed_at && draft.redeemed_by_user_id === user.id) {
       const existing = await findExistingDeal(service, user.id, sourceRef);
-      if (existing) {
+      if (existing && existing.has_snapshot) {
         return NextResponse.json({
           ok: true,
           deal_id: existing.deal_id,
-          snapshot_version: existing.snapshot_version,
+          snapshot_id: existing.snapshot_id,
+          snapshot_version: 1,
           redirect_url: `/deal/${existing.deal_id}`,
           idempotent: true,
         });
@@ -163,57 +185,18 @@ export async function POST(request: NextRequest) {
         sourceRef,
       });
 
-      const { data: existingSnap } = await (
-        service.from("calculator_snapshots") as any
-      )
-        .select("version")
-        .eq("deal_id", deal.id)
-        .order("version", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      const snapVersion = existingSnap?.version ?? null;
-
-      if (snapVersion == null) {
-        const { data: calcSnap, error: snapError } = await (
-          service.from("calculator_snapshots") as any
-        )
-          .insert({
-            deal_id: deal.id,
-            version: 1,
-            source: "marketing_resume",
-            inputs_json: snapshot.inputs,
-            results_json: snapshot.result,
-            calculator_schema_version: snapshot.calculator_schema_version,
-            engine_version: snapshot.engine_version,
-            inputs_hash: snapshot.inputs_hash,
-            result_hash: snapshot.result_hash,
-            parent_snapshot_id: null,
-            created_by: user.id,
-          })
-          .select("id, version")
-          .single();
-
-        if (snapError || !calcSnap) {
-          return jsonError(
-            "Draft redeemed and deal exists, but calculator snapshot is missing and could not be created.",
-            500,
-          );
-        }
-
-        return NextResponse.json({
-          ok: true,
-          deal_id: deal.id,
-          snapshot_version: calcSnap.version,
-          redirect_url: `/deal/${deal.id}`,
-          idempotent: true,
-        });
-      }
+      const { snapshot_id } = await ensureDealSnapshot(
+        service,
+        deal.id,
+        user.id,
+        dealSnapshot,
+      );
 
       return NextResponse.json({
         ok: true,
         deal_id: deal.id,
-        snapshot_version: snapVersion,
+        snapshot_id,
+        snapshot_version: 1,
         redirect_url: `/deal/${deal.id}`,
         idempotent: true,
       });
@@ -243,11 +226,12 @@ export async function POST(request: NextRequest) {
 
       if (refetched?.redeemed_by_user_id === user.id) {
         const existing = await findExistingDeal(service, user.id, sourceRef);
-        if (existing) {
+        if (existing && existing.has_snapshot) {
           return NextResponse.json({
             ok: true,
             deal_id: existing.deal_id,
-            snapshot_version: existing.snapshot_version,
+            snapshot_id: existing.snapshot_id,
+            snapshot_version: 1,
             redirect_url: `/deal/${existing.deal_id}`,
             idempotent: true,
           });
@@ -259,9 +243,17 @@ export async function POST(request: NextRequest) {
           sourceRef,
         });
 
+        const { snapshot_id } = await ensureDealSnapshot(
+          service,
+          deal.id,
+          user.id,
+          dealSnapshot,
+        );
+
         return NextResponse.json({
           ok: true,
           deal_id: deal.id,
+          snapshot_id,
           snapshot_version: 1,
           redirect_url: `/deal/${deal.id}`,
           idempotent: true,
@@ -277,29 +269,12 @@ export async function POST(request: NextRequest) {
       sourceRef,
     });
 
-    const { data: calcSnap, error: snapError } = await (
-      service.from("calculator_snapshots") as any
-    )
-      .insert({
-        deal_id: deal.id,
-        version: 1,
-        source: "marketing_resume",
-        inputs_json: snapshot.inputs,
-        results_json: snapshot.result,
-        calculator_schema_version: snapshot.calculator_schema_version,
-        engine_version: snapshot.engine_version,
-        inputs_hash: snapshot.inputs_hash,
-        result_hash: snapshot.result_hash,
-        parent_snapshot_id: null,
-        created_by: user.id,
-      })
-      .select("id, version, created_at")
-      .single();
-
-    if (snapError || !calcSnap) {
-      console.error("calculator_snapshot insert error:", snapError?.message);
-      return jsonError("Failed to create calculator snapshot", 500);
-    }
+    const { snapshot_id } = await ensureDealSnapshot(
+      service,
+      deal.id,
+      user.id,
+      dealSnapshot,
+    );
 
     const events = [
       {
@@ -314,9 +289,9 @@ export async function POST(request: NextRequest) {
       },
       {
         deal_id: deal.id,
-        event_type: "CALCULATOR_SNAPSHOT_CREATED",
+        event_type: "DEAL_SNAPSHOT_CREATED",
         payload: {
-          snapshot_version: calcSnap.version,
+          snapshot_id,
           source: "marketing_resume",
           calculator_schema_version: snapshot.calculator_schema_version,
           engine_version: snapshot.engine_version,
@@ -338,7 +313,8 @@ export async function POST(request: NextRequest) {
       {
         ok: true,
         deal_id: deal.id,
-        snapshot_version: calcSnap.version,
+        snapshot_id,
+        snapshot_version: 1,
         redirect_url: `/deal/${deal.id}`,
         idempotent: false,
       },
