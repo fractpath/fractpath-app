@@ -55,11 +55,17 @@ src/
 │       ├── counter/route.ts           # POST: create COUNTER version (OWNER or COUNTERPARTY)
 │       └── versions/[versionId]/
 │           └── decision/route.ts     # POST: ACCEPT/REJECT a version (OWNER only)
+├── components/deal/
+│   ├── DealSummary.tsx                  # Orchestrator: friendly deal summary renderer
+│   ├── DealKpiCard.tsx                  # Headline + supporting KPI cards
+│   ├── DealExitTable.tsx                # Early/standard/late exit outcomes table
+│   └── DealAssumptionsSummary.tsx       # Collapsible key assumptions list
 ├── lib/
 │   ├── dealSnapshot.ts                  # FullDealSnapshotV1 validation
 │   ├── dealSnapshotDb.ts               # insertDealSnapshot + getDealSnapshots helpers
 │   ├── dealSnapshotDisplay.ts          # Pure display + selectSnapshot helpers
 │   ├── snapshotCompare.ts              # compareSnapshotDisplay pure diff helper
+│   ├── dealSummaryViewModel.ts          # buildDealSummaryViewModel pure view-model helper
 │   ├── dealTimeline.ts                 # getDealEvents + buildDealTimeline merge/sort helper
 │   ├── dealVersionDb.ts                # getDealVersions + getLatestDealVersion + version_type validation
 │   ├── draftToDealSnapshot.ts          # DraftSnapshotV1 → FullDealSnapshotV1 mapping
@@ -73,7 +79,8 @@ src/
 │       ├── counterRoute.test.ts          # 13 tests (body parsing, role gating, snapshot validation)
 │       ├── decisionRoute.test.ts        # 21 tests (body parsing, role gating, version validation, duplicate prevention)
 │       ├── snapshotCompare.test.ts     # 14 tests (diff logic, missing keys, null handling, nested objects)
-│       └── dealTimeline.test.ts       # 17 tests (ordering, labeling, links, missing fields)
+│       ├── dealTimeline.test.ts       # 17 tests (ordering, labeling, links, missing fields)
+│       └── dealSummaryViewModel.test.ts # 15 tests (KPI extraction, exits, assumptions, flags)
 supabase/migrations/
 ├── 20260210_app_060_deal_snapshots.sql
 ├── 20260211_app_070_deal_versions.sql
@@ -82,6 +89,19 @@ supabase/migrations/
 ```
 
 ## Sprint Status
+
+### APP-080 — Friendly Deal Summary Renderer (Complete)
+- [x] Pure view-model helper: src/lib/dealSummaryViewModel.ts — buildDealSummaryViewModel
+- [x] Extracts 1 headline + up to 4 supporting KPIs from outputs/inputs
+- [x] Exit outcomes table from settlements or exit_early/standard/late keys
+- [x] Collapsible assumptions from known input keys (capped at 6)
+- [x] Graceful degradation: null display, null outputs, missing keys all handled
+- [x] Components: DealSummary, DealKpiCard, DealExitTable, DealAssumptionsSummary
+- [x] Deal page updated: raw snapshot dump replaced with friendly summary
+- [x] isHistorical banner shown for older snapshots
+- [x] Snapshot history + timeline sections untouched
+- [x] Tests: 15 pure logic tests (KPI extraction, exits, assumptions, flags, fallbacks)
+- [x] npm run build passes
 
 ### APP-075 — Unified deal timeline (Complete)
 - [x] Server helper: src/lib/dealTimeline.ts — getDealEvents + buildDealTimeline

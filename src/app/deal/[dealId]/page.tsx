@@ -8,14 +8,13 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ShareDealCard } from "@/components/ShareDealCard";
+import { DealSummary } from "@/components/deal/DealSummary";
 import { getDealSnapshots } from "@/lib/dealSnapshotDb";
 import { getDealVersions } from "@/lib/dealVersionDb";
 import { getDealEvents, buildDealTimeline } from "@/lib/dealTimeline";
 import {
   extractSnapshotDisplay,
   selectSnapshot,
-  formatValue,
-  humanLabel,
 } from "@/lib/dealSnapshotDisplay";
 
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -207,93 +206,18 @@ export default async function DealPage({ params, searchParams }: PageProps) {
           </div>
         ) : null}
 
-        {!display ? (
-          <div className="mt-3 space-y-2">
-            <p className="text-sm font-medium">
-              No scenario snapshot saved yet
-            </p>
-            <p className="text-sm text-muted-foreground">
-              A snapshot will appear here once the calculator widget saves one
-              for this deal. No numbers are computed in this app.
-            </p>
-          </div>
-        ) : (
-          <div className="mt-4 space-y-4 text-sm">
-            <div className="grid gap-2">
-              <div>
-                <span className="font-medium">Contract version:</span>{" "}
-                {display.contractVersion}
-              </div>
-              <div>
-                <span className="font-medium">Schema version:</span>{" "}
-                {display.schemaVersion}
-              </div>
-              <div>
-                <span className="font-medium">Created:</span>{" "}
-                {display.createdAt}
-              </div>
-              <div>
-                <span className="font-medium">Input hash:</span>{" "}
-                <span className="break-words">{display.inputHash}</span>
-              </div>
-              <div>
-                <span className="font-medium">Output hash:</span>{" "}
-                <span className="break-words">{display.outputHash}</span>
-              </div>
-            </div>
-
-            {display.inputs ? (
-              <div>
-                <div className="font-medium">Inputs</div>
-                <div className="mt-2 grid gap-1 rounded-md bg-muted p-3 text-xs">
-                  {Object.entries(display.inputs).map(([k, v]) => (
-                    <div key={k} className="flex justify-between gap-4">
-                      <span className="text-muted-foreground">
-                        {humanLabel(k)}
-                      </span>
-                      <span className="font-medium">{formatValue(v)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div>
-                <div className="font-medium">Inputs</div>
-                <p className="mt-2 text-xs text-muted-foreground">{"\u2014"}</p>
-              </div>
-            )}
-
-            {display.outputs ? (
-              <div>
-                <div className="font-medium">Outputs</div>
-                <div className="mt-2 grid gap-1 rounded-md bg-muted p-3 text-xs">
-                  {Object.entries(display.outputs).map(([k, v]) => (
-                    <div key={k} className="flex justify-between gap-4">
-                      <span className="text-muted-foreground">
-                        {humanLabel(k)}
-                      </span>
-                      <span className="font-medium">{formatValue(v)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div>
-                <div className="font-medium">Outputs</div>
-                <p className="mt-2 text-xs text-muted-foreground">{"\u2014"}</p>
-              </div>
-            )}
-
-            {display.chartSeries ? (
-              <div>
-                <div className="font-medium">Projection series</div>
-                <pre className="mt-2 overflow-auto rounded-md bg-muted p-3 text-xs leading-relaxed">
-                  {JSON.stringify(display.chartSeries, null, 2)}
-                </pre>
-              </div>
-            ) : null}
-          </div>
-        )}
+        <div className="mt-4">
+          <DealSummary
+            snapshot={display}
+            snapshotMeta={{
+              contractVersion: display?.contractVersion ?? "\u2014",
+              schemaVersion: display?.schemaVersion ?? "\u2014",
+              createdAt: display?.createdAt ?? "\u2014",
+            }}
+            dealId={dealId}
+            isHistorical={!isLatest}
+          />
+        </div>
       </section>
 
       {snapshots.length > 1 ? (
