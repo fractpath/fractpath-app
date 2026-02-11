@@ -8,6 +8,12 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ShareDealCard } from "@/components/ShareDealCard";
+import { getLatestDealSnapshot } from "@/lib/dealSnapshotDb";
+import {
+  extractSnapshotDisplay,
+  formatValue,
+  humanLabel,
+} from "@/lib/dealSnapshotDisplay";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -100,19 +106,11 @@ export default async function DealPage({ params, searchParams }: PageProps) {
 
   const readOnly = role === "VIEWER" || isSharedMode;
 
-  const snapRes = await supabase
-    .from("calculator_snapshots")
-    .select(
-      "id, version, source, engine_version, calculator_schema_version, inputs_json, results_json, inputs_hash, result_hash, created_at",
-    )
-    .eq("deal_id", dealId)
-    .order("version", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const snapResult = await getLatestDealSnapshot(supabase, dealId);
+  const snapshotRow = snapResult.ok ? snapResult.snapshot : null;
+  const display = extractSnapshotDisplay(snapshotRow);
 
-  const snapshot = snapRes.data ?? null;
-
-  // NEW: Deal events timeline (read-only)
+  // Deal events timeline (read-only)
   const eventsRes = await supabase
     .from("deal_events")
     .select("id, event_type, payload, created_by, created_at")
@@ -158,60 +156,97 @@ export default async function DealPage({ params, searchParams }: PageProps) {
 
       <section className="mt-6 rounded-md border p-4">
         <div className="flex items-baseline justify-between gap-4">
-          <h2 className="text-base font-semibold">Snapshot v1</h2>
+          <h2 className="text-base font-semibold">Scenario snapshot</h2>
           <div className="text-xs text-muted-foreground">
-            Latest calculator snapshot (stored JSON; no recompute)
+            Latest saved snapshot (read-only; no recompute)
           </div>
         </div>
 
-        {!snapshot ? (
-          <p className="mt-3 text-sm text-muted-foreground">
-            No calculator snapshot found for this deal.
-          </p>
+        {!display ? (
+          <div className="mt-3 space-y-2">
+            <p className="text-sm font-medium">
+              No scenario snapshot saved yet
+            </p>
+            <p className="text-sm text-muted-foreground">
+              A snapshot will appear here once the calculator widget saves one
+              for this deal. No numbers are computed in this app.
+            </p>
+          </div>
         ) : (
           <div className="mt-4 space-y-4 text-sm">
             <div className="grid gap-2">
               <div>
-                <span className="font-medium">Version:</span> {snapshot.version}
+                <span className="font-medium">Contract version:</span>{" "}
+                {display.contractVersion}
               </div>
               <div>
-                <span className="font-medium">Source:</span> {snapshot.source}
-              </div>
-              <div>
-                <span className="font-medium">Engine:</span>{" "}
-                {snapshot.engine_version}
-              </div>
-              <div>
-                <span className="font-medium">Calculator schema:</span>{" "}
-                {snapshot.calculator_schema_version}
+                <span className="font-medium">Schema version:</span>{" "}
+                {display.schemaVersion}
               </div>
               <div>
                 <span className="font-medium">Created:</span>{" "}
-                {snapshot.created_at}
+                {display.createdAt}
               </div>
               <div>
-                <span className="font-medium">Inputs hash:</span>{" "}
-                <span className="break-words">{snapshot.inputs_hash}</span>
+                <span className="font-medium">Input hash:</span>{" "}
+                <span className="break-words">{display.inputHash}</span>
               </div>
               <div>
-                <span className="font-medium">Result hash:</span>{" "}
-                <span className="break-words">{snapshot.result_hash}</span>
+                <span className="font-medium">Output hash:</span>{" "}
+                <span className="break-words">{display.outputHash}</span>
               </div>
             </div>
 
-            <div>
-              <div className="font-medium">Inputs</div>
-              <pre className="mt-2 overflow-auto rounded-md bg-muted p-3 text-xs leading-relaxed">
-                {JSON.stringify(snapshot.inputs_json, null, 2)}
-              </pre>
-            </div>
+            {display.inputs ? (
+              <div>
+                <div className="font-medium">Inputs</div>
+                <div className="mt-2 grid gap-1 rounded-md bg-muted p-3 text-xs">
+                  {Object.entries(display.inputs).map(([k, v]) => (
+                    <div key={k} className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">
+                        {humanLabel(k)}
+                      </span>
+                      <span className="font-medium">{formatValue(v)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="font-medium">Inputs</div>
+                <p className="mt-2 text-xs text-muted-foreground">{"\u2014"}</p>
+              </div>
+            )}
 
-            <div>
-              <div className="font-medium">Results</div>
-              <pre className="mt-2 overflow-auto rounded-md bg-muted p-3 text-xs leading-relaxed">
-                {JSON.stringify(snapshot.results_json, null, 2)}
-              </pre>
-            </div>
+            {display.outputs ? (
+              <div>
+                <div className="font-medium">Outputs</div>
+                <div className="mt-2 grid gap-1 rounded-md bg-muted p-3 text-xs">
+                  {Object.entries(display.outputs).map(([k, v]) => (
+                    <div key={k} className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">
+                        {humanLabel(k)}
+                      </span>
+                      <span className="font-medium">{formatValue(v)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="font-medium">Outputs</div>
+                <p className="mt-2 text-xs text-muted-foreground">{"\u2014"}</p>
+              </div>
+            )}
+
+            {display.chartSeries ? (
+              <div>
+                <div className="font-medium">Projection series</div>
+                <pre className="mt-2 overflow-auto rounded-md bg-muted p-3 text-xs leading-relaxed">
+                  {JSON.stringify(display.chartSeries, null, 2)}
+                </pre>
+              </div>
+            ) : null}
           </div>
         )}
       </section>

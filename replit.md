@@ -50,12 +50,14 @@ src/
 │   ├── draftSnapshot.ts      # DraftSnapshot v1 validation + hash verification
 │   ├── dealSnapshot.ts       # FullDealSnapshotV1 validation (opaque, no recompute)
 │   ├── dealSnapshotDb.ts     # insertDealSnapshot + getLatestDealSnapshot helpers
+│   ├── dealSnapshotDisplay.ts # Pure display extraction + formatting helpers
 │   ├── rateLimit.ts          # In-memory IP rate limiter
 │   ├── useSession.ts         # React session hook
 │   └── __tests__/
 │       ├── draftToken.test.ts              # Token generation tests (5 tests)
 │       ├── draftSnapshotValidation.test.ts # Snapshot validation tests (12 tests)
 │       ├── dealSnapshotValidation.test.ts  # FullDealSnapshotV1 validation tests (14 tests)
+│       ├── dealSnapshotDisplay.test.ts    # Snapshot display/rendering logic tests (9 tests)
 │       └── shareRoute.test.ts             # Share route validation tests (9 tests)
 └── middleware.ts             # Next.js middleware
 
@@ -134,6 +136,16 @@ Required for deal resume + share flows:
 - deal_share_tokens: service-role only (deny all anon/authenticated)
 
 ## Sprint Status
+
+### APP-061 — Render deal detail from persisted snapshot only (Complete)
+- [x] Deal page fetches from deal_snapshots via getLatestDealSnapshot
+- [x] Snapshot present → renders inputs/outputs as key-value pairs (no recompute)
+- [x] Snapshot missing → clear empty state ("No scenario snapshot saved yet")
+- [x] Chart series rendered if present in snapshot_json
+- [x] Graceful degradation for missing optional fields (em dash fallback)
+- [x] Pure display helper (dealSnapshotDisplay.ts) with formatValue + humanLabel
+- [x] Tests: 9 display logic tests (all passing)
+- [x] npm run build passes
 
 ### APP-060 — Persist FullDealSnapshotV1 (Complete)
 - [x] Migration: deal_snapshots table with append-only triggers, indexes, RLS
