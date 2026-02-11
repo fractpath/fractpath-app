@@ -40,6 +40,7 @@ FractPath is a Next.js application that utilizes API routes for backend logic an
 - **Snapshot Comparison:** A read-only comparison view at `/deal/[dealId]/compare?a=<id>&b=<id>` shows field-level diffs between two snapshots of the same deal.
 - **Historical Snapshot Mode:** Viewing a historical snapshot hides the calculator and shows an amber banner with a "Back to latest" link. Uses `computeHistoricalState` pure helper.
 - **Counterparty Counter Flow:** COUNTERPARTY users see the calculator widget on latest snapshot view. Submitting creates a snapshot via `/api/deals/[dealId]/snapshot/propose` (COUNTERPARTY-only), then creates a COUNTER deal_version via existing `/api/deals/[dealId]/counter`. VIEWER never sees calculator. Base snapshot ID auto-selected from current view.
+- **Version Timeline Cards:** VERSION entries in the timeline render as styled cards with type-specific color badges (Offer=blue, Counter=purple, Accepted=green, Rejected=red), version number, note, timestamp, and compare link when both snapshots exist. SNAPSHOT and EVENT entries retain original rendering.
 
 ## External Dependencies
 - **Next.js:** React framework for server-side rendering and API routes.

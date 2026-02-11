@@ -7,6 +7,7 @@ export interface TimelineEntry {
   title: string;
   subtitle: string | null;
   href: string | null;
+  version_type?: string;
 }
 
 export interface DealEventRow {
@@ -139,6 +140,7 @@ export function buildDealTimeline(input: BuildTimelineInput): TimelineEntry[] {
       title: versionTypeLabel(v.version_type ?? "UNKNOWN"),
       subtitle,
       href,
+      version_type: v.version_type ?? undefined,
     });
   }
 

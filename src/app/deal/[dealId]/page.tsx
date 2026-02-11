@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ShareDealCard } from "@/components/ShareDealCard";
 import { DealSummary } from "@/components/deal/DealSummary";
 import { DealCalculatorEmbed } from "@/components/deal/DealCalculatorEmbed";
+import { VersionTimelineCard } from "@/components/deal/VersionTimelineCard";
 import { shouldRenderDealCalculator } from "@/lib/dealCalculatorGating";
 import { selectBaseSnapshotId } from "@/lib/counterBaseSnapshot";
 import { getDealSnapshots } from "@/lib/dealSnapshotDb";
@@ -298,19 +299,19 @@ export default async function DealPage({ params, searchParams }: PageProps) {
           </p>
         ) : (
           <div className="mt-4 space-y-2">
-            {timeline.map((entry) => (
+            {timeline.map((entry) => entry.type === "VERSION" ? (
+              <VersionTimelineCard key={`${entry.type}-${entry.id}`} entry={entry} />
+            ) : (
               <div
                 key={`${entry.type}-${entry.id}`}
                 className="flex items-start gap-3 rounded-md px-3 py-2 text-xs hover:bg-muted/50"
               >
                 <span className={`mt-0.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                  entry.type === "VERSION"
-                    ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
-                    : entry.type === "SNAPSHOT"
-                      ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                      : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                  entry.type === "SNAPSHOT"
+                    ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                    : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
                 }`}>
-                  {entry.type === "VERSION" ? "VER" : entry.type === "SNAPSHOT" ? "SNAP" : "EVT"}
+                  {entry.type === "SNAPSHOT" ? "SNAP" : "EVT"}
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">
