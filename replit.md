@@ -33,7 +33,8 @@ src/
 │       ├── deals/
 │       │   ├── resume/route.ts       # POST: resume DraftSnapshot → Deal + Snapshot v1
 │       │   └── [dealId]/
-│       │       └── share/route.ts    # POST: create share link (OWNER only)
+│       │       ├── share/route.ts    # POST: create share link (OWNER only)
+│       │       └── snapshot/route.ts # POST: owner-only snapshot ingestion
 │       └── drafts/
 │           ├── mint/route.ts   # POST: mint draft token (pre-auth)
 │           └── redeem/route.ts # POST: redeem token → scenario (legacy)
@@ -60,7 +61,8 @@ src/
 │       ├── dealSnapshotValidation.test.ts  # FullDealSnapshotV1 validation tests (14 tests)
 │       ├── dealSnapshotDisplay.test.ts    # Snapshot display/rendering + selection tests (14 tests)
 │       ├── draftToDealSnapshot.test.ts   # Draft→Deal snapshot mapping tests (5 tests)
-│       └── shareRoute.test.ts             # Share route validation tests (9 tests)
+│       ├── shareRoute.test.ts             # Share route validation tests (9 tests)
+│       └── snapshotIngestion.test.ts     # Snapshot ingestion route tests (14 tests)
 └── middleware.ts             # Next.js middleware
 
 supabase/
@@ -138,6 +140,16 @@ Required for deal resume + share flows:
 - deal_share_tokens: service-role only (deny all anon/authenticated)
 
 ## Sprint Status
+
+### APP-063 — Owner-only snapshot ingestion endpoint (Complete)
+- [x] POST /api/deals/[dealId]/snapshot — auth + OWNER-only
+- [x] Request body: { snapshot: FullDealSnapshotV1 } (opaque, no recompute)
+- [x] Uses insertDealSnapshot() as single source for validation + insert
+- [x] Ownership: owner_user_id match OR OWNER grant in deal_access_grants
+- [x] Error responses: 401 (unauth), 403 (not owner), 400 (bad body), 404 (no deal), 422 (validation)
+- [x] Returns: { ok: true, snapshot_id } on success (201)
+- [x] Tests: 14 ingestion route tests (UUID, body parsing, ownership, validation gating)
+- [x] npm run build passes
 
 ### APP-062 — Snapshot history & selection (Complete)
 - [x] getDealSnapshots(dealId, limit=20) helper added
