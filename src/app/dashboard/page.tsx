@@ -15,7 +15,8 @@ const PERSONA_WELCOME: Record<
   },
   buyer: {
     tagline: "Welcome, Future Homeowner",
-    description: "You're modeling a pathway to ownership through shared equity.",
+    description:
+      "You're modeling a pathway to ownership through shared equity.",
   },
   realtor: {
     tagline: "Welcome, Partner",
@@ -41,11 +42,21 @@ const NEXT_STEPS: Record<Persona, string[]> = {
   ],
 };
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams?: Record<string, string | string[] | undefined>;
+}) {
   const draftToken = (await cookies()).get("fractpath_draft_token")?.value;
   if (draftToken) {
     redirect(`/resume?token=${encodeURIComponent(draftToken)}`);
   }
+
+  const createFailed =
+    (typeof searchParams?.create === "string" ? searchParams?.create : null) ===
+    "failed";
+  const createCode =
+    typeof searchParams?.code === "string" ? searchParams?.code : null;
 
   const supabase = await createClient();
 
@@ -134,16 +145,35 @@ export default async function DashboardPage() {
           <p className="mt-1 text-sm text-muted-foreground">
             {welcome.description}
           </p>
+
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <Link
+              href="/deal/new"
+              className="inline-flex items-center rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background"
+            >
+              Create deal
+            </Link>
+          </div>
         </div>
+
         <form method="post" action="/auth/logout" className="m-0">
-          <button
-            type="submit"
-            className="rounded-md border px-3 py-2 text-sm"
-          >
+          <button type="submit" className="rounded-md border px-3 py-2 text-sm">
             Sign out
           </button>
         </form>
       </header>
+
+      {createFailed ? (
+        <div className="mt-6 rounded-md border p-4">
+          <div className="text-sm font-medium">Deal creation failed</div>
+          <div className="mt-1 text-sm text-muted-foreground">
+            Please try again.{" "}
+            {createCode ? (
+              <span className="break-words">Error code: {createCode}</span>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       <div className="mt-6 grid gap-6">
         <section className="rounded-md border p-4">
