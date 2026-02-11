@@ -15,15 +15,15 @@ export default async function NewDealPage() {
     redirect("/login?returnTo=/deal/new");
   }
 
-  // Use canonical DB function (RLS-safe)
-  const { data: result, error: rpcErr } = await supabase.rpc(
+  const { data: dealId, error: rpcErr } = await supabase.rpc(
     "create_deal_with_owner_grant",
     {
-      p_owner_user_id: user.id,
+      p_property_address: "New Property",
+      p_user_id: user.id,
     },
   );
 
-  if (rpcErr || !result) {
+  if (rpcErr || !dealId) {
     console.error("NEW_DEAL_CREATE_FAILED", {
       message: rpcErr?.message,
       code: (rpcErr as any)?.code,
@@ -38,8 +38,5 @@ export default async function NewDealPage() {
     redirect(`/dashboard?create=failed&code=${errorCode}`);
   }
 
-  // Assume function returns the deal id
-  const dealId = result as string;
-
-  redirect(`/deal/${encodeURIComponent(dealId)}`);
+  redirect(`/deal/${encodeURIComponent(dealId as string)}`);
 }
