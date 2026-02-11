@@ -39,6 +39,7 @@ FractPath is a Next.js application leveraging API routes for backend logic and S
 - **Snapshot Ingestion:** Owners can ingest new snapshots for their deals via `/api/deals/[dealId]/snapshot`.
 - **Offer Creation:** Owners can create OFFER deal_versions referencing snapshots via `/api/deals/[dealId]/offer`.
 - **Counter-Offer Creation:** Owners or counterparties can create COUNTER deal_versions via `/api/deals/[dealId]/counter`.
+- **Accept/Reject Decisions:** Owners can accept or reject a specific deal_version via `/api/deals/[dealId]/versions/[versionId]/decision`. Decisions are recorded as new ACCEPT/REJECT version rows referencing the target version, preventing duplicate decisions on the same version.
 
 ## Project Structure (Key Files)
 
@@ -50,7 +51,9 @@ src/
 │       ├── share/route.ts               # POST: create share link (OWNER only)
 │       ├── snapshot/route.ts            # POST: owner-only snapshot ingestion
 │       ├── offer/route.ts              # POST: create OFFER version (OWNER only)
-│       └── counter/route.ts           # POST: create COUNTER version (OWNER or COUNTERPARTY)
+│       ├── counter/route.ts           # POST: create COUNTER version (OWNER or COUNTERPARTY)
+│       └── versions/[versionId]/
+│           └── decision/route.ts     # POST: ACCEPT/REJECT a version (OWNER only)
 ├── lib/
 │   ├── dealSnapshot.ts                  # FullDealSnapshotV1 validation
 │   ├── dealSnapshotDb.ts               # insertDealSnapshot + getDealSnapshots helpers
@@ -64,7 +67,8 @@ src/
 │       ├── snapshotIngestion.test.ts       # 14 tests
 │       ├── dealVersionDb.test.ts           # 15 tests (version_type + ordering)
 │       ├── offerRoute.test.ts             # 15 tests (body parsing, ownership, snapshot validation)
-│       └── counterRoute.test.ts          # 13 tests (body parsing, role gating, snapshot validation)
+│       ├── counterRoute.test.ts          # 13 tests (body parsing, role gating, snapshot validation)
+│       └── decisionRoute.test.ts        # 21 tests (body parsing, role gating, version validation, duplicate prevention)
 supabase/migrations/
 ├── 20260210_app_060_deal_snapshots.sql
 ├── 20260211_app_070_deal_versions.sql
@@ -73,6 +77,17 @@ supabase/migrations/
 ```
 
 ## Sprint Status
+
+### APP-073 — Accept/reject deal versions (Complete)
+- [x] POST /api/deals/[dealId]/versions/[versionId]/decision — auth + OWNER-only
+- [x] Body: { decision: "ACCEPT" | "REJECT", note?: string }
+- [x] Validates version belongs to deal
+- [x] Prevents duplicate decisions on same version (409)
+- [x] Inserts new deal_version with version_type=ACCEPT or REJECT, meta: { target_version_id }
+- [x] Logs DEAL_VERSION_DECIDED event
+- [x] Returns { ok: true, decision_version_id, version_number } on 201
+- [x] Tests: 21 pure logic tests (body parsing, role gating incl. COUNTERPARTY/VIEWER denied, version validation, duplicate prevention)
+- [x] npm run build passes
 
 ### APP-072 — Counter-offer endpoint + COUNTERPARTY role (Complete)
 - [x] Migration: Updated deal_versions INSERT RLS to allow COUNTERPARTY for COUNTER versions
