@@ -18,7 +18,6 @@ export default async function NewDealPage() {
   const { data: dealId, error: rpcErr } = await supabase.rpc(
     "create_deal_with_owner_grant",
     {
-      p_property_address: "New Property",
       p_user_id: user.id,
     },
   );
@@ -35,8 +34,7 @@ export default async function NewDealPage() {
       ((rpcErr as any)?.code as string) || "unknown",
     );
 
-    // Debug marker added
-    redirect(`/dashboard?create=failed&code=${errorCode}&m=rpc_sig_v2`);
+    redirect(`/dashboard?create=failed&code=${errorCode}`);
   }
 
   redirect(`/deal/${encodeURIComponent(dealId as string)}`);
