@@ -40,6 +40,7 @@ FractPath is a Next.js application leveraging API routes for backend logic and S
 - **Offer Creation:** Owners can create OFFER deal_versions referencing snapshots via `/api/deals/[dealId]/offer`.
 - **Counter-Offer Creation:** Owners or counterparties can create COUNTER deal_versions via `/api/deals/[dealId]/counter`.
 - **Accept/Reject Decisions:** Owners can accept or reject a specific deal_version via `/api/deals/[dealId]/versions/[versionId]/decision`. Decisions are recorded as new ACCEPT/REJECT version rows referencing the target version, preventing duplicate decisions on the same version.
+- **Snapshot Comparison:** A read-only comparison view at `/deal/[dealId]/compare?a=<id>&b=<id>` shows field-level diffs between two snapshots of the same deal, grouped by metadata, inputs, and outputs. No recomputation; values displayed as-is.
 
 ## Project Structure (Key Files)
 
@@ -58,6 +59,7 @@ src/
 │   ├── dealSnapshot.ts                  # FullDealSnapshotV1 validation
 │   ├── dealSnapshotDb.ts               # insertDealSnapshot + getDealSnapshots helpers
 │   ├── dealSnapshotDisplay.ts          # Pure display + selectSnapshot helpers
+│   ├── snapshotCompare.ts              # compareSnapshotDisplay pure diff helper
 │   ├── dealVersionDb.ts                # getDealVersions + getLatestDealVersion + version_type validation
 │   ├── draftToDealSnapshot.ts          # DraftSnapshotV1 → FullDealSnapshotV1 mapping
 │   └── __tests__/
@@ -68,7 +70,8 @@ src/
 │       ├── dealVersionDb.test.ts           # 15 tests (version_type + ordering)
 │       ├── offerRoute.test.ts             # 15 tests (body parsing, ownership, snapshot validation)
 │       ├── counterRoute.test.ts          # 13 tests (body parsing, role gating, snapshot validation)
-│       └── decisionRoute.test.ts        # 21 tests (body parsing, role gating, version validation, duplicate prevention)
+│       ├── decisionRoute.test.ts        # 21 tests (body parsing, role gating, version validation, duplicate prevention)
+│       └── snapshotCompare.test.ts     # 14 tests (diff logic, missing keys, null handling, nested objects)
 supabase/migrations/
 ├── 20260210_app_060_deal_snapshots.sql
 ├── 20260211_app_070_deal_versions.sql
@@ -77,6 +80,18 @@ supabase/migrations/
 ```
 
 ## Sprint Status
+
+### APP-074 — Read-only snapshot comparison view (Complete)
+- [x] Pure diff helper: src/lib/snapshotCompare.ts — compareSnapshotDisplay(a, b)
+- [x] Shallow compare on inputs, outputs, and meta keys (contract_version, schema_version, input_hash, output_hash)
+- [x] Handles null/undefined snapshots, missing keys, nested objects defensively
+- [x] UI route: /deal/[dealId]/compare?a=<id>&b=<id>
+- [x] Validates both snapshots exist and belong to dealId
+- [x] Header with snapshot A vs B metadata (version, schema, created_at)
+- [x] Changed fields grouped by Metadata / Inputs / Outputs
+- [x] "Back to deal" and "Swap A / B" links
+- [x] Tests: 14 pure logic tests (identical, changed input/output, missing keys, null, nested objects, meta diffs)
+- [x] npm run build passes
 
 ### APP-073 — Accept/reject deal versions (Complete)
 - [x] POST /api/deals/[dealId]/versions/[versionId]/decision — auth + OWNER-only
