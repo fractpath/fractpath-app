@@ -28,7 +28,7 @@ FractPath is a Next.js application leveraging API routes for backend logic and S
 - **Share Link Flow:**
     - Owners can generate shareable URLs for their deals via `/api/deals/[dealId]/share`.
     - The `/share` page validates tokens, handles authentication, and grants `VIEWER` access to the recipient, redirecting them to a read-only view of the deal.
-- **Access Control (RLS):** Supabase Row Level Security (RLS) is extensively used to manage access to deals, snapshots, events, and share tokens based on `deal_access_grants` (OWNER, VIEWER roles). Ownership is determined by `owner_user_id` or `OWNER` grant.
+- **Access Control (RLS):** Supabase Row Level Security (RLS) is extensively used to manage access to deals, snapshots, events, and share tokens based on `deal_access_grants` (OWNER, VIEWER, COUNTERPARTY roles). Ownership is determined by `owner_user_id` or `OWNER` grant. COUNTERPARTY can submit COUNTER versions only.
 - **Rate Limiting:** In-memory IP rate limiting is implemented to prevent abuse of pre-authentication endpoints.
 
 **Feature Specifications:**
@@ -38,6 +38,7 @@ FractPath is a Next.js application leveraging API routes for backend logic and S
 - **Share Deal Functionality:** Allows deal owners to generate read-only share links for others.
 - **Snapshot Ingestion:** Owners can ingest new snapshots for their deals via `/api/deals/[dealId]/snapshot`.
 - **Offer Creation:** Owners can create OFFER deal_versions referencing snapshots via `/api/deals/[dealId]/offer`.
+- **Counter-Offer Creation:** Owners or counterparties can create COUNTER deal_versions via `/api/deals/[dealId]/counter`.
 
 ## Project Structure (Key Files)
 
@@ -48,7 +49,8 @@ src/
 │   └── [dealId]/
 │       ├── share/route.ts               # POST: create share link (OWNER only)
 │       ├── snapshot/route.ts            # POST: owner-only snapshot ingestion
-│       └── offer/route.ts              # POST: create OFFER version (OWNER only)
+│       ├── offer/route.ts              # POST: create OFFER version (OWNER only)
+│       └── counter/route.ts           # POST: create COUNTER version (OWNER or COUNTERPARTY)
 ├── lib/
 │   ├── dealSnapshot.ts                  # FullDealSnapshotV1 validation
 │   ├── dealSnapshotDb.ts               # insertDealSnapshot + getDealSnapshots helpers
@@ -61,14 +63,27 @@ src/
 │       ├── draftToDealSnapshot.test.ts     # 5 tests
 │       ├── snapshotIngestion.test.ts       # 14 tests
 │       ├── dealVersionDb.test.ts           # 15 tests (version_type + ordering)
-│       └── offerRoute.test.ts             # 15 tests (body parsing, ownership, snapshot validation)
+│       ├── offerRoute.test.ts             # 15 tests (body parsing, ownership, snapshot validation)
+│       └── counterRoute.test.ts          # 13 tests (body parsing, role gating, snapshot validation)
 supabase/migrations/
 ├── 20260210_app_060_deal_snapshots.sql
 ├── 20260211_app_070_deal_versions.sql
+├── 20260211_app_072_counterparty_role.sql
 └── (earlier migrations...)
 ```
 
 ## Sprint Status
+
+### APP-072 — Counter-offer endpoint + COUNTERPARTY role (Complete)
+- [x] Migration: Updated deal_versions INSERT RLS to allow COUNTERPARTY for COUNTER versions
+- [x] POST /api/deals/[dealId]/counter — auth + OWNER or COUNTERPARTY
+- [x] Body: { proposed_snapshot_id, base_snapshot_id?, note? }
+- [x] Validates snapshot IDs belong to the same deal
+- [x] Inserts deal_versions row with version_type=COUNTER
+- [x] Logs DEAL_COUNTER_CREATED event
+- [x] VIEWER remains read-only (denied)
+- [x] Tests: 13 pure logic tests (body parsing, role gating incl. VIEWER denied, snapshot validation)
+- [x] npm run build passes
 
 ### APP-071 — Create offer version endpoint (Complete)
 - [x] POST /api/deals/[dealId]/offer — auth + OWNER-only
