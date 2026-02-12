@@ -1,253 +1,297 @@
-# APP-002 — Calculator snapshot persistence + versioning (audit-safe, snapshot-first)
+# APP-002 — Calculator Snapshot Persistence + Versioning (Server-Computed, Audit-Safe)
 
 ## Sprint
-Sprint 0 (alignment-only rewrite) → Sprint 5 (implementation)
-
-## Objective
-Define a durable, auditable system inside the secure portal to **persist, reference, and evolve calculator snapshots**
-that originate from the marketing calculator and the in-app calculator.
-
-This ticket ensures:
-- calculator projections never “disappear”
-- users can review exactly what was modeled
-- FractPath can trace how terms evolve over time
-- nothing can be silently changed or recomputed
-
-At this stage, calculator snapshots are **viewable and versioned**, and **editable only via explicit Apply actions**
-(which create new snapshots).
+Sprint 0 (architecture alignment rewrite) → Sprint 9 (implementation foundation)
 
 ---
 
-## Non-Goals
-- No inline negotiation UI (see APP-008)
-- No silent recomputation of saved snapshots
-- No background syncing with marketing calculator
-- No deal execution or payments
-- No AVM enrichment (APP-013 governs that)
+# Objective
+
+Define the authoritative, audit-safe persistence model for **calculator snapshots** inside the secure app.
+
+This ticket formalizes:
+
+- Server-side compute (trusted context)
+- Snapshot-first storage
+- Versioning under a stable `deal_id`
+- Immutable historical records
+- No silent recomputation
+- No multi-party mutation of a deal thread
+
+This is the foundation required before counter flows (APP-008).
 
 ---
 
-## Preconditions
-- APP-001 complete (auth, profiles, dashboard)
-- Widget produces DraftSnapshot (WGT-040)
-- Draft token redemption flow implemented (APP-INT-001)
-- OPS-INT-001 lifecycle + logging discipline defined
+# Architecture Alignment (Frozen)
+
+This ticket is governed by the Sprint 9 Architecture Scope.
+
+## Canonical Compute
+- All economic math lives in `fractpath-calculator-widget`.
+- App imports compute module and executes it server-side.
+- App UI never derives numeric terms independently.
+- App never recomputes silently on render.
+
+## Trusted Compute Rule
+All persisted snapshots must be generated via a **server-side compute-and-save operation**.
+
+Client previews are allowed for UX only — but persisted data must originate from server compute.
 
 ---
 
-## Core Design Principles (Locked)
-1) **Snapshots are immutable**
-   - once written, never mutated
-2) **Changes create new snapshots**
-   - version increments
-3) **Deal views render snapshots**
-   - never recompute silently
-4) **Calculator is the only math engine**
-   - app never derives numeric terms independently
+# Core Design Principles (Locked)
+
+1. **Snapshots are immutable**
+   - No UPDATE after insert.
+   - Version history is append-only.
+
+2. **All economic mutations create a new version**
+   - No overwriting.
+   - No patching results_json.
+
+3. **Snapshots are computed server-side**
+   - App must not persist client-generated results without recompute.
+
+4. **Deal thread is stable**
+   - `deal_id` persists.
+   - Versions exist under one deal.
+
+5. **VIEWER cannot create versions**
+   - Only OWNER (or admin) can mutate deal thread.
 
 ---
 
-## Terminology Alignment
-- **Calculator Snapshot**: Persisted calculator inputs + results (canonical unit)
-- **DraftSnapshot**: Pre-auth snapshot created by widget (WGT-040)
-- **Deal Snapshot**: Persisted calculator snapshot attached to a Deal ID
-- **Version**: Monotonic integer per deal, starting at 1
+# Terminology (Authoritative)
 
-This ticket replaces the older notion of “scenario” with **calculator snapshots**,
-which are the authoritative source for deal terms.
+- **Deal** — negotiation thread container (`deal_id`)
+- **Snapshot** — immutable computed economic state
+- **Version** — monotonic integer per deal
+- **DraftSnapshot** — marketing-side preview only (not authoritative)
+- **Engine Version** — compute package version
+- **Terms Version** — economic rule set identifier
 
 ---
 
-## A) Data Model — Calculator Snapshots (Minimal, Future-Proof)
+# A) Data Model — Deal Snapshots (Revised)
 
-Create a calculator snapshot model/table (or equivalent storage) with:
+Create or align to a `deal_snapshots` table with:
 
-### Required Fields
+## Required Fields
+
 - `id` (uuid, pk)
 - `deal_id` (uuid, fk → deals)
-- `version` (integer, starting at 1, monotonic per deal)
-- `source` (`marketing_resume` | `app_apply` | `admin_override`)
-- `calculator_schema_version`
+- `version` (integer, monotonic per deal)
+- `source` (`marketing_resume` | `owner_apply` | `admin_override`)
+- `terms_version`
 - `engine_version`
-- `persona_context` (nullable; informational only)
-- `inputs_json` (canonical `CalculatorInputsV1`)
-- `results_json` (canonical `CalculatorResultV1`)
+- `inputs_json`
+- `outputs_json`
+  - must include:
+    - summary
+    - schedule[]
+- `integrity_hash` (recommended; over terms_version + inputs + outputs)
 - `created_at`
-- `created_by` (`system` | `user` | `fractpath_admin`)
-- `parent_snapshot_id` (nullable; links prior version)
+- `created_by` (user id or system)
+- `parent_snapshot_id` (nullable)
 
-### Rules
-- Rows are **append-only**
-- No UPDATEs after insert
-- Version = max(version for deal_id) + 1
-- Snapshot #1 is always created from DraftSnapshot on resume (APP-INT-001)
+## Rules
 
-### “Current snapshot” rule (pick one; enforce consistently)
-- The deal detail view must render the **current snapshot** by reading:
-  - `deals.current_snapshot_id` (recommended), OR
-  - the latest snapshot by version (if no pointer is stored)
-
-Agents must not implement both approaches simultaneously.
+- Append-only.
+- No UPDATE.
+- No DELETE.
+- `version = max(version) + 1` scoped to deal_id.
+- Snapshot #1 created during resume.
 
 ---
 
-## B) Snapshot Creation Flows (Authoritative)
+# B) Current Snapshot Pointer (Required)
 
-### 1) Marketing → App Resume (Initial Snapshot)
-- Triggered by draft token redemption (APP-INT-001)
-- Create:
-  - Deal record
-  - Calculator snapshot version = 1
-- Snapshot #1:
-  - copied verbatim from DraftSnapshot
-  - no recompute
-  - no normalization beyond schema validation
-- Source = `marketing_resume`
+To prevent ambiguity:
 
-### 2) In-App Apply (New Snapshot)
-- Triggered when authenticated owner:
-  - opens input modal
-  - edits inputs/assumptions
-  - clicks **Apply**
-- Widget computes new result (client preview)
-- App persists:
-  - new snapshot
-  - version = prior + 1
-- Server must validate payload against widget schemas (inputs + results).
-- Source = `app_apply`
+`deals.current_snapshot_id` must exist.
 
-### 3) Admin Override (Manual, Rare)
-- Admin may create a new snapshot by:
-  - copying inputs from prior snapshot
-  - adjusting values
-  - persisting as version +1
-- Source = `admin_override`
-- Must preserve parent_snapshot_id linkage
+Rules:
+
+- Rendering must use `current_snapshot_id`.
+- Changing current version requires explicit action.
+- Do not derive “latest by version” implicitly in multiple places.
+
+Single source of truth for active version.
 
 ---
 
-## C) Ownership, Visibility, and Permissions
-- Snapshots belong to a **deal**, not directly to a user
+# C) Snapshot Creation Flows (Revised to Server Compute)
 
-### RLS / Access Rules (explicit)
-- Deal owner: read all snapshots; create new snapshots (Apply)
-- Viewers: read-only access to snapshots
-- Admins: read all; create admin_override snapshots
+## 1) Marketing → Resume (Initial Snapshot)
 
-No deletion. No edits.
+Triggered by draft token redemption.
+
+Flow:
+
+1. Create deal.
+2. Extract inputs from DraftSnapshot.
+3. Run compute server-side using canonical compute module.
+4. Persist snapshot:
+   - version = 1
+   - source = `marketing_resume`
+5. Set `deals.current_snapshot_id`.
+
+Important:
+- Do not persist client-computed results.
+- Always recompute on server.
 
 ---
 
-## D) Dashboard Updates (User-Facing)
-Update `/dashboard` to show **Deals**, not free-floating scenarios.
+## 2) Owner Apply (New Version)
+
+Triggered when OWNER edits inputs and clicks Apply.
+
+Flow:
+
+1. Client submits inputs only.
+2. Server:
+   - validates OWNER permission
+   - runs compute module
+   - persists new snapshot
+   - increments version
+   - sets current_snapshot_id
+3. Response returns new version metadata.
+
+Client preview must not be persisted directly.
+
+Source = `owner_apply`.
+
+---
+
+## 3) Admin Override
+
+Admin may:
+
+1. Provide modified inputs.
+2. Server recomputes.
+3. Persist new snapshot.
+4. Link parent_snapshot_id.
+
+Source = `admin_override`.
+
+No manual edits to outputs_json allowed.
+
+---
+
+# D) Permissions + RLS
+
+## Owner
+- Read all snapshots for their deal.
+- Create new versions.
+- Update current_snapshot_id.
+
+## Viewer
+- Read snapshots.
+- Cannot create versions.
+- Cannot change current pointer.
+
+## Admin
+- Read all.
+- Create override versions.
+
+No deletion permitted.
+
+---
+
+# E) Deal Detail Rendering Rules
+
+`/deal/[dealId]` must:
+
+- Load `deals.current_snapshot_id`
+- Render snapshot read-only
+- Provide version history list
+
+Switching versions:
+- Must not mutate data.
+- Must not recompute.
+- Must only change rendered snapshot.
+
+---
+
+# F) Dashboard Contract
+
+Dashboard lists Deals.
 
 For each deal:
-- Property / deal identifier
-- Latest snapshot version
-- Key KPI rollups (from latest snapshot only)
-- Status badge:
-  - “Imported”
-  - “Updated”
-  - “Superseded” (older versions)
 
-Clicking a deal opens:
-- `/deal/[dealId]`
-- renders current snapshot by default
+- Property identifier
+- Current version #
+- Key KPIs (derived from current snapshot only)
+- Status badge
+
+KPIs must be read from persisted snapshot, not recomputed.
 
 ---
 
-## E) Deal Detail View — Snapshot Renderer
-The deal detail page must:
-- Render the **current calculator snapshot** by default
-- Allow switching to older versions (read-only)
-- Show snapshot metadata:
-  - version
-  - created_at
-  - source
-  - created_by
+# G) Audit Discipline
 
-### Display Sections
-- Snapshot header (version + date)
-- Key inputs (read-only)
-- Key outputs / terms sheet
-- Charts (from results_json)
-- Assumptions used
-- Version history list:
-  - version #
-  - date
-  - source
-  - clickable to view
-
-### UX Rules
-- Viewing ≠ editing
-- Editing always opens the input modal
-- Applying changes always creates a new snapshot
-
----
-
-## F) Admin-Only Capabilities (Manual-First)
-Admins may create new snapshots by:
-- copying inputs from an existing snapshot
-- adjusting values
-- saving as a new snapshot version
-
-This may be implemented as:
-- hidden admin route
-- protected admin UI
-- controlled script
-
-Requirements:
-- version increments correctly
-- parent_snapshot_id preserved
-- user can see that a new version exists
-- no silent overwrite
-
----
-
-## G) Audit Trail Discipline
 Every snapshot must answer:
-- who created it
-- when it was created
-- what prior snapshot it derived from
-- which calculator schema + engine produced it
 
-No silent edits.
-No background recompute.
-No mutation of history.
+- Who created it?
+- When?
+- What version?
+- Which terms_version?
+- Which engine_version?
+- What prior snapshot?
 
----
-
-## Acceptance Criteria (Definition of Done)
-- Calculator snapshots are persisted in the app DB
-- Snapshots are immutable once saved
-- New versions are created instead of edits
-- Resume flow creates snapshot #1
-- In-app Apply creates snapshot N+1
-- Server validates snapshots against widget schemas
-- Users can:
-  - view latest snapshot
-  - view prior snapshots
-- Admins can create a new snapshot manually
-- No snapshot disappears after refresh
-- Read-only enforcement holds for non-owners
-- Mobile rendering acceptable
+No silent recompute.
+No background recalculation on load.
+No hidden mutation.
 
 ---
 
-## QA Checklist
-- Resume from marketing creates exactly one snapshot
-- Re-applying inputs creates a new version
-- Version numbers increment correctly
-- Old versions remain accessible
-- No recompute occurs on page load
-- Permissions enforced correctly
-- Dashboard KPIs reflect latest snapshot only
+# H) Integrity Enforcement (Required)
+
+Server must:
+
+- Validate input schema.
+- Validate compute output schema.
+- Optionally compute integrity_hash.
+- Reject persistence if malformed.
+
+App must never trust client-supplied results_json.
 
 ---
 
-## Deliverables
-- Calculator snapshot data model
-- Snapshot persistence logic
-- Deal detail snapshot renderer
+# Acceptance Criteria (Revised)
+
+- Snapshot persisted only via server compute.
+- Snapshots immutable.
+- Resume creates version 1.
+- Owner Apply creates version N+1.
+- Viewer cannot create version.
+- current_snapshot_id always valid.
+- outputs_json includes schedule table.
+- terms_version stored.
+- Dashboard reads persisted snapshot.
+- No silent recompute anywhere in UI.
+
+---
+
+# QA Checklist
+
+- Resume creates exactly one version.
+- Apply increments version correctly.
+- Switching versions does not recompute.
+- Viewer cannot apply changes.
+- Attempted client-side tampering rejected.
+- No snapshot disappears.
+- Integrity hash matches compute result.
+
+---
+
+# Deliverables
+
+- deal_snapshots table (or aligned equivalent)
+- current_snapshot_id column on deals
+- Server compute-and-save endpoint
+- Snapshot renderer UI
 - Version history UI
-- Admin snapshot creation mechanism
+- RLS enforcement for snapshot writes
+- Optional integrity_hash implementation
+
