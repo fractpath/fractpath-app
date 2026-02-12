@@ -1,178 +1,203 @@
-# APP-INT-001 — Resume draft token into authenticated deal
+# APP-INT-001 — Resume Draft Token into Authenticated Deal (Server Compute + Snapshot v1)
 
 ## Sprint
-Sprint 0 (alignment-only) → Sprint 5 (implementation)
-
-## Objective
-Define the **authoritative app-side behavior** for redeeming a draft token
-(created during the marketing flow) and resuming it into an authenticated,
-permissioned deal context.
-
-This ticket establishes the **only valid bridge** from:
-**marketing proto-state → authenticated app deal**.
-
-It explicitly governs:
-- how DraftSnapshots are redeemed
-- how the *first* deal + calculator snapshot is created
-- how idempotency, validation, and failure are handled
-- what is *not* allowed during resume
+Sprint 0 (alignment-only) → Sprint 9 (implementation foundation)
 
 ---
 
-## Context (Locked Decisions)
-- Marketing may **never** create real deals.
-- Widget produces DraftSnapshot but does **not** persist or mint tokens.
-- App is the sole authority for:
+# Objective
+
+Define the authoritative app-side behavior for redeeming a draft token (minted during marketing lead capture) and resuming it into an authenticated, permissioned deal context.
+
+This is the only valid bridge from:
+
+**marketing proto-state → authenticated app deal**
+
+It governs:
+
+- draft-token redemption
+- deal creation + initial snapshot creation
+- idempotency + validation + failure handling
+- strict prohibitions (no silent inference, no drift)
+
+---
+
+# Architecture Alignment (Critical Updates)
+
+This ticket must align with:
+
+- **APP-002** (server-side compute + immutable deal snapshots)
+- **WGT-040** (DraftSnapshot is transport; app recomputes authoritative outputs)
+
+### Key Update vs prior draft
+Snapshot #1 is **NOT** persisted “verbatim” from widget-computed outputs.
+
+Instead:
+
+- DraftSnapshot provides **inputs + assumptions + meta**
+- App recomputes outputs server-side using canonical compute module
+- App persists snapshot v1 as authoritative
+
+This eliminates client authority, prevents tampering, and preserves auditability.
+
+---
+
+# Context (Locked Decisions)
+
+- Marketing never creates real deals.
+- Widget never mints/stores/redeems draft tokens.
+- App is sole authority for:
   - draft-token minting
   - draft-token redemption
   - deal creation
-  - calculator snapshot persistence
+  - snapshot persistence
 - Draft tokens are:
   - non-binding
-  - pre-auth
-  - opaque to clients
-- No real deal exists until authentication is complete.
-- Deal creation from a draft is **snapshot-based** (no recompute on resume).
+  - opaque
+  - time-limited
+- No deal exists until authentication is complete.
 
 ---
 
-## Definitions
-- **DraftSnapshot**  
-  Widget-produced snapshot of:
-  - applied calculator inputs
-  - widget-computed outputs
-  - assumptions + engine/meta  
-  (defined in WGT-040)
+# Definitions
 
-- **Draft Token**  
-  App-minted, opaque token referencing exactly one stored DraftSnapshot.
+- **DraftSnapshot** (WGT-040)
+  - transport payload containing:
+    - canonical inputs
+    - explicit assumptions
+    - schema/meta
+    - optional preview_result (non-authoritative)
 
-- **Resume Flow**  
-  Deterministic process of redeeming a Draft Token and initializing a deal.
+- **Draft Token**
+  - app-minted opaque token referencing one stored DraftSnapshot
 
-- **Authenticated Deal**  
-  A persisted, permissioned deal owned by an authenticated user, seeded from a DraftSnapshot.
-
----
-
-## Draft Token Lifecycle (Authoritative)
-
-### Creation
-- Draft tokens are minted **only by the app** (via marketing `/api/lead` flow).
-- Each token references **exactly one** stored DraftSnapshot.
-- Tokens are:
-  - non-binding
-  - pre-auth
-  - opaque to clients
-- Widget never mints, stores, or redeems tokens.
-
-### Expiry
-- Draft tokens must have an explicit expiry (time-based).
-- Expired tokens must fail redemption explicitly.
-- No silent renewal or refresh is allowed.
-
-### Single-Use Semantics
-- Draft tokens are **single-use by default**.
-- Idempotent re-entry is allowed **only** when:
-  - the token has already been redeemed
-  - the same authenticated user is re-entering
-  - the associated deal already exists
-- Any other reuse attempt must fail explicitly.
+- **Resume Flow**
+  - deterministic redemption process producing:
+    - deal
+    - snapshot version 1 (server-computed)
 
 ---
 
-## Resume Entry Points
-Draft token redemption may occur only via:
+# Draft Token Lifecycle (Authoritative)
+
+## Creation
+- Draft tokens minted only by the app (via marketing `/api/lead`).
+- Each token references exactly one stored DraftSnapshot.
+- Widget does not mint/store/redeem tokens.
+
+## Expiry
+- Tokens must have explicit expiry.
+- Expired tokens fail redemption explicitly.
+
+## Single-Use + Idempotency
+- Tokens are single-use by default.
+
+Idempotent re-entry allowed only when:
+- token already redeemed
+- same authenticated user re-enters
+- associated deal already exists
+
+Any other reuse must fail explicitly.
+
+---
+
+# Resume Entry Points
+
+Draft token redemption occurs only via:
 - `/resume?token=...`
-- equivalent deep link from a marketing share email
+(or equivalent deep link)
 
-No other route or background process may redeem a draft token.
-
----
-
-## Authentication Preservation Rules
-- If the user is unauthenticated at entry:
-  - authentication must occur first
-  - the draft token must be preserved securely across the auth redirect
-- Loss of token across authentication is a **hard failure**.
-- The app must never attempt to infer, reconstruct, or guess a missing token.
+No background process may redeem draft tokens.
 
 ---
 
-## Redemption Flow (Deterministic, Ordered)
-Redemption must occur in the following order, with no reordering or skipping:
+# Authentication Preservation Rules
 
-1) Validate draft token  
-   - existence  
-   - expiry  
-   - unused or idempotent-reentry case  
-
-2) Load associated DraftSnapshot  
-   - server-side only  
-   - validate against DraftSnapshot schema (WGT-040)
-
-3) Authenticate user (if not already authenticated)
-
-4) Create a new deal record  
-   OR reattach to an existing deal **only** in the idempotent re-entry case
-
-5) Create **initial calculator snapshot** for the deal  
-   - snapshot #1 is persisted **verbatim** from DraftSnapshot
-   - no recompute
-   - no normalization beyond schema validation
-   - snapshot records:
-     - inputs
-     - results
-     - assumptions
-     - calculator schema version
-     - engine version
-
-6) Mark draft token as redeemed
-
-7) Transition user into authenticated deal detail view
+- If unauthenticated at entry:
+  - authenticate first
+  - preserve token across redirect securely
+- Loss of token across auth redirect is a hard failure.
+- No inference or reconstruction of a missing token.
 
 ---
 
-## Deal Creation Semantics
-- DraftSnapshot data is treated as:
-  - user-provided inputs
-  - widget-computed, non-binding outputs
-- Snapshot #1 becomes the authoritative starting point for the deal.
-- All future edits:
-  - occur via the widget in `mode="app"`
-  - produce new calculator snapshots (APP-002 governs versioning)
-- No counterparty commitments, pricing guarantees, or legal obligations exist at resume time.
+# Redemption Flow (Deterministic, Ordered)
+
+1) Validate token:
+   - exists
+   - unexpired
+   - unused OR valid idempotent re-entry
+
+2) Load stored DraftSnapshot (server-side):
+   - validate against WGT-040 schema
+   - reject unsupported schema_version/calculator_schema_version
+
+3) Ensure user is authenticated:
+   - if not, redirect to auth, preserving token securely
+
+4) Deal handling:
+   - if idempotent re-entry: load existing deal_id
+   - else: create new deal owned by auth.uid()
+
+5) Create initial deal snapshot (version = 1):
+   - inputs_json = DraftSnapshot.inputs
+   - assumptions = DraftSnapshot.assumptions
+   - server runs canonical compute module:
+     - outputs_json = computed result (includes schedule table)
+   - record:
+     - terms_version (from compute module)
+     - engine_version
+     - calculator_schema_version
+   - set deals.current_snapshot_id
+
+6) Mark token redeemed:
+   - attach redeemed_by_user_id
+   - redeemed_at timestamp
+   - attach deal_id
+
+7) Redirect user to:
+   - `/deal/[dealId]`
 
 ---
 
-## Persona Handling at Resume
-- Persona used in marketing:
-  - may be stored as contextual metadata
-  - may be forwarded to CRM / lead systems
-- Persona **does not**:
-  - affect calculator math
-  - affect deal economics
-  - grant permissions
-- App deal views render **objective outputs only** (no marketing framing).
+# Deal Creation Semantics
+
+- DraftSnapshot is non-binding and pre-auth.
+- Deal snapshot v1 is authoritative and server-computed.
+- All future economic changes create new snapshot versions via OWNER Apply (APP-002).
+
+No counterparty commitments exist at resume time.
 
 ---
 
-## Permissions & Ownership
-- The authenticated user who redeems the token becomes:
-  - the initial deal owner
-- All access control is enforced via app auth + RLS.
-- Marketing-originated shares grant **no implicit permissions**.
+# Persona Handling
+
+- Persona from marketing may be stored as contextual metadata only.
+- Persona does not affect compute.
+- Persona does not grant permissions.
+- App renders objective outputs (no marketing framing).
 
 ---
 
-## Failure Modes (Explicit, Blocking)
-The app must explicitly handle and surface:
-- expired tokens
-- invalid or unknown tokens
-- reused tokens (outside idempotent case)
-- DraftSnapshot schema or version mismatch
+# Permissions & Ownership
+
+- Redeeming user becomes deal OWNER.
+- Access control enforced via auth + RLS.
+- Marketing shares grant no permissions.
+
+---
+
+# Failure Modes (Explicit, Blocking)
+
+Must explicitly handle:
+
+- invalid/unknown token
+- expired token
+- reused token (outside idempotent case)
+- DraftSnapshot schema mismatch
 - unsupported calculator schema version
-- lost token during auth redirect
+- missing token after auth redirect
+- compute failure / schema validation failure
 
 Failure must result in:
 - no deal creation
@@ -182,31 +207,36 @@ Failure must result in:
 
 ---
 
-## Prohibitions (No Silent Mutation)
-The app must NOT:
-- trust client-side DraftSnapshot data
-- allow marketing or widget code to create deals
-- recompute calculator outputs during resume
-- infer missing fields not present in DraftSnapshot
-- auto-upgrade incompatible snapshots without explicit logic
-- treat draft data as a binding offer or quote
+# Prohibitions (Hard)
+
+App must NOT:
+
+- trust client-provided DraftSnapshot payloads (must load server-side stored snapshot)
+- persist preview_result as authoritative outputs
+- silently infer missing fields
+- auto-upgrade incompatible snapshots
+- treat draft data as binding
 
 ---
 
-## Acceptance Criteria
-- Draft tokens cleanly bridge marketing → app.
-- No deal exists before authentication.
-- Snapshot #1 is created verbatim from DraftSnapshot.
-- Resume behavior is deterministic and auditable.
-- Idempotency rules are explicit and enforced.
-- Persona is contextual only, not economic.
-- All behavior aligns with OPS-INT-001 governance.
+# Acceptance Criteria
+
+- Draft tokens bridge marketing → app deterministically.
+- No deal exists pre-auth.
+- Deal snapshot v1 is computed server-side from DraftSnapshot inputs/assumptions.
+- Idempotency rules enforced.
+- Token reuse outside idempotency fails.
+- Failures produce no partial state.
+- Persona treated as contextual only.
+- Behavior aligns with OPS-INT-001 governance.
 
 ---
 
-## Dependencies
+# Dependencies
+
 - OPS-INT-001 — Multi-repo orchestration + contract enforcement
-- WGT-INT-001 — Widget public interface
-- WGT-040 — DraftSnapshot schema + stability guarantees
-- APP-002 — Scenario persistence & versioning
-- MKT-006 — Lead + share API routes
+- WGT-040 — DraftSnapshot schema
+- WGT-010 — canonical compute module
+- APP-002 — snapshot persistence + versioning
+- MKT-006 — lead API routes
+
