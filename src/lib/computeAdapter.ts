@@ -1,3 +1,6 @@
+import { computeDeal as widgetCompute } from "fractpath-calculator-widget";
+import type { CalcOutput } from "fractpath-calculator-widget";
+
 export interface ComputeInput {
   [key: string]: unknown;
 }
@@ -22,47 +25,18 @@ export interface ComputeError {
   code: "NOT_INTEGRATED" | "COMPUTE_FAILED";
 }
 
-function loadComputeFn():
-  | ((inputs: ComputeInput) => ComputeOutput)
-  | undefined {
-  try {
-    // IMPORTANT:
-    // - Do NOT use `import("fractpath-calculator-widget")` here.
-    //   Turbopack will attempt to resolve it at build time and warn/fail if absent.
-    // - Use a runtime require that bundlers cannot statically analyze.
-    const req = (eval("require") as (id: string) => any) ?? undefined; // eslint-disable-line no-eval
-    if (!req) return undefined;
-
-    const mod = req("fractpath-calculator-widget");
-    return mod?.computeDeal ?? mod?.default?.computeDeal;
-  } catch {
-    return undefined;
-  }
-}
-
 export async function computeDeal(
   inputs: ComputeInput,
 ): Promise<ComputeResult | ComputeError> {
   try {
-    const computeFn = loadComputeFn();
-
-    if (!computeFn) {
-      return {
-        ok: false,
-        error:
-          "Calculator widget compute engine is not yet integrated. Install fractpath-calculator-widget and export computeDeal.",
-        code: "NOT_INTEGRATED",
-      };
-    }
-
-    const result = computeFn(inputs);
+    const result: CalcOutput = widgetCompute(inputs);
 
     if (
       !result ||
       typeof result !== "object" ||
-      typeof (result as any).terms_version !== "string" ||
-      !(result as any).outputs ||
-      typeof (result as any).outputs !== "object"
+      typeof result.terms_version !== "string" ||
+      !result.outputs ||
+      typeof result.outputs !== "object"
     ) {
       return {
         ok: false,
@@ -71,7 +45,7 @@ export async function computeDeal(
       };
     }
 
-    return { ok: true, result };
+    return { ok: true, result: result as unknown as ComputeOutput };
   } catch (err: any) {
     return {
       ok: false,

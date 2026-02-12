@@ -22,14 +22,14 @@ console.log("\n--- fork route contract ---\n");
 test("fork endpoint file exists", () => {
   const fs = require("fs");
   assert(
-    fs.existsSync("src/api/deals/[dealId]/fork/route.ts"),
+    fs.existsSync("src/app/api/deals/[dealId]/fork/route.ts"),
     "fork route.ts should exist",
   );
 });
 
 test("fork route exports POST handler", () => {
   const content = require("fs").readFileSync(
-    "src/api/deals/[dealId]/fork/route.ts",
+    "src/app/api/deals/[dealId]/fork/route.ts",
     "utf-8",
   );
   assert(content.includes("export async function POST"), "should export POST");
@@ -37,7 +37,7 @@ test("fork route exports POST handler", () => {
 
 test("fork route checks auth", () => {
   const content = require("fs").readFileSync(
-    "src/api/deals/[dealId]/fork/route.ts",
+    "src/app/api/deals/[dealId]/fork/route.ts",
     "utf-8",
   );
   assert(content.includes("Unauthorized"), "should check for unauthorized");
@@ -45,7 +45,7 @@ test("fork route checks auth", () => {
 
 test("fork route prevents OWNER self-fork", () => {
   const content = require("fs").readFileSync(
-    "src/api/deals/[dealId]/fork/route.ts",
+    "src/app/api/deals/[dealId]/fork/route.ts",
     "utf-8",
   );
   assert(
@@ -56,7 +56,7 @@ test("fork route prevents OWNER self-fork", () => {
 
 test("fork route creates new deal with OWNER grant", () => {
   const content = require("fs").readFileSync(
-    "src/api/deals/[dealId]/fork/route.ts",
+    "src/app/api/deals/[dealId]/fork/route.ts",
     "utf-8",
   );
   assert(
@@ -67,7 +67,7 @@ test("fork route creates new deal with OWNER grant", () => {
 
 test("fork route copies baseline snapshot", () => {
   const content = require("fs").readFileSync(
-    "src/api/deals/[dealId]/fork/route.ts",
+    "src/app/api/deals/[dealId]/fork/route.ts",
     "utf-8",
   );
   assert(
@@ -78,7 +78,7 @@ test("fork route copies baseline snapshot", () => {
 
 test("fork route records DEAL_CREATED event", () => {
   const content = require("fs").readFileSync(
-    "src/api/deals/[dealId]/fork/route.ts",
+    "src/app/api/deals/[dealId]/fork/route.ts",
     "utf-8",
   );
   assert(
@@ -89,7 +89,7 @@ test("fork route records DEAL_CREATED event", () => {
 
 test("fork route returns new deal_id and redirect", () => {
   const content = require("fs").readFileSync(
-    "src/api/deals/[dealId]/fork/route.ts",
+    "src/app/api/deals/[dealId]/fork/route.ts",
     "utf-8",
   );
   assert(content.includes("deal_id") && content.includes("redirect_url"), "should return deal_id and redirect_url");

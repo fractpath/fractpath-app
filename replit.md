@@ -42,7 +42,7 @@ FractPath is a Next.js application that utilizes API routes for backend logic an
 - **Counterparty Counter Flow:** COUNTERPARTY users see the calculator widget on latest snapshot view. Submitting creates a snapshot via `/api/deals/[dealId]/snapshot/propose` (COUNTERPARTY-only), then creates a COUNTER deal_version via existing `/api/deals/[dealId]/counter`. VIEWER never sees calculator. Base snapshot ID auto-selected from current view.
 - **Compute Endpoint:** `POST /api/deals/[dealId]/snapshot/compute` — OWNER-only. Accepts `{ inputs }`, runs compute adapter (backed by `fractpath-calculator-widget` when installed), persists full snapshot (inputs + outputs + terms_version) atomically via `insertDealSnapshot`, records `DEAL_SNAPSHOT_COMPUTED` audit event. Returns 501 when calculator package is not yet integrated.
 - **Fork Endpoint:** `POST /api/deals/[dealId]/fork` — Any authenticated user with read access (VIEWER, COUNTERPARTY) can fork a deal they don't own. Creates a new deal owned by requester, copies latest baseline snapshot, records `DEAL_CREATED` event with fork provenance. OWNER self-fork is blocked (use compute instead).
-- **Compute Adapter:** `src/lib/computeAdapter.ts` — Clean interface for calculator-widget integration. Dynamically imports `fractpath-calculator-widget` at runtime; returns `NOT_INTEGRATED` code when package is absent. Ready for swap-in without endpoint changes.
+- **Compute Adapter:** `src/lib/computeAdapter.ts` — Imports `computeDeal` directly from `fractpath-calculator-widget` (local package at `packages/fractpath-calculator-widget`). Returns `COMPUTE_FAILED` on invalid inputs. Widget is the single source of truth for all economic logic.
 - **Version Timeline Cards:** VERSION entries in the timeline render as styled cards with type-specific color badges (Offer=blue, Counter=purple, Accepted=green, Rejected=red), version number, note, timestamp, and compare link when both snapshots exist. SNAPSHOT and EVENT entries retain original rendering.
 
 **Performance & Stability (APP-085 verified):**
@@ -53,7 +53,17 @@ FractPath is a Next.js application that utilizes API routes for backend logic an
 - Client/server boundaries verified: DealCalculatorEmbed, ShareDealCard, DealAssumptionsSummary are "use client"; DealSummary, DealKpiCard, DealExitTable, VersionTimelineCard are server components.
 - No circular imports detected. No server-only imports in client components.
 
+**Calculator Widget Package (`packages/fractpath-calculator-widget`):**
+- Pure, deterministic compute engine — all economic logic lives here (single source of truth).
+- Exports `computeDeal(inputs)` → `{ terms_version, outputs: { summary, schedule[], settlements } }`.
+- Node-safe: no window/document dependencies. Runs server-side in API routes.
+- Types: `CalcInput`, `CalcOutput`, `Summary`, `ScheduleRow`, `SettlementCase`.
+- `terms_version`: `"fractpath-terms-v1.0"` — included in every snapshot.
+- Golden fixture tests lock 3 scenarios with exact outputs (13 tests total).
+- Installed as local dependency: `"fractpath-calculator-widget": "file:packages/fractpath-calculator-widget"`.
+
 ## External Dependencies
 - **Next.js:** React framework for server-side rendering and API routes.
 - **Supabase:** Provides PostgreSQL database, authentication services, and Row Level Security (RLS).
 - **HubSpot:** Integrates for sales follow-up and scenario summary distribution.
+- **fractpath-calculator-widget:** Local package providing the compute engine (see above).

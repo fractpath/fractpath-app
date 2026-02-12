@@ -22,14 +22,14 @@ console.log("\n--- compute route contract ---\n");
 test("compute endpoint file exists", () => {
   const fs = require("fs");
   assert(
-    fs.existsSync("src/api/deals/[dealId]/snapshot/compute/route.ts"),
+    fs.existsSync("src/app/api/deals/[dealId]/snapshot/compute/route.ts"),
     "compute route.ts should exist",
   );
 });
 
 test("compute route exports POST handler", () => {
   const content = require("fs").readFileSync(
-    "src/api/deals/[dealId]/snapshot/compute/route.ts",
+    "src/app/api/deals/[dealId]/snapshot/compute/route.ts",
     "utf-8",
   );
   assert(content.includes("export async function POST"), "should export POST");
@@ -37,7 +37,7 @@ test("compute route exports POST handler", () => {
 
 test("compute route is OWNER-only", () => {
   const content = require("fs").readFileSync(
-    "src/api/deals/[dealId]/snapshot/compute/route.ts",
+    "src/app/api/deals/[dealId]/snapshot/compute/route.ts",
     "utf-8",
   );
   assert(content.includes("OWNER only"), "should enforce OWNER only");
@@ -46,7 +46,7 @@ test("compute route is OWNER-only", () => {
 
 test("compute route requires inputs object", () => {
   const content = require("fs").readFileSync(
-    "src/api/deals/[dealId]/snapshot/compute/route.ts",
+    "src/app/api/deals/[dealId]/snapshot/compute/route.ts",
     "utf-8",
   );
   assert(
@@ -57,7 +57,7 @@ test("compute route requires inputs object", () => {
 
 test("compute route imports computeDeal adapter", () => {
   const content = require("fs").readFileSync(
-    "src/api/deals/[dealId]/snapshot/compute/route.ts",
+    "src/app/api/deals/[dealId]/snapshot/compute/route.ts",
     "utf-8",
   );
   assert(
@@ -68,7 +68,7 @@ test("compute route imports computeDeal adapter", () => {
 
 test("compute route persists snapshot via insertDealSnapshot", () => {
   const content = require("fs").readFileSync(
-    "src/api/deals/[dealId]/snapshot/compute/route.ts",
+    "src/app/api/deals/[dealId]/snapshot/compute/route.ts",
     "utf-8",
   );
   assert(
@@ -79,7 +79,7 @@ test("compute route persists snapshot via insertDealSnapshot", () => {
 
 test("compute route includes terms_version in snapshot", () => {
   const content = require("fs").readFileSync(
-    "src/api/deals/[dealId]/snapshot/compute/route.ts",
+    "src/app/api/deals/[dealId]/snapshot/compute/route.ts",
     "utf-8",
   );
   assert(
@@ -90,7 +90,7 @@ test("compute route includes terms_version in snapshot", () => {
 
 test("compute route stores computed_at and computed_by", () => {
   const content = require("fs").readFileSync(
-    "src/api/deals/[dealId]/snapshot/compute/route.ts",
+    "src/app/api/deals/[dealId]/snapshot/compute/route.ts",
     "utf-8",
   );
   assert(
@@ -101,7 +101,7 @@ test("compute route stores computed_at and computed_by", () => {
 
 test("compute route returns summary in response", () => {
   const content = require("fs").readFileSync(
-    "src/api/deals/[dealId]/snapshot/compute/route.ts",
+    "src/app/api/deals/[dealId]/snapshot/compute/route.ts",
     "utf-8",
   );
   assert(
@@ -112,7 +112,7 @@ test("compute route returns summary in response", () => {
 
 test("compute route records audit event", () => {
   const content = require("fs").readFileSync(
-    "src/api/deals/[dealId]/snapshot/compute/route.ts",
+    "src/app/api/deals/[dealId]/snapshot/compute/route.ts",
     "utf-8",
   );
   assert(
