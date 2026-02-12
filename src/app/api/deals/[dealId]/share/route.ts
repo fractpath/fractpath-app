@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
+function isOwnerOnlyError(err: any): boolean {
+  const code = err?.code;
+  const msg = String(err?.message || "");
+  return (
+    code === "42501" || /Only\s+OWNER/i.test(msg) || /owner\s+only/i.test(msg)
+  );
+}
+
 export const runtime = "nodejs";
 
 export async function POST(
@@ -14,7 +22,10 @@ export async function POST(
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    return NextResponse.json(
+      { ok: false, error: "unauthorized" },
+      { status: 401 },
+    );
   }
 
   const { dealId } = await context.params;
@@ -48,8 +59,17 @@ export async function POST(
   );
 
   if (rpcErr || !token) {
+    // Normalize OWNER-only attempts to 403 with canonical body
+    if (isOwnerOnlyError(rpcErr)) {
+      return NextResponse.json(
+        { ok: false, error: "Forbidden (OWNER only)" },
+        { status: 403 },
+      );
+    }
+
     return NextResponse.json(
       {
+        ok: false,
         error: "share_failed",
         code: (rpcErr as any)?.code ?? null,
         message: rpcErr?.message ?? null,
