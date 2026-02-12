@@ -17,6 +17,7 @@ const eslintConfig = defineConfig([
     "_app_unused/**",
     "_archived_scripts/**",
     "supabase/**",
+    "packages/**/dist/**",
   ]),
 
   // Pragmatic project overrides (MVP-safe)
@@ -25,6 +26,17 @@ const eslintConfig = defineConfig([
       "@typescript-eslint/no-explicit-any": "warn",
       "react-hooks/set-state-in-effect": "warn",
       "react/no-unescaped-entities": "warn",
+    },
+  },
+
+  // Test-only override: allow require() in tests (Node-style harness)
+  {
+    files: [
+      "src/**/__tests__/**/*.{ts,tsx}",
+      "packages/**/src/**/__tests__/**/*.{ts,tsx}",
+    ],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
     },
   },
 ]);
