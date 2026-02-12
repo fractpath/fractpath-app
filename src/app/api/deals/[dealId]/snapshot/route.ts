@@ -25,9 +25,9 @@ function isUuid(v: string) {
  */
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { dealId: string } },
+  context: { params: Promise<{ dealId: string }> },
 ) {
-  const dealId = params.dealId;
+  const { dealId } = await context.params;
   if (!isUuid(dealId)) return jsonError(400, "bad_request", "Invalid dealId");
 
   const supabase = await createClient();
@@ -69,9 +69,9 @@ export async function GET(
  */
 export async function POST(
   req: NextRequest,
-  { params }: { params: { dealId: string } },
+  context: { params: Promise<{ dealId: string }> },
 ) {
-  const dealId = params.dealId;
+  const { dealId } = await context.params;
   if (!isUuid(dealId)) return jsonError(400, "bad_request", "Invalid dealId");
 
   const supabase = await createClient();
