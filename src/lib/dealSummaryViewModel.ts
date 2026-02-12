@@ -65,6 +65,26 @@ const ASSUMPTION_KEYS = [
   "inflation_rate",
 ];
 
+function formatExitNetPayout(c: Record<string, unknown>): string {
+  // Widget outputs settlements with homeowner-centric keys:
+  // - homeowner_net
+  // - investor_payout
+  // - home_value_at_exit
+  // - exit_year
+  // In the app UI, "Net payout" = homeowner net at exit.
+  return formatValue(
+    c.homeowner_net ??
+      c.net_payout ??
+      c.net ??
+      c.payout ??
+      null,
+  );
+}
+
+function formatExitTiming(c: Record<string, unknown>): string {
+  return formatValue(c.timing ?? c.year ?? c.exit_year ?? null);
+}
+
 export function buildDealSummaryViewModel(
   display: SnapshotDisplayData | null,
   isHistorical: boolean,
@@ -137,8 +157,8 @@ export function buildDealSummaryViewModel(
           const c = caseData as Record<string, unknown>;
           exits.push({
             label,
-            netPayout: formatValue(c.net_payout ?? c.net ?? c.payout ?? null),
-            timing: formatValue(c.timing ?? c.year ?? c.exit_year ?? null),
+            netPayout: formatExitNetPayout(c),
+            timing: formatExitTiming(c),
           });
         }
       }
@@ -153,8 +173,8 @@ export function buildDealSummaryViewModel(
             const c = val as Record<string, unknown>;
             exits.push({
               label,
-              netPayout: formatValue(c.net_payout ?? c.net ?? c.payout ?? null),
-              timing: formatValue(c.timing ?? c.year ?? c.exit_year ?? null),
+              netPayout: formatExitNetPayout(c),
+              timing: formatExitTiming(c),
             });
           }
         }
