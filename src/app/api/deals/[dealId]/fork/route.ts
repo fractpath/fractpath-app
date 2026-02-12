@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createServiceClient } from "@/lib/supabase/service";
 import { getLatestDealSnapshot } from "@/lib/dealSnapshotDb";
 
 function jsonError(message: string, status = 400) {
@@ -14,7 +13,7 @@ function isUuid(v: string): boolean {
 }
 
 export async function POST(
-  request: NextRequest,
+  _request: NextRequest,
   context: { params: Promise<{ dealId: string }> },
 ) {
   const { dealId } = await context.params;
@@ -32,10 +31,30 @@ export async function POST(
     return jsonError("Unauthorized", 401);
   }
 
-  const service = createServiceClient();
+  // Enforce access via deal_access_grants (RLS-backed). Only OWNER/VIEWER exist.
+  const { data: grant, error: grantError } = await (supabase
+    .from("deal_access_grants") as any)
+    .select("role")
+    .eq("deal_id", dealId)
+    .eq("user_id", user.id)
+    .maybeSingle();
 
-  const { data: originalDeal, error: dealError } = await (service.from("deals") as any)
-    .select("id, owner_user_id, mode")
+  if (grantError) {
+    return jsonError("Failed to verify access", 500);
+  }
+
+  if (!grant?.role || !["OWNER", "VIEWER"].includes(grant.role)) {
+    return jsonError("Forbidden (no access to source deal)", 403);
+  }
+
+  // Viewer counter model: viewers fork; owners revise in-place via compute/save.
+  if (grant.role === "OWNER") {
+    return jsonError("OWNER cannot fork their own deal; use compute instead", 400);
+  }
+
+  // Load source deal (read should be permitted by RLS if viewer has access).
+  const { data: originalDeal, error: dealError } = await (supabase.from("deals") as any)
+    .select("id, mode")
     .eq("id", dealId)
     .maybeSingle();
 
@@ -43,25 +62,8 @@ export async function POST(
     return jsonError("Deal not found", 404);
   }
 
-  const { data: grant } = await (service.from("deal_access_grants") as any)
-    .select("role")
-    .eq("deal_id", dealId)
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  const hasAccess =
-    originalDeal.owner_user_id === user.id ||
-    (grant?.role && ["OWNER", "VIEWER", "COUNTERPARTY"].includes(grant.role));
-
-  if (!hasAccess) {
-    return jsonError("Forbidden (no access to source deal)", 403);
-  }
-
-  if (originalDeal.owner_user_id === user.id || grant?.role === "OWNER") {
-    return jsonError("OWNER cannot fork their own deal; use compute instead", 400);
-  }
-
-  const { data: newDeal, error: insertDealError } = await (service.from("deals") as any)
+  // Create new deal owned by the requester.
+  const { data: newDeal, error: insertDealError } = await (supabase.from("deals") as any)
     .insert({
       owner_user_id: user.id,
       status: "IMPORTED",
@@ -77,24 +79,30 @@ export async function POST(
     return jsonError("Failed to create forked deal", 500);
   }
 
-  const { error: grantError } = await (service.from("deal_access_grants") as any).insert({
-    deal_id: newDeal.id,
-    user_id: user.id,
-    role: "OWNER",
-    created_by: user.id,
-  });
+  // Grant OWNER on new deal to the requester.
+  const { error: newGrantError } = await (supabase.from("deal_access_grants") as any).insert(
+    {
+      deal_id: newDeal.id,
+      user_id: user.id,
+      role: "OWNER",
+      created_by: user.id,
+    },
+  );
 
-  if (grantError) {
-    console.error("grant insert error:", grantError.message);
+  if (newGrantError) {
+    console.error("grant insert error:", newGrantError.message);
     return jsonError("Failed to assign ownership on forked deal", 500);
   }
 
+  // Best-effort copy of latest snapshot from source deal into new deal.
   let baselineSnapshotId: string | null = null;
-  const latestResult = await getLatestDealSnapshot(service, dealId);
+
+  const latestResult = await getLatestDealSnapshot(supabase as any, dealId);
   if (latestResult.ok && latestResult.snapshot) {
     const src = latestResult.snapshot;
+
     const { data: copiedSnap, error: snapError } = await (
-      service.from("deal_snapshots") as any
+      supabase.from("deal_snapshots") as any
     )
       .insert({
         deal_id: newDeal.id,
@@ -115,7 +123,8 @@ export async function POST(
     }
   }
 
-  const { error: eventError } = await (service.from("deal_events") as any).insert({
+  // Audit event (best-effort)
+  const { error: eventError } = await (supabase.from("deal_events") as any).insert({
     deal_id: newDeal.id,
     event_type: "DEAL_CREATED",
     payload: {

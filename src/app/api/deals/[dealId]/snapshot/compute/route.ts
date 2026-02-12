@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createServiceClient } from "@/lib/supabase/service";
 import { insertDealSnapshot } from "@/lib/dealSnapshotDb";
 import { computeDeal } from "@/lib/computeAdapter";
 
@@ -40,34 +39,26 @@ export async function POST(
     return jsonError("Invalid JSON body", 400);
   }
 
-  if (!body?.inputs || typeof body.inputs !== "object" || Array.isArray(body.inputs)) {
+  if (
+    !body?.inputs ||
+    typeof body.inputs !== "object" ||
+    Array.isArray(body.inputs)
+  ) {
     return jsonError("inputs is required and must be a JSON object", 400);
   }
 
-  const service = createServiceClient();
-
-  const { data: deal, error: dealError } = await (service.from("deals") as any)
-    .select("id, owner_user_id")
-    .eq("id", dealId)
+  // RLS-enforced OWNER check via deal_access_grants
+  const { data: grant, error: grantError } = await (supabase
+    .from("deal_access_grants") as any)
+    .select("role")
+    .eq("deal_id", dealId)
+    .eq("user_id", user.id)
     .maybeSingle();
 
-  if (dealError || !deal) {
-    return jsonError("Deal not found", 404);
+  if (grantError) {
+    return jsonError("Failed to verify access", 500);
   }
-
-  let isOwner = deal.owner_user_id === user.id;
-
-  if (!isOwner) {
-    const { data: grant } = await (service.from("deal_access_grants") as any)
-      .select("role")
-      .eq("deal_id", dealId)
-      .eq("user_id", user.id)
-      .maybeSingle();
-
-    if (grant?.role === "OWNER") isOwner = true;
-  }
-
-  if (!isOwner) {
+  if (grant?.role !== "OWNER") {
     return jsonError("Forbidden (OWNER only)", 403);
   }
 
@@ -85,28 +76,37 @@ export async function POST(
     contract_version: terms_version,
     schema_version: "1",
     inputs: body.inputs,
-    outputs,
+    outputs, // must include outputs.schedule[] and outputs.summary
     computed_at: computedAt,
     computed_by: user.id,
   };
 
-  const result = await insertDealSnapshot(service, dealId, user.id, fullSnapshot);
+  // Runs under user-scoped client so RLS + immutability triggers apply.
+  const result = await insertDealSnapshot(
+    supabase as any,
+    dealId,
+    user.id,
+    fullSnapshot,
+  );
 
   if (!result.ok) {
     const status = result.code === "VALIDATION_FAILED" ? 422 : 500;
     return jsonError(result.error, status);
   }
 
-  const { error: eventError } = await (service.from("deal_events") as any).insert({
-    deal_id: dealId,
-    event_type: "DEAL_SNAPSHOT_COMPUTED",
-    payload: {
-      snapshot_id: result.id,
-      terms_version,
-      computed_at: computedAt,
+  // Audit event insert should also be under RLS.
+  const { error: eventError } = await (supabase.from("deal_events") as any).insert(
+    {
+      deal_id: dealId,
+      event_type: "DEAL_SNAPSHOT_COMPUTED",
+      payload: {
+        snapshot_id: result.id,
+        terms_version,
+        computed_at: computedAt,
+      },
+      created_by: user.id,
     },
-    created_by: user.id,
-  });
+  );
 
   if (eventError) {
     console.error("deal_events insert error:", eventError.message);

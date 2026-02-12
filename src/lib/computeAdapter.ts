@@ -22,18 +22,29 @@ export interface ComputeError {
   code: "NOT_INTEGRATED" | "COMPUTE_FAILED";
 }
 
+function loadComputeFn():
+  | ((inputs: ComputeInput) => ComputeOutput)
+  | undefined {
+  try {
+    // IMPORTANT:
+    // - Do NOT use `import("fractpath-calculator-widget")` here.
+    //   Turbopack will attempt to resolve it at build time and warn/fail if absent.
+    // - Use a runtime require that bundlers cannot statically analyze.
+    const req = (eval("require") as (id: string) => any) ?? undefined; // eslint-disable-line no-eval
+    if (!req) return undefined;
+
+    const mod = req("fractpath-calculator-widget");
+    return mod?.computeDeal ?? mod?.default?.computeDeal;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function computeDeal(
   inputs: ComputeInput,
 ): Promise<ComputeResult | ComputeError> {
   try {
-    let computeFn: ((inputs: ComputeInput) => ComputeOutput) | undefined;
-    try {
-      // @ts-ignore — package resolved at runtime when fractpath-calculator-widget is installed
-      const mod = await import("fractpath-calculator-widget");
-      computeFn = mod.computeDeal ?? mod.default?.computeDeal;
-    } catch {
-      // package not installed
-    }
+    const computeFn = loadComputeFn();
 
     if (!computeFn) {
       return {
@@ -49,9 +60,9 @@ export async function computeDeal(
     if (
       !result ||
       typeof result !== "object" ||
-      typeof result.terms_version !== "string" ||
-      !result.outputs ||
-      typeof result.outputs !== "object"
+      typeof (result as any).terms_version !== "string" ||
+      !(result as any).outputs ||
+      typeof (result as any).outputs !== "object"
     ) {
       return {
         ok: false,
