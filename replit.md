@@ -32,7 +32,8 @@ FractPath is a Next.js application that utilizes API routes for backend logic an
 **Feature Specifications:**
 - **Homeowner Intake:** Primary data collection form.
 - **User Dashboard:** Role-specific content and access to scenarios.
-- **Deal Resume:** `POST /api/deals/resume` — Converts marketing drafts into authenticated deals. Dual-path: if `canonicalSnapshot` is present in the draft payload, persists it opaquely as the authoritative record (snapshot_source = "canonical_snapshot") without recomputation; if absent, computes via `computeDeal` adapter (snapshot_source = "app_compute"). Persists `deal_terms_defaults_used` from the draft payload. Idempotent on already-redeemed tokens.
+- **Deal Resume:** `POST /api/deals/resume` — Redeems `draft_tokens` minted by marketing. Queries `draft_tokens` (not `draft_snapshots`) by token, checks `expires_at` (410), handles idempotent redeem via `source_ref = "draft_token:<id>"`. Dual-path: if `canonicalSnapshot` is present, persists it nested/opaquely (no spreading) with `snapshot_source = "canonical_snapshot"`; if absent, computes via `computeDeal` adapter and synthesizes canonical nested. Both branches nest `draft_snapshot_json` verbatim. Race-safe redemption via conditional update `where redeemed_at is null`. Best-effort audit event. Response: `{ ok, deal_id, redirect_url }`.
+- **Draft Token Mint:** `POST /api/draft-tokens/mint` — Service-role endpoint that stores `canonicalSnapshot` verbatim if provided (no validation gating), or synthesizes with fallback chain (`contract_version → engine_version → calculator_schema_version → "0.0.1"`). Generates 32-byte hex token, inserts into `draft_tokens` with 7-day expiry. Response: `{ ok, token, resumeUrl }`.
 - **Share Deal:** Enables generation of read-only share links.
 - **Snapshot Ingestion:** Allows owners to ingest new snapshots for their deals.
 - **Offer/Counter-Offer Creation:** Owners can create OFFER versions; Owners or Counterparties can create COUNTER versions.
@@ -44,6 +45,14 @@ FractPath is a Next.js application that utilizes API routes for backend logic an
 - **Fork Endpoint:** `POST /api/deals/[dealId]/fork` — Any authenticated user with read access (VIEWER, COUNTERPARTY) can fork a deal they don't own. Creates a new deal owned by requester, copies latest baseline snapshot, records `DEAL_CREATED` event with fork provenance. OWNER self-fork is blocked (use compute instead).
 - **Compute Adapter:** `src/lib/computeAdapter.ts` — Imports `computeDeal` directly from `fractpath-calculator-widget` (local package at `packages/fractpath-calculator-widget`). Returns `COMPUTE_FAILED` on invalid inputs. Widget is the single source of truth for all economic logic.
 - **Version Timeline Cards:** VERSION entries in the timeline render as styled cards with type-specific color badges (Offer=blue, Counter=purple, Accepted=green, Rejected=red), version number, note, timestamp, and compare link when both snapshots exist. SNAPSHOT and EVENT entries retain original rendering.
+
+**Visualization Hardening (Phase 4 — APP-009..APP-013):**
+- `normalizeSnapshotJson()` in `dealSnapshotDisplay.ts`: Pure read-only function that normalizes `snapshot_json` for rendering. Prefers envelope fields (`inputs`, `outputs`, `contract_version`, `computed_at`); falls back to nested `canonicalSnapshot` values. Never mutates input. Returns `warnings[]` for missing data.
+- `extractSnapshotDisplay()` uses normalizer internally — canonical-only snapshots now render correctly.
+- `compareSnapshotDisplay()` normalizes both sides before diffing — no false diffs when comparing canonical vs envelope snapshots.
+- `buildDealTimeline()` reads from DB columns (not `snapshot_json`) — already resilient.
+- `SnapshotDisplayData` interface shape preserved exactly (no fields added/removed).
+- 22 contract tests lock normalization behavior, immutability, shape preservation, and comparison invariants.
 
 **Performance & Stability (APP-085 verified):**
 - Deal query narrowed to `select("id, owner_user_id, mode")` — no unnecessary column serialization.
