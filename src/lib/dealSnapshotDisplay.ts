@@ -1,3 +1,71 @@
+export interface NormalizedSnapshotJson {
+  contract_version: string;
+  computed_at: string;
+  computed_by: string;
+  inputs: Record<string, unknown>;
+  outputs: Record<string, unknown>;
+  snapshot_source: string;
+  warnings: string[];
+}
+
+function safeObj(v: unknown): Record<string, unknown> | null {
+  if (v && typeof v === "object" && !Array.isArray(v)) {
+    return v as Record<string, unknown>;
+  }
+  return null;
+}
+
+function safeStr(v: unknown, fallback: string): string {
+  return typeof v === "string" && v.trim().length > 0 ? v : fallback;
+}
+
+export function normalizeSnapshotJson(snapshotJson: unknown): NormalizedSnapshotJson {
+  const warnings: string[] = [];
+  const json = safeObj(snapshotJson) ?? {};
+
+  const canonical = safeObj(json.canonicalSnapshot);
+
+  const envelopeInputs = safeObj(json.inputs);
+  const envelopeOutputs = safeObj(json.outputs);
+  const canonicalInputs = canonical ? safeObj(canonical.inputs) : null;
+  const canonicalOutputs = canonical ? safeObj(canonical.outputs) : null;
+
+  const inputs = envelopeInputs ?? canonicalInputs ?? {};
+  const outputs = envelopeOutputs ?? canonicalOutputs;
+
+  if (!envelopeInputs && !canonicalInputs) {
+    warnings.push("inputs: missing from envelope and canonicalSnapshot");
+  }
+
+  if (!outputs) {
+    warnings.push("outputs: missing from envelope and canonicalSnapshot");
+  }
+
+  const contractVersion = safeStr(
+    json.contract_version,
+    canonical ? safeStr(canonical.compute_version, "\u2014") : "\u2014",
+  );
+
+  const computedAt = safeStr(
+    json.computed_at,
+    canonical ? safeStr(canonical.computed_at, "\u2014") : "\u2014",
+  );
+
+  const computedBy = safeStr(json.computed_by, "\u2014");
+
+  const snapshotSource = safeStr(json.snapshot_source, "\u2014");
+
+  return {
+    contract_version: contractVersion,
+    computed_at: computedAt,
+    computed_by: computedBy,
+    inputs,
+    outputs: outputs ?? {},
+    snapshot_source: snapshotSource,
+    warnings,
+  };
+}
+
 export interface SnapshotDisplayData {
   contractVersion: string;
   schemaVersion: string;
@@ -22,21 +90,15 @@ export function extractSnapshotDisplay(
   if (!snapshotRow) return null;
 
   const json = snapshotRow.snapshot_json ?? {};
+  const normalized = normalizeSnapshotJson(json);
 
-  const inputs =
-    json.inputs && typeof json.inputs === "object" && !Array.isArray(json.inputs)
-      ? (json.inputs as Record<string, unknown>)
-      : null;
-
-  const outputs =
-    json.outputs && typeof json.outputs === "object" && !Array.isArray(json.outputs)
-      ? (json.outputs as Record<string, unknown>)
-      : null;
+  const inputs = Object.keys(normalized.inputs).length > 0 ? normalized.inputs : null;
+  const outputs = Object.keys(normalized.outputs).length > 0 ? normalized.outputs : null;
 
   const chartSeries = Array.isArray(json.chart_series) ? json.chart_series : null;
 
   return {
-    contractVersion: snapshotRow.contract_version ?? "\u2014",
+    contractVersion: snapshotRow.contract_version ?? normalized.contract_version,
     schemaVersion: snapshotRow.schema_version ?? "\u2014",
     inputHash: snapshotRow.input_hash ?? "\u2014",
     outputHash: snapshotRow.output_hash ?? "\u2014",

@@ -1,3 +1,5 @@
+import { normalizeSnapshotJson } from "./dealSnapshotDisplay";
+
 export interface FieldDiff {
   key: string;
   a: unknown;
@@ -53,20 +55,24 @@ export function compareSnapshotDisplay(
   a: Record<string, unknown> | null | undefined,
   b: Record<string, unknown> | null | undefined,
 ): SnapshotCompareResult {
+  const aNorm = normalizeSnapshotJson(a);
+  const bNorm = normalizeSnapshotJson(b);
+
+  const aInputs = safeRecord(aNorm.inputs);
+  const bInputs = safeRecord(bNorm.inputs);
+
+  const aOutputs = safeRecord(aNorm.outputs);
+  const bOutputs = safeRecord(bNorm.outputs);
+
+  const metaDiffs: FieldDiff[] = [];
+
   const aObj = a && typeof a === "object" ? a : {};
   const bObj = b && typeof b === "object" ? b : {};
 
-  const aInputs = safeRecord((aObj as any).inputs);
-  const bInputs = safeRecord((bObj as any).inputs);
-
-  const aOutputs = safeRecord((aObj as any).outputs);
-  const bOutputs = safeRecord((bObj as any).outputs);
-
   const metaKeysToCompare = ["contract_version", "schema_version", "input_hash", "output_hash"];
-  const metaDiffs: FieldDiff[] = [];
   for (const key of metaKeysToCompare) {
-    const aVal = (aObj as any)[key];
-    const bVal = (bObj as any)[key];
+    const aVal = key === "contract_version" ? aNorm.contract_version : (aObj as any)[key];
+    const bVal = key === "contract_version" ? bNorm.contract_version : (bObj as any)[key];
     if (!valuesEqual(aVal, bVal)) {
       metaDiffs.push({ key, a: aVal ?? null, b: bVal ?? null });
     }
