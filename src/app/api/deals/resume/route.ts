@@ -53,9 +53,9 @@ export async function POST(request: NextRequest) {
   const service = createServiceClient();
 
   const { data: draft, error: draftError } = await (
-    service.from("draft_snapshots") as any
+    service.from("draft_tokens") as any
   )
-    .select("id, snapshot_json, redeemed_deal_id")
+    .select("id, snapshot_json, expires_at, redeemed_at, redeemed_by_user_id, source")
     .eq("token", token.trim())
     .maybeSingle();
 
@@ -63,15 +63,28 @@ export async function POST(request: NextRequest) {
     return jsonError("Draft not found or token invalid", 404);
   }
 
-  if (draft.redeemed_deal_id) {
-    return NextResponse.json(
-      {
-        ok: true,
-        deal_id: draft.redeemed_deal_id,
-        redirect_url: `/deal/${draft.redeemed_deal_id}`,
-      },
-      { status: 200 },
-    );
+  if (draft.expires_at && new Date(draft.expires_at) < new Date()) {
+    return jsonError("Token has expired", 410);
+  }
+
+  if (draft.redeemed_at || draft.redeemed_by_user_id) {
+    const { data: existingDeal } = await (service.from("deals") as any)
+      .select("id")
+      .eq("source_ref", `draft_token:${draft.id}`)
+      .maybeSingle();
+
+    if (existingDeal) {
+      return NextResponse.json(
+        {
+          ok: true,
+          deal_id: existingDeal.id,
+          redirect_url: `/deal/${existingDeal.id}`,
+        },
+        { status: 200 },
+      );
+    }
+
+    return jsonError("Token already redeemed", 409);
   }
 
   const draftPayload = draft.snapshot_json;
@@ -88,18 +101,19 @@ export async function POST(request: NextRequest) {
   if (canonicalSnapshot && isValidCanonicalSnapshot(canonicalSnapshot)) {
     snapshotSource = "canonical_snapshot";
 
-    const cs = canonicalSnapshot as unknown as Record<string, unknown>;
+    const cs = canonicalSnapshot as CanonicalSnapshot;
 
     fullSnapshot = {
-      ...cs,
-      contract_version: cs.compute_version as string,
+      contract_version: cs.compute_version,
       schema_version: "1",
-      inputs: cs.inputs as Record<string, unknown>,
-      outputs: cs.outputs as Record<string, unknown>,
-      computed_at: cs.computed_at as string,
+      inputs: cs.inputs,
+      outputs: cs.outputs,
+      computed_at: cs.computed_at,
       computed_by: "canonical",
       snapshot_source: snapshotSource,
       deal_terms_defaults_used: dealTermsDefaultsUsed,
+      canonicalSnapshot: canonicalSnapshot,
+      draft_snapshot_json: draftPayload,
     };
   } else {
     snapshotSource = "app_compute";
@@ -123,6 +137,14 @@ export async function POST(request: NextRequest) {
     const { terms_version, outputs } = computeResult.result;
     const computedAt = new Date().toISOString();
 
+    const synthesizedCanonical = {
+      compute_version: terms_version,
+      computed_at: computedAt,
+      inputs: mapped.inputs,
+      outputs,
+      assumptions: {},
+    };
+
     fullSnapshot = {
       contract_version: terms_version,
       schema_version: "1",
@@ -132,6 +154,8 @@ export async function POST(request: NextRequest) {
       computed_by: user.id,
       snapshot_source: snapshotSource,
       deal_terms_defaults_used: dealTermsDefaultsUsed,
+      canonicalSnapshot: synthesizedCanonical,
+      draft_snapshot_json: draftPayload,
     };
   }
 
@@ -142,7 +166,7 @@ export async function POST(request: NextRequest) {
       owner_user_id: user.id,
       status: "ACTIVE",
       created_from: "resume",
-      source_ref: `draft:${draft.id}`,
+      source_ref: `draft_token:${draft.id}`,
       mode: "app",
     })
     .select("id, created_at")
@@ -182,29 +206,37 @@ export async function POST(request: NextRequest) {
     return jsonError("Failed to persist snapshot", 500);
   }
 
-  const { error: eventError } = await (
-    service.from("deal_events") as any
-  ).insert({
-    deal_id: newDeal.id,
-    event_type: "DEAL_CREATED",
-    payload: {
-      source: "resume",
-      draft_id: draft.id,
-      snapshot_id: snapshotResult.id,
-      snapshot_source: snapshotSource,
-    },
-    created_by: user.id,
-  });
+  try {
+    const { error: eventError } = await (
+      service.from("deal_events") as any
+    ).insert({
+      deal_id: newDeal.id,
+      event_type: "DEAL_CREATED",
+      payload: {
+        source: "resume",
+        draft_id: draft.id,
+        snapshot_id: snapshotResult.id,
+        snapshot_source: snapshotSource,
+      },
+      created_by: user.id,
+    });
 
-  if (eventError) {
-    console.error("deal_events insert error:", eventError.message);
+    if (eventError) {
+      console.error("deal_events insert error:", eventError.message);
+    }
+  } catch (eventErr: any) {
+    console.error("deal_events insert exception:", eventErr.message);
   }
 
-  const { error: redeemError } = await (
-    service.from("draft_snapshots") as any
+  const { data: redeemData, error: redeemError } = await (
+    service.from("draft_tokens") as any
   )
-    .update({ redeemed_deal_id: newDeal.id })
-    .eq("id", draft.id);
+    .update({
+      redeemed_at: new Date().toISOString(),
+      redeemed_by_user_id: user.id,
+    })
+    .eq("id", draft.id)
+    .is("redeemed_at", null);
 
   if (redeemError) {
     console.error("draft redeem update error:", redeemError.message);

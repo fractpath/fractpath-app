@@ -41,21 +41,50 @@ test("resume route validates token parameter", () => {
   assert(content.includes("token is required"), "must validate token");
 });
 
-test("resume route looks up draft by token", () => {
+test("resume route queries draft_tokens table", () => {
   assert(
-    content.includes('from("draft_snapshots")') && content.includes('.eq("token"'),
-    "must query draft_snapshots by token",
+    content.includes('from("draft_tokens")') && content.includes('.eq("token"'),
+    "must query draft_tokens by token",
   );
 });
 
-test("resume route handles already-redeemed drafts idempotently", () => {
+test("resume route selects required draft_tokens columns", () => {
+  assert(content.includes("expires_at"), "must select expires_at");
+  assert(content.includes("redeemed_at"), "must select redeemed_at");
+  assert(content.includes("redeemed_by_user_id"), "must select redeemed_by_user_id");
+  assert(content.includes("snapshot_json"), "must select snapshot_json");
+});
+
+test("resume route returns 410 for expired token", () => {
   assert(
-    content.includes("redeemed_deal_id"),
-    "must check redeemed_deal_id for idempotent redeem",
+    content.includes("expires_at") && content.includes("410"),
+    "must return 410 for expired token",
+  );
+  assert(
+    content.includes("Token has expired") || content.includes("expired"),
+    "must include expiry error message",
+  );
+});
+
+test("resume route handles already-redeemed tokens", () => {
+  assert(
+    content.includes("draft.redeemed_at") || content.includes("redeemed_at"),
+    "must check redeemed_at",
   );
   assert(
     content.includes("status: 200"),
-    "must return 200 for already-redeemed",
+    "must return 200 for already-redeemed with existing deal",
+  );
+  assert(
+    content.includes("409"),
+    "must return 409 for already-redeemed without deal",
+  );
+});
+
+test("resume route looks up existing deal by source_ref for idempotent redeem", () => {
+  assert(
+    content.includes("draft_token:${draft.id}") && content.includes("source_ref"),
+    "must look up deal by source_ref = draft_token:<id>",
   );
 });
 
@@ -70,24 +99,35 @@ test("resume route has canonical_snapshot branch (no recompute)", () => {
   );
 });
 
-test("canonical branch: persists compute_version as contract_version", () => {
+test("canonical branch: persists canonicalSnapshot nested opaquely", () => {
+  assert(
+    content.includes("canonicalSnapshot: canonicalSnapshot"),
+    "must nest canonicalSnapshot opaquely in snapshot payload",
+  );
+});
+
+test("canonical branch: persists draft_snapshot_json nested verbatim", () => {
+  assert(
+    content.includes("draft_snapshot_json: draftPayload"),
+    "must nest original draft snapshot_json verbatim",
+  );
+});
+
+test("canonical branch: does NOT spread canonical fields into top-level", () => {
+  const canonicalBlock = content.slice(
+    content.indexOf("isValidCanonicalSnapshot(canonicalSnapshot)"),
+    content.indexOf("} else {"),
+  );
+  assert(
+    !canonicalBlock.includes("...cs"),
+    "must NOT spread canonical fields into top-level snapshot (no silent spreading)",
+  );
+});
+
+test("canonical branch: sets contract_version from cs.compute_version", () => {
   assert(
     content.includes("contract_version: cs.compute_version"),
-    "must map compute_version → contract_version",
-  );
-});
-
-test("canonical branch: persists computed_at from canonical payload", () => {
-  assert(
-    content.includes("computed_at: cs.computed_at"),
-    "must preserve original computed_at",
-  );
-});
-
-test("canonical branch: preserves all canonical fields via opaque spread", () => {
-  assert(
-    content.includes("...cs"),
-    "must spread canonical snapshot to preserve all opaque fields (assumptions, etc.)",
+    "must set contract_version from canonical compute_version",
   );
 });
 
@@ -131,6 +171,17 @@ test("app_compute branch: maps draft via mapDraftToDealSnapshot", () => {
   );
 });
 
+test("app_compute branch: synthesizes canonicalSnapshot nested", () => {
+  assert(
+    content.includes("synthesizedCanonical"),
+    "must synthesize canonical when absent",
+  );
+  assert(
+    content.includes("canonicalSnapshot: synthesizedCanonical"),
+    "must nest synthesized canonical in snapshot payload",
+  );
+});
+
 test("app_compute branch: marks snapshot_source = app_compute", () => {
   assert(
     content.includes('"app_compute"'),
@@ -146,13 +197,28 @@ test("both branches: persist deal_terms_defaults_used", () => {
   );
 });
 
-test("resume route creates deal with owner grant", () => {
+test("both branches: nest draft_snapshot_json", () => {
+  const matches = content.match(/draft_snapshot_json: draftPayload/g);
+  assert(
+    matches !== null && matches.length >= 2,
+    "must nest draft_snapshot_json in both canonical and compute branches",
+  );
+});
+
+test("resume route creates deal with source_ref = draft_token:<id>", () => {
   assert(
     content.includes('owner_user_id: user.id') &&
     content.includes('.from("deals")') &&
     content.includes(".insert("),
     "must insert deal owned by user",
   );
+  assert(
+    content.includes("draft_token:${draft.id}"),
+    "source_ref must use draft_token: prefix",
+  );
+});
+
+test("resume route creates OWNER grant", () => {
   assert(
     content.includes('"OWNER"') && content.includes("deal_access_grants"),
     "must grant OWNER on new deal",
@@ -163,7 +229,7 @@ test("resume route persists snapshot via insertDealSnapshot", () => {
   assert(content.includes("insertDealSnapshot"), "must use insertDealSnapshot");
 });
 
-test("resume route records DEAL_CREATED audit event", () => {
+test("resume route records DEAL_CREATED audit event (best-effort)", () => {
   assert(
     content.includes('"DEAL_CREATED"') && content.includes("deal_events"),
     "must record audit event",
@@ -178,10 +244,21 @@ test("resume route audit event includes snapshot_source", () => {
   );
 });
 
-test("resume route marks draft as redeemed", () => {
+test("resume route updates draft_tokens with redeemed_at and redeemed_by_user_id", () => {
   assert(
-    content.includes(".update(") && content.includes("redeemed_deal_id"),
-    "must update draft_snapshots.redeemed_deal_id",
+    content.includes(".update(") && content.includes("redeemed_at"),
+    "must update draft_tokens.redeemed_at",
+  );
+  assert(
+    content.includes("redeemed_by_user_id: user.id"),
+    "must update draft_tokens.redeemed_by_user_id",
+  );
+});
+
+test("resume route uses race-safe conditional update (where redeemed_at is null)", () => {
+  assert(
+    content.includes('.is("redeemed_at", null)'),
+    "must use conditional update where redeemed_at is null",
   );
 });
 
