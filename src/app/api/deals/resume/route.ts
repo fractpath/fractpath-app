@@ -21,10 +21,17 @@ interface CanonicalSnapshot {
 function isValidCanonicalSnapshot(cs: unknown): cs is CanonicalSnapshot {
   if (!cs || typeof cs !== "object" || Array.isArray(cs)) return false;
   const c = cs as Record<string, unknown>;
-  if (typeof c.compute_version !== "string" || c.compute_version.trim().length === 0) return false;
-  if (typeof c.computed_at !== "string" || c.computed_at.trim().length === 0) return false;
-  if (!c.inputs || typeof c.inputs !== "object" || Array.isArray(c.inputs)) return false;
-  if (!c.outputs || typeof c.outputs !== "object" || Array.isArray(c.outputs)) return false;
+  if (
+    typeof c.compute_version !== "string" ||
+    c.compute_version.trim().length === 0
+  )
+    return false;
+  if (typeof c.computed_at !== "string" || c.computed_at.trim().length === 0)
+    return false;
+  if (!c.inputs || typeof c.inputs !== "object" || Array.isArray(c.inputs))
+    return false;
+  if (!c.outputs || typeof c.outputs !== "object" || Array.isArray(c.outputs))
+    return false;
   return true;
 }
 
@@ -55,7 +62,9 @@ export async function POST(request: NextRequest) {
   const { data: draft, error: draftError } = await (
     service.from("draft_tokens") as any
   )
-    .select("id, snapshot_json, expires_at, redeemed_at, redeemed_by_user_id, source")
+    .select(
+      "id, snapshot_json, expires_at, redeemed_at, redeemed_by_user_id, source",
+    )
     .eq("token", token.trim())
     .maybeSingle();
 
@@ -92,8 +101,10 @@ export async function POST(request: NextRequest) {
     return jsonError("Draft snapshot payload is invalid", 422);
   }
 
-  const canonicalSnapshot: unknown = draftPayload.canonicalSnapshot ?? null;
-  const dealTermsDefaultsUsed: unknown = draftPayload.deal_terms_defaults_used ?? null;
+  const canonicalSnapshot: unknown =
+    (draftPayload as any).canonicalSnapshot ?? null;
+  const dealTermsDefaultsUsed: unknown =
+    (draftPayload as any).deal_terms_defaults_used ?? null;
 
   let snapshotSource: "canonical_snapshot" | "app_compute";
   let fullSnapshot: Record<string, unknown>;
@@ -137,7 +148,7 @@ export async function POST(request: NextRequest) {
     const { terms_version, outputs } = computeResult.result;
     const computedAt = new Date().toISOString();
 
-    const synthesizedCanonical = {
+    const synthesizedCanonical: CanonicalSnapshot = {
       compute_version: terms_version,
       computed_at: computedAt,
       inputs: mapped.inputs,
@@ -225,9 +236,13 @@ export async function POST(request: NextRequest) {
       console.error("deal_events insert error:", eventError.message);
     }
   } catch (eventErr: any) {
-    console.error("deal_events insert exception:", eventErr.message);
+    console.error(
+      "deal_events insert exception:",
+      eventErr?.message ?? String(eventErr),
+    );
   }
 
+  // Redeem token (race-safe). If another request redeemed first, do not return a new deal as success.
   const { data: redeemData, error: redeemError } = await (
     service.from("draft_tokens") as any
   )
@@ -236,10 +251,33 @@ export async function POST(request: NextRequest) {
       redeemed_by_user_id: user.id,
     })
     .eq("id", draft.id)
-    .is("redeemed_at", null);
+    .is("redeemed_at", null)
+    .select("id")
+    .maybeSingle();
 
   if (redeemError) {
     console.error("draft redeem update error:", redeemError.message);
+  }
+
+  // If the conditional update matched 0 rows, treat as already redeemed and follow idempotent path.
+  if (!redeemData) {
+    const { data: existingDeal } = await (service.from("deals") as any)
+      .select("id")
+      .eq("source_ref", `draft_token:${draft.id}`)
+      .maybeSingle();
+
+    if (existingDeal) {
+      return NextResponse.json(
+        {
+          ok: true,
+          deal_id: existingDeal.id,
+          redirect_url: `/deal/${existingDeal.id}`,
+        },
+        { status: 200 },
+      );
+    }
+
+    return jsonError("Token already redeemed", 409);
   }
 
   return NextResponse.json(
