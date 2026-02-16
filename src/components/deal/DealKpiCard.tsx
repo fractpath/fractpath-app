@@ -1,38 +1,44 @@
-import type { KpiItem } from "@/lib/dealSummaryViewModel";
+'use client';
 
-interface DealKpiCardProps {
-  kpis: KpiItem[];
-}
+import React from "react";
 
-export function DealKpiCard({ kpis }: DealKpiCardProps) {
-  if (kpis.length === 0) return null;
-
-  const [headline, ...supporting] = kpis;
+/**
+ * Canonical-only v10 reset:
+ * - Avoid importing legacy types from dealSummaryViewModel (they were removed/renamed).
+ * - Keep component permissive while UI alignment work is in progress.
+ */
+export function DealKpiCard(props: any) {
+  const items = props?.items ?? props?.kpis ?? props?.vm?.kpis ?? [];
 
   return (
-    <div className="space-y-3">
-      <div className="rounded-md bg-primary/5 p-4 text-center">
-        <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          {headline.label}
-        </div>
-        <div className="mt-1 text-2xl font-semibold">{headline.value}</div>
-      </div>
-
-      {supporting.length > 0 ? (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {supporting.map((kpi) => (
+    <section style={{ display: "grid", gap: 12 }}>
+      <h3 style={{ fontSize: 14, fontWeight: 600 }}>Key metrics</h3>
+      {Array.isArray(items) && items.length > 0 ? (
+        <div style={{ display: "grid", gap: 8 }}>
+          {items.map((it: any, idx: number) => (
             <div
-              key={kpi.label}
-              className="rounded-md border px-3 py-2 text-center"
+              key={idx}
+              style={{
+                border: "1px solid rgba(0,0,0,0.08)",
+                borderRadius: 12,
+                padding: 12,
+              }}
             >
-              <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                {kpi.label}
-              </div>
-              <div className="mt-0.5 text-sm font-semibold">{kpi.value}</div>
+            <div style={{ fontSize: 12, opacity: 0.75 }}>
+              {it?.label ?? it?.title ?? `Metric ${idx + 1}` }
             </div>
-          ))}
+            <div style={{ fontSize: 18, fontWeight: 700 }}>
+              {it?.value ?? it?.display ?? it?.amount ?? "-" }
+            </div>
+            {it?.hint ? <div style={{ marginTop: 4, fontSize: 12, opacity: 0.7 }}>{it.hint}</div> : null}
+          </div>
+        ))}
         </div>
-      ) : null}
-    </div>
+      ) : (
+        <div style={{ fontSize: 13, opacity: 0.7 }}>No metrics available.</div>
+      )}
+    </section>
   );
 }
+
+export default DealKpiCard;

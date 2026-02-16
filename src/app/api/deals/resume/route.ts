@@ -15,16 +15,24 @@ interface CanonicalSnapshot {
   computed_at: string;
   inputs: Record<string, unknown>;
   assumptions: Record<string, unknown>;
-  outputs: Record<string, unknown>;
+  outputs: Record<string, unknown>; // expected to be an object; typically { results: ... }}
 }
+
 
 function isValidCanonicalSnapshot(cs: unknown): cs is CanonicalSnapshot {
   if (!cs || typeof cs !== "object" || Array.isArray(cs)) return false;
   const c = cs as Record<string, unknown>;
-  if (typeof c.compute_version !== "string" || c.compute_version.trim().length === 0) return false;
-  if (typeof c.computed_at !== "string" || c.computed_at.trim().length === 0) return false;
-  if (!c.inputs || typeof c.inputs !== "object" || Array.isArray(c.inputs)) return false;
-  if (!c.outputs || typeof c.outputs !== "object" || Array.isArray(c.outputs)) return false;
+  if (
+    typeof c.compute_version !== "string" ||
+    c.compute_version.trim().length === 0
+  )
+    return false;
+  if (typeof c.computed_at !== "string" || c.computed_at.trim().length === 0)
+    return false;
+  if (!c.inputs || typeof c.inputs !== "object" || Array.isArray(c.inputs))
+    return false;
+  if (!c.outputs || typeof c.outputs !== "object" || Array.isArray(c.outputs))
+    return false;
   return true;
 }
 
@@ -55,7 +63,9 @@ export async function POST(request: NextRequest) {
   const { data: draft, error: draftError } = await (
     service.from("draft_tokens") as any
   )
-    .select("id, snapshot_json, expires_at, redeemed_at, redeemed_by_user_id, source")
+    .select(
+      "id, snapshot_json, expires_at, redeemed_at, redeemed_by_user_id, source",
+    )
     .eq("token", token.trim())
     .maybeSingle();
 
@@ -93,7 +103,8 @@ export async function POST(request: NextRequest) {
   }
 
   const canonicalSnapshot: unknown = draftPayload.canonicalSnapshot ?? null;
-  const dealTermsDefaultsUsed: unknown = draftPayload.deal_terms_defaults_used ?? null;
+  const dealTermsDefaultsUsed: unknown =
+    draftPayload.deal_terms_defaults_used ?? null;
 
   let snapshotSource: "canonical_snapshot" | "app_compute";
   let fullSnapshot: Record<string, unknown>;
@@ -126,7 +137,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const mapped = mapDraftToDealSnapshot(draftValidation.snapshot);
+    const mapped = mapDraftToDealSnapshot(draftValidation.snapshot as any);
 
     const computeResult = await computeDeal(mapped.inputs);
     if (!computeResult.ok) {
@@ -134,29 +145,32 @@ export async function POST(request: NextRequest) {
       return jsonError(`Compute failed: ${computeResult.error}`, status);
     }
 
-    const { terms_version, outputs } = computeResult.result;
-    const computedAt = new Date().toISOString();
+    const { compute_version, results } = computeResult.result;
 
-    const synthesizedCanonical = {
-      compute_version: terms_version,
-      computed_at: computedAt,
-      inputs: mapped.inputs,
-      outputs,
-      assumptions: {},
-    };
+      const computedAt = new Date().toISOString();
 
-    fullSnapshot = {
-      contract_version: terms_version,
-      schema_version: "1",
-      inputs: mapped.inputs,
-      outputs,
-      computed_at: computedAt,
-      computed_by: user.id,
-      snapshot_source: snapshotSource,
-      deal_terms_defaults_used: dealTermsDefaultsUsed,
-      canonicalSnapshot: synthesizedCanonical,
-      draft_snapshot_json: draftPayload,
-    };
+      const canonicalOutputs: Record<string, unknown> = { results };
+
+      const synthesizedCanonical = {
+        compute_version,
+        computed_at: computedAt,
+        inputs: mapped.inputs,
+        assumptions: {},
+        outputs: canonicalOutputs,
+      };
+
+      fullSnapshot = {
+        contract_version: compute_version,
+        schema_version: "1",
+        inputs: mapped.inputs,
+        outputs: canonicalOutputs,
+        computed_at: computedAt,
+        computed_by: user.id,
+        snapshot_source: snapshotSource,
+        deal_terms_defaults_used: dealTermsDefaultsUsed,
+        canonicalSnapshot: synthesizedCanonical,
+        draft_snapshot_json: draftPayload,
+      };
   }
 
   const { data: newDeal, error: insertDealError } = await (

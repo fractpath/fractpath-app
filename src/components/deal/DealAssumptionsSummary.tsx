@@ -1,40 +1,44 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import type { AssumptionItem } from "@/lib/dealSummaryViewModel";
+import React from "react";
 
-interface DealAssumptionsSummaryProps {
-  assumptions: AssumptionItem[];
-}
-
-export function DealAssumptionsSummary({ assumptions }: DealAssumptionsSummaryProps) {
-  const [open, setOpen] = useState(false);
-
-  if (assumptions.length === 0) return null;
+export function DealAssumptionsSummary(props: any) {
+  const items =
+    props?.items ??
+    props?.assumptions ??
+    props?.vm?.assumptions ??
+    props?.vm?.assumptionItems ??
+    [];
 
   return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        className="flex w-full items-center justify-between text-sm font-semibold"
-      >
-        <span>Key assumptions</span>
-        <span className="text-xs text-muted-foreground">
-          {open ? "Hide" : "Show"} ({assumptions.length})
-        </span>
-      </button>
+    <section style={{ display: "grid", gap: 12 }}>
+      <h3 style={{ fontSize: 14, fontWeight: 600 }}>Assumptions</h3>
 
-      {open ? (
-        <div className="mt-2 grid gap-1 rounded-md bg-muted p-3 text-xs">
-          {assumptions.map((a) => (
-            <div key={a.label} className="flex justify-between gap-4">
-              <span className="text-muted-foreground">{a.label}</span>
-              <span className="font-medium">{a.value}</span>
+      {Array.isArray(items) && items.length > 0 ? (
+        <div style={{ display: "grid", gap: 8 }}>
+          {items.map((it: any, idx: number) => (
+            <div
+              key={idx}
+              style={{
+                border: "1px solid rgba(0,0,0,0.08)",
+                borderRadius: 12,
+                padding: 12,
+              }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 600 }}>
+                {it?.label ?? it?.name ?? it?.key ?? ("Assumption " + String(idx + 1))}
+              </div>
+              <div style={{ fontSize: 13, opacity: 0.85 }}>
+                {it?.value ?? it?.display ?? it?.description ?? "-"}
+              </div>
             </div>
           ))}
         </div>
-      ) : null}
-    </div>
+      ) : (
+        <div style={{ fontSize: 13, opacity: 0.7 }}>No assumptions available.</div>
+      )}
+    </section>
   );
 }
+
+export default DealAssumptionsSummary;

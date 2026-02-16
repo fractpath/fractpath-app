@@ -1,3 +1,5 @@
+// src/lib/dealSnapshot.ts
+
 export interface FullDealSnapshotV1 {
   contract_version: string;
   schema_version: string;
@@ -20,16 +22,23 @@ export interface SnapshotValidationResult {
 export interface SnapshotValidationError {
   ok: false;
   error: string;
-  code:
-    | "INVALID_TYPE"
-    | "MISSING_FIELD"
-    | "INVALID_FIELD_TYPE";
+  code: "INVALID_TYPE" | "MISSING_FIELD" | "INVALID_FIELD_TYPE" | "NOT_CANONICAL";
 }
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === "object" && !Array.isArray(v);
+}
+
+/**
+ * Canonical-only rule:
+ * - inputs must include { deal_terms: object, scenario: object }
+ * - outputs must include { results: object }
+ * This prevents legacy widget snapshots ({summary/schedule/settlements}) from being stored.
+ */
 export function validateFullDealSnapshotV1(
   payload: unknown,
 ): SnapshotValidationResult | SnapshotValidationError {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+  if (!isRecord(payload)) {
     return {
       ok: false,
       error: "Payload must be a JSON object",
@@ -55,7 +64,7 @@ export function validateFullDealSnapshotV1(
     };
   }
 
-  if (!p.inputs || typeof p.inputs !== "object" || Array.isArray(p.inputs)) {
+  if (!isRecord(p.inputs)) {
     return {
       ok: false,
       error: "inputs is required and must be a JSON object",
@@ -63,7 +72,7 @@ export function validateFullDealSnapshotV1(
     };
   }
 
-  if (!p.outputs || typeof p.outputs !== "object" || Array.isArray(p.outputs)) {
+  if (!isRecord(p.outputs)) {
     return {
       ok: false,
       error: "outputs is required and must be a JSON object",
@@ -84,6 +93,38 @@ export function validateFullDealSnapshotV1(
       ok: false,
       error: "output_hash must be a string if provided",
       code: "INVALID_FIELD_TYPE",
+    };
+  }
+
+  // --- Canonical-only enforcement ---
+  const inputs = p.inputs as Record<string, unknown>;
+  const outputs = p.outputs as Record<string, unknown>;
+
+  const deal_terms = inputs.deal_terms;
+  const scenario = inputs.scenario;
+
+  if (!isRecord(deal_terms)) {
+    return {
+      ok: false,
+      error: "Canonical snapshot required: inputs.deal_terms must be an object",
+      code: "NOT_CANONICAL",
+    };
+  }
+
+  if (!isRecord(scenario)) {
+    return {
+      ok: false,
+      error: "Canonical snapshot required: inputs.scenario must be an object",
+      code: "NOT_CANONICAL",
+    };
+  }
+
+  const results = outputs.results;
+  if (!isRecord(results)) {
+    return {
+      ok: false,
+      error: "Canonical snapshot required: outputs.results must be an object",
+      code: "NOT_CANONICAL",
     };
   }
 

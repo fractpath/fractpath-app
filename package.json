@@ -13,6 +13,7 @@
     "verify": "npm run lint && npm run build && npm run smoke"
   },
   "dependencies": {
+    "@fractpath/compute": "file:packages/compute",
     "@supabase/auth-helpers-nextjs": "^0.15.0",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.93.3",
@@ -30,6 +31,7 @@
     "dotenv": "^17.2.3",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }

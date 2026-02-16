@@ -1,206 +1,140 @@
-import type { SnapshotDisplayData } from "./dealSnapshotDisplay";
-import { formatValue, humanLabel } from "./dealSnapshotDisplay";
+// src/lib/dealSummaryViewModel.ts
+//
+// Canonical-only view model.
+// Canonical compute outputs live at:
+//   snapshot_json.outputs.results (DealResults)
+// This file no longer supports legacy widget shapes.
 
-export interface KpiItem {
+export type Kpi = {
   label: string;
   value: string;
+};
+
+export type DealSummaryViewModel = {
+  kpis: Kpi[];
+};
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === "object" && !Array.isArray(v);
 }
 
-export interface ExitRow {
-  label: string;
-  netPayout: string;
-  timing: string;
+function asNumber(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
-export interface AssumptionItem {
-  label: string;
-  value: string;
+function fmtMoney(n: number): string {
+  return n.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+  });
 }
 
-export interface DealSummaryViewModel {
-  kpis: KpiItem[];
-  exits: ExitRow[];
-  assumptions: AssumptionItem[];
-  flags: {
-    isHistorical: boolean;
-    hasOutputs: boolean;
-    hasExits: boolean;
-    hasAssumptions: boolean;
-  };
+function fmtPct(n: number, digits = 2): string {
+  return (n * 100).toFixed(digits) + "%";
 }
 
-const HEADLINE_OUTPUT_KEYS = [
-  "net_at_exit",
-  "net_payout",
-  "total_return",
-  "estimated_value",
-  "headline_value",
-];
-
-const SUPPORTING_OUTPUT_KEYS = [
-  "buy_amount",
-  "purchase_price",
-  "term",
-  "term_years",
-  "growth_rate",
-  "annual_growth",
-  "monthly_payment",
-  "equity_share",
-];
-
-const EXIT_KEYS: { key: string; label: string }[] = [
-  { key: "early", label: "Early exit" },
-  { key: "standard", label: "Standard exit" },
-  { key: "late", label: "Late exit" },
-];
-
-const ASSUMPTION_KEYS = [
-  "home_value",
-  "property_value",
-  "appreciation_rate",
-  "discount_rate",
-  "holding_period",
-  "term",
-  "term_years",
-  "inflation_rate",
-];
-
-function formatExitNetPayout(c: Record<string, unknown>): string {
-  // Widget outputs settlements with homeowner-centric keys:
-  // - homeowner_net
-  // - investor_payout
-  // - home_value_at_exit
-  // - exit_year
-  // In the app UI, "Net payout" = homeowner net at exit.
-  return formatValue(
-    c.homeowner_net ??
-      c.net_payout ??
-      c.net ??
-      c.payout ??
-      null,
-  );
+function fmtNum(n: number, digits = 2): string {
+  return n.toLocaleString("en-US", {
+    maximumFractionDigits: digits,
+  });
 }
 
-function formatExitTiming(c: Record<string, unknown>): string {
-  return formatValue(c.timing ?? c.year ?? c.exit_year ?? null);
-}
+function extractCanonicalResults(
+  outputs: Record<string, unknown> | null | undefined,
+): Record<string, unknown> | null {
+  if (!outputs || !isRecord(outputs)) return null;
 
-export function buildDealSummaryViewModel(
-  display: SnapshotDisplayData | null,
-  isHistorical: boolean,
-): DealSummaryViewModel {
-  const empty: DealSummaryViewModel = {
-    kpis: [{ label: "Status", value: "Scenario saved" }],
-    exits: [],
-    assumptions: [],
-    flags: {
-      isHistorical,
-      hasOutputs: false,
-      hasExits: false,
-      hasAssumptions: false,
-    },
-  };
-
-  if (!display) return empty;
-
-  const outputs = display.outputs;
-  const inputs = display.inputs;
-
-  const kpis: KpiItem[] = [];
-
-  if (outputs) {
-    let headlineFound = false;
-    for (const key of HEADLINE_OUTPUT_KEYS) {
-      if (key in outputs && outputs[key] != null) {
-        kpis.push({ label: humanLabel(key), value: formatValue(outputs[key]) });
-        headlineFound = true;
-        break;
-      }
-    }
-    if (!headlineFound) {
-      kpis.push({ label: "Status", value: "Scenario saved" });
-    }
-
-    for (const key of SUPPORTING_OUTPUT_KEYS) {
-      if (key in outputs && outputs[key] != null) {
-        kpis.push({ label: humanLabel(key), value: formatValue(outputs[key]) });
-      }
-      if (kpis.length >= 5) break;
-    }
-
-    if (kpis.length < 5 && inputs) {
-      for (const key of SUPPORTING_OUTPUT_KEYS) {
-        if (kpis.length >= 5) break;
-        if (key in inputs && inputs[key] != null) {
-          const alreadyAdded = kpis.some((k) => k.label === humanLabel(key));
-          if (!alreadyAdded) {
-            kpis.push({ label: humanLabel(key), value: formatValue(inputs[key]) });
-          }
-        }
-      }
-    }
-  } else {
-    kpis.push({ label: "Status", value: "Scenario saved" });
+  // Preferred canonical shape: { results: DealResults }
+  if (isRecord((outputs as any).results)) {
+    return (outputs as any).results;
   }
 
-  const exits: ExitRow[] = [];
-  if (outputs) {
-    const settlements =
-      outputs.settlements && typeof outputs.settlements === "object" && !Array.isArray(outputs.settlements)
-        ? (outputs.settlements as Record<string, unknown>)
-        : null;
-
-    if (settlements) {
-      for (const { key, label } of EXIT_KEYS) {
-        const caseData = settlements[key];
-        if (caseData && typeof caseData === "object" && !Array.isArray(caseData)) {
-          const c = caseData as Record<string, unknown>;
-          exits.push({
-            label,
-            netPayout: formatExitNetPayout(c),
-            timing: formatExitTiming(c),
-          });
-        }
-      }
-    }
-
-    if (exits.length === 0) {
-      for (const { key, label } of EXIT_KEYS) {
-        const exitKey = `exit_${key}`;
-        if (exitKey in outputs && outputs[exitKey] != null) {
-          const val = outputs[exitKey];
-          if (val && typeof val === "object" && !Array.isArray(val)) {
-            const c = val as Record<string, unknown>;
-            exits.push({
-              label,
-              netPayout: formatExitNetPayout(c),
-              timing: formatExitTiming(c),
-            });
-          }
-        }
-      }
-    }
+    if (
+    "isa_settlement" in outputs ||
+    "invested_capital_total" in outputs ||
+    "projected_fmv" in outputs
+  ) {
+    return outputs;
   }
 
-  const assumptions: AssumptionItem[] = [];
-  if (inputs) {
-    for (const key of ASSUMPTION_KEYS) {
-      if (key in inputs && inputs[key] != null) {
-        assumptions.push({ label: humanLabel(key), value: formatValue(inputs[key]) });
-      }
-      if (assumptions.length >= 6) break;
-    }
+  return null;
+}
+
+export function buildDealSummaryViewModel(args: {
+  contractVersion?: string | null;
+  schemaVersion?: string | null;
+  inputs?: Record<string, unknown> | null;
+  outputs?: Record<string, unknown> | null;
+}): DealSummaryViewModel {
+  const results = extractCanonicalResults(args.outputs);
+
+  if (!results) {
+    return {
+      kpis: [{ label: "Status", value: "Not computed" }],
+    };
   }
 
-  return {
-    kpis,
-    exits,
-    assumptions,
-    flags: {
-      isHistorical,
-      hasOutputs: !!outputs,
-      hasExits: exits.length > 0,
-      hasAssumptions: assumptions.length > 0,
-    },
-  };
+  const kpis: Kpi[] = [];
+
+  const invested = asNumber(results.invested_capital_total);
+  if (invested !== null) {
+    kpis.push({
+      label: "Invested capital",
+      value: fmtMoney(invested),
+    });
+  }
+
+  const fmv = asNumber(results.projected_fmv);
+  if (fmv !== null) {
+    kpis.push({
+      label: "Projected FMV",
+      value: fmtMoney(fmv),
+    });
+  }
+
+  const settlement = asNumber(results.isa_settlement);
+  if (settlement !== null) {
+    kpis.push({
+      label: "ISA settlement",
+      value: fmtMoney(settlement),
+    });
+  }
+
+  const multiple = asNumber(results.investor_multiple);
+  if (multiple !== null) {
+    kpis.push({
+      label: "Investor multiple",
+      value: fmtNum(multiple, 2) + "×",
+    });
+  }
+
+  const irr = asNumber(results.investor_irr_annual);
+  if (irr !== null) {
+    kpis.push({
+      label: "Investor IRR (annual)",
+      value: fmtPct(irr, 2),
+    });
+  }
+
+  const profit = asNumber(results.investor_profit);
+  if (profit !== null) {
+    kpis.push({
+      label: "Investor profit",
+      value: fmtMoney(profit),
+    });
+  }
+
+  const vested = asNumber(results.vested_equity_percentage);
+  if (vested !== null) {
+    kpis.push({
+      label: "Vested equity",
+      value: fmtPct(vested, 2),
+    });
+  }
+
+  if (kpis.length === 0) {
+    kpis.push({ label: "Status", value: "Computed" });
+  }
+
+  return { kpis };
 }

@@ -47,9 +47,34 @@ export async function POST(
     return jsonError("inputs is required and must be a JSON object", 400);
   }
 
+  // Canonical shape required now
+  if (
+    !("deal_terms" in body.inputs) ||
+    !body.inputs.deal_terms ||
+    typeof body.inputs.deal_terms !== "object" ||
+    Array.isArray(body.inputs.deal_terms)
+  ) {
+    return jsonError(
+      "inputs.deal_terms is required and must be a JSON object",
+      400,
+    );
+  }
+  if (
+    !("scenario" in body.inputs) ||
+    !body.inputs.scenario ||
+    typeof body.inputs.scenario !== "object" ||
+    Array.isArray(body.inputs.scenario)
+  ) {
+    return jsonError(
+      "inputs.scenario is required and must be a JSON object",
+      400,
+    );
+  }
+
   // RLS-enforced OWNER check via deal_access_grants
-  const { data: grant, error: grantError } = await (supabase
-    .from("deal_access_grants") as any)
+  const { data: grant, error: grantError } = await (
+    supabase.from("deal_access_grants") as any
+  )
     .select("role")
     .eq("deal_id", dealId)
     .eq("user_id", user.id)
@@ -69,14 +94,15 @@ export async function POST(
     return jsonError(computeResult.error, status);
   }
 
-  const { terms_version, outputs } = computeResult.result;
+  const { compute_version, results } = computeResult.result;
   const computedAt = new Date().toISOString();
 
+  // Snapshot remains validated by validateFullDealSnapshotV1
   const fullSnapshot = {
-    contract_version: terms_version,
+    contract_version: compute_version,
     schema_version: "1",
-    inputs: body.inputs,
-    outputs, // must include outputs.schedule[] and outputs.summary
+    inputs: body.inputs, // { deal_terms, scenario }
+    outputs: { results }, // canonical nesting
     computed_at: computedAt,
     computed_by: user.id,
   };
@@ -95,18 +121,18 @@ export async function POST(
   }
 
   // Audit event insert should also be under RLS.
-  const { error: eventError } = await (supabase.from("deal_events") as any).insert(
-    {
-      deal_id: dealId,
-      event_type: "DEAL_SNAPSHOT_COMPUTED",
-      payload: {
-        snapshot_id: result.id,
-        terms_version,
-        computed_at: computedAt,
-      },
-      created_by: user.id,
+  const { error: eventError } = await (
+    supabase.from("deal_events") as any
+  ).insert({
+    deal_id: dealId,
+    event_type: "DEAL_SNAPSHOT_COMPUTED",
+    payload: {
+      snapshot_id: result.id,
+      compute_version,
+      computed_at: computedAt,
     },
-  );
+    created_by: user.id,
+  });
 
   if (eventError) {
     console.error("deal_events insert error:", eventError.message);
@@ -116,8 +142,8 @@ export async function POST(
     {
       ok: true,
       snapshot_id: result.id,
-      terms_version,
-      summary: outputs.summary ?? {},
+      compute_version,
+      results,
       computed_at: computedAt,
     },
     { status: 201 },

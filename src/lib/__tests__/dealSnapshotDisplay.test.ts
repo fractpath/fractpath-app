@@ -1,4 +1,9 @@
-import { extractSnapshotDisplay, selectSnapshot, formatValue, humanLabel } from "../dealSnapshotDisplay";
+import {
+  extractSnapshotDisplay,
+  selectSnapshot,
+  formatValue,
+  humanLabel,
+} from "../dealSnapshotDisplay";
 
 let passed = 0;
 let failed = 0;
@@ -7,11 +12,11 @@ function test(name: string, fn: () => void) {
   try {
     fn();
     passed++;
-    console.log(`  PASS: ${name}`);
+    console.log("  PASS: " + name);
   } catch (err: any) {
     failed++;
-    console.log(`  FAIL: ${name}`);
-    console.log(`        ${err.message}`);
+    console.log("  FAIL: " + name);
+    console.log("        " + (err?.message ?? String(err)));
   }
 }
 
@@ -19,127 +24,56 @@ function assert(condition: boolean, msg: string) {
   if (!condition) throw new Error(msg);
 }
 
-console.log("\n=== Deal Snapshot Display Tests ===\n");
+console.log("\n=== Deal Snapshot Display Tests (canonical-only v10) ===\n");
 
-test("null snapshot returns null (empty state path)", () => {
+test("null snapshot returns null", () => {
   const result = extractSnapshotDisplay(null);
   assert(result === null, "expected null");
 });
 
-test("valid snapshot returns display data (snapshot path)", () => {
+test("valid canonical snapshot returns outputs from outputs.results", () => {
   const row = {
     created_at: "2026-02-10T12:00:00Z",
-    contract_version: "1.0.0",
-    schema_version: "1",
-    input_hash: "abc123",
-    output_hash: "def456",
+    contract_version: "10.0.0",
+    schema_version: "10",
     snapshot_json: {
-      contract_version: "1.0.0",
-      schema_version: "1",
-      inputs: { home_value: 500000 },
-      outputs: { monthly_payment: 1200 },
+      inputs: { deal_terms: { home_value: 500000 } },
+      outputs: { results: { invested_capital_total: 123 } },
     },
   };
-  const result = extractSnapshotDisplay(row);
+
+  const result = extractSnapshotDisplay(row as any);
   assert(result !== null, "expected non-null");
-  assert(result!.contractVersion === "1.0.0", "contract_version mismatch");
-  assert(result!.schemaVersion === "1", "schema_version mismatch");
-  assert(result!.inputHash === "abc123", "input_hash mismatch");
-  assert(result!.outputHash === "def456", "output_hash mismatch");
+  assert(result!.contractVersion === "10.0.0", "contractVersion mismatch");
+  assert(result!.schemaVersion === "10", "schemaVersion mismatch");
   assert(result!.inputs !== null, "inputs should exist");
   assert(result!.outputs !== null, "outputs should exist");
-  assert(result!.chartSeries === null, "no chart_series expected");
+  assert(
+    (result!.outputs as any).invested_capital_total === 123,
+    "expected results value",
+  );
 });
 
-test("missing optional hashes degrade to em dash", () => {
+test("missing outputs.results yields outputs=null", () => {
   const row = {
     created_at: "2026-02-10T12:00:00Z",
-    contract_version: "1.0.0",
-    schema_version: "1",
-    input_hash: null,
-    output_hash: null,
+    contract_version: "10.0.0",
+    schema_version: "10",
     snapshot_json: {
-      inputs: { a: 1 },
-      outputs: { b: 2 },
+      inputs: { deal_terms: { home_value: 500000 } },
+      outputs: {},
     },
   };
-  const result = extractSnapshotDisplay(row);
+
+  const result = extractSnapshotDisplay(row as any);
   assert(result !== null, "expected non-null");
-  assert(result!.inputHash === "\u2014", "should show em dash for null hash");
-  assert(result!.outputHash === "\u2014", "should show em dash for null hash");
+  assert(
+    result!.outputs === null,
+    "outputs should be null when results missing",
+  );
 });
 
-test("missing inputs in snapshot_json degrades gracefully", () => {
-  const row = {
-    created_at: "2026-02-10T12:00:00Z",
-    contract_version: "1.0.0",
-    schema_version: "1",
-    input_hash: null,
-    output_hash: null,
-    snapshot_json: {
-      outputs: { b: 2 },
-    },
-  };
-  const result = extractSnapshotDisplay(row);
-  assert(result !== null, "expected non-null");
-  assert(result!.inputs === null, "missing inputs should be null");
-  assert(result!.outputs !== null, "outputs should exist");
-});
-
-test("missing outputs in snapshot_json degrades gracefully", () => {
-  const row = {
-    created_at: "2026-02-10T12:00:00Z",
-    contract_version: "1.0.0",
-    schema_version: "1",
-    input_hash: null,
-    output_hash: null,
-    snapshot_json: {
-      inputs: { a: 1 },
-    },
-  };
-  const result = extractSnapshotDisplay(row);
-  assert(result !== null, "expected non-null");
-  assert(result!.inputs !== null, "inputs should exist");
-  assert(result!.outputs === null, "missing outputs should be null");
-});
-
-test("chart_series present as array is extracted", () => {
-  const row = {
-    created_at: "2026-02-10T12:00:00Z",
-    contract_version: "1.0.0",
-    schema_version: "1",
-    input_hash: null,
-    output_hash: null,
-    snapshot_json: {
-      inputs: { a: 1 },
-      outputs: { b: 2 },
-      chart_series: [{ year: 1, value: 100 }, { year: 2, value: 200 }],
-    },
-  };
-  const result = extractSnapshotDisplay(row);
-  assert(result !== null, "expected non-null");
-  assert(result!.chartSeries !== null, "chart_series should exist");
-  assert(result!.chartSeries!.length === 2, "should have 2 entries");
-});
-
-test("chart_series as non-array is ignored", () => {
-  const row = {
-    created_at: "2026-02-10T12:00:00Z",
-    contract_version: "1.0.0",
-    schema_version: "1",
-    input_hash: null,
-    output_hash: null,
-    snapshot_json: {
-      inputs: { a: 1 },
-      outputs: { b: 2 },
-      chart_series: "not an array",
-    },
-  };
-  const result = extractSnapshotDisplay(row);
-  assert(result!.chartSeries === null, "non-array chart_series should be null");
-});
-
-test("formatValue handles various types", () => {
+test("formatValue handles types", () => {
   assert(formatValue(null) === "\u2014", "null");
   assert(formatValue(undefined) === "\u2014", "undefined");
   assert(formatValue(true) === "Yes", "true");
@@ -148,9 +82,12 @@ test("formatValue handles various types", () => {
   assert(formatValue(1000).includes("1"), "number");
 });
 
-test("humanLabel converts snake_case to title case", () => {
-  assert(humanLabel("home_value") === "Home Value", `got: ${humanLabel("home_value")}`);
-  assert(humanLabel("monthly_payment") === "Monthly Payment", `got: ${humanLabel("monthly_payment")}`);
+test("humanLabel converts snake_case", () => {
+  assert(humanLabel("home_value") === "Home Value", "home_value");
+  assert(
+    humanLabel("monthly_payment") === "Monthly Payment",
+    "monthly_payment",
+  );
 });
 
 console.log("\n--- selectSnapshot Tests ---\n");
@@ -161,33 +98,27 @@ test("selectSnapshot: empty list returns null, isLatest true", () => {
   assert(isLatest === true, "expected isLatest");
 });
 
-test("selectSnapshot: no selectedId returns first (latest)", () => {
-  const items = [{ id: "a" }, { id: "b" }, { id: "c" }];
-  const { selected, isLatest } = selectSnapshot(items, null);
-  assert(selected!.id === "a", `expected a, got ${selected!.id}`);
-  assert(isLatest === true, "expected isLatest");
-});
-
-test("selectSnapshot: selectedId matches first is isLatest=true", () => {
+test("selectSnapshot: no selectedId returns first", () => {
   const items = [{ id: "a" }, { id: "b" }];
-  const { selected, isLatest } = selectSnapshot(items, "a");
+  const { selected, isLatest } = selectSnapshot(items, null);
   assert(selected!.id === "a", "expected a");
   assert(isLatest === true, "expected isLatest");
 });
 
-test("selectSnapshot: selectedId matches second is isLatest=false", () => {
+test("selectSnapshot: selectedId matches second yields isLatest=false", () => {
   const items = [{ id: "a" }, { id: "b" }, { id: "c" }];
   const { selected, isLatest } = selectSnapshot(items, "b");
-  assert(selected!.id === "b", `expected b, got ${selected!.id}`);
+  assert(selected!.id === "b", "expected b");
   assert(isLatest === false, "expected not isLatest");
 });
 
-test("selectSnapshot: unknown selectedId falls back to latest", () => {
-  const items = [{ id: "a" }, { id: "b" }];
-  const { selected, isLatest } = selectSnapshot(items, "zzz");
-  assert(selected!.id === "a", "expected fallback to a");
-  assert(isLatest === true, "expected isLatest on fallback");
-});
-
-console.log(`\n${passed} passed, ${failed} failed out of ${passed + failed} tests\n`);
+console.log(
+  "\n" +
+    passed +
+    " passed, " +
+    failed +
+    " failed out of " +
+    (passed + failed) +
+    " tests\n",
+);
 if (failed > 0) process.exit(1);

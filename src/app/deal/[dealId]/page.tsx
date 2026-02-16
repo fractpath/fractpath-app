@@ -120,7 +120,7 @@ export default async function DealPage({ params, searchParams }: PageProps) {
   const selectedSnapshotId = getParam(resolvedSearchParams, "snapshot");
   const { selected: snapshotRow, isLatest } = selectSnapshot(snapshots, selectedSnapshotId);
   const display = extractSnapshotDisplay(snapshotRow);
-  const summaryVm = buildDealSummaryViewModel(display, !isLatest);
+  const summaryVm = buildDealSummaryViewModel(display ?? {});
 
   const [versionsResult, eventsResult] = await Promise.all([
     getDealVersions(supabase, dealId, 50),
@@ -217,12 +217,6 @@ export default async function DealPage({ params, searchParams }: PageProps) {
         <div className="mt-4">
           <DealSummary
             vm={summaryVm}
-            snapshotMeta={{
-              contractVersion: display?.contractVersion ?? "\u2014",
-              schemaVersion: display?.schemaVersion ?? "\u2014",
-              createdAt: display?.createdAt ?? "\u2014",
-            }}
-            hasSnapshot={!!display}
           />
         </div>
       </section>

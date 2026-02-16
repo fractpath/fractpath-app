@@ -1,90 +1,80 @@
-export interface SnapshotDisplayData {
-  contractVersion: string;
-  schemaVersion: string;
-  inputHash: string;
-  outputHash: string;
-  createdAt: string;
-  inputs: Record<string, unknown> | null;
-  outputs: Record<string, unknown> | null;
-  chartSeries: unknown[] | null;
+/* Canonical-only (v10)
+ *
+ * Supported snapshot_json shape:
+ *   snapshot_json.inputs  (object)
+ *   snapshot_json.outputs.results (object)
+ *
+ * Non-negotiable: do NOT read legacy fields (chart_series, outputs.summary, outputs.schedule).
+ */
+
+type AnyRecord = Record<string, unknown>;
+
+export type SnapshotRowLike = {
+  id?: string;
+  created_at?: string;
+  contract_version?: string | null;
+  schema_version?: string | null;
+  snapshot_json?: unknown;
+} | null;
+
+export type SnapshotDisplayData = {
+  contractVersion: string | null;
+  schemaVersion: string | null;
+  createdAt: string | null;
+  inputs: AnyRecord | null;
+  // Canonical-only: DealResults (snapshot_json.outputs.results)
+  outputs: AnyRecord | null;
+};
+
+function isRecord(v: unknown): v is AnyRecord {
+  return v !== null && typeof v === "object" && Array.isArray(v) === false;
 }
 
-export function extractSnapshotDisplay(
-  snapshotRow: {
-    created_at: string;
-    contract_version: string;
-    schema_version: string;
-    input_hash: string | null;
-    output_hash: string | null;
-    snapshot_json: Record<string, unknown>;
-  } | null,
-): SnapshotDisplayData | null {
-  if (!snapshotRow) return null;
+function safeRecord(v: unknown): AnyRecord | null {
+  return isRecord(v) ? (v as AnyRecord) : null;
+}
 
-  const json = snapshotRow.snapshot_json ?? {};
+export function extractSnapshotDisplay(snapshotRow: SnapshotRowLike): SnapshotDisplayData | null {
+  if (snapshotRow === null) return null;
 
-  const inputs =
-    json.inputs && typeof json.inputs === "object" && !Array.isArray(json.inputs)
-      ? (json.inputs as Record<string, unknown>)
-      : null;
+  const json = safeRecord((snapshotRow as any).snapshot_json) ?? {};
+  const inputs = safeRecord((json as any).inputs);
 
-  const outputs =
-    json.outputs && typeof json.outputs === "object" && !Array.isArray(json.outputs)
-      ? (json.outputs as Record<string, unknown>)
-      : null;
-
-  const chartSeries = Array.isArray(json.chart_series) ? json.chart_series : null;
+  const outputsContainer = safeRecord((json as any).outputs);
+  const results = outputsContainer ? safeRecord((outputsContainer as any).results) : null;
 
   return {
-    contractVersion: snapshotRow.contract_version ?? "\u2014",
-    schemaVersion: snapshotRow.schema_version ?? "\u2014",
-    inputHash: snapshotRow.input_hash ?? "\u2014",
-    outputHash: snapshotRow.output_hash ?? "\u2014",
-    createdAt: snapshotRow.created_at ?? "\u2014",
+    contractVersion: ((snapshotRow as any).contract_version ?? null) as any,
+    schemaVersion: ((snapshotRow as any).schema_version ?? null) as any,
+    createdAt: ((snapshotRow as any).created_at ?? null) as any,
     inputs,
-    outputs,
-    chartSeries,
+    outputs: results,
   };
-}
-
-export interface SnapshotListItem {
-  id: string;
-  created_at: string;
-  contract_version: string;
-  schema_version: string;
 }
 
 export function selectSnapshot<T extends { id: string }>(
   snapshots: T[],
   selectedId: string | null,
 ): { selected: T | null; isLatest: boolean } {
-  if (snapshots.length === 0) {
-    return { selected: null, isLatest: true };
-  }
-
-  if (!selectedId) {
-    return { selected: snapshots[0], isLatest: true };
-  }
-
-  const found = snapshots.find((s) => s.id === selectedId);
-  if (!found) {
-    return { selected: snapshots[0], isLatest: true };
-  }
-
-  return { selected: found, isLatest: found.id === snapshots[0].id };
-}
-
-export function formatValue(v: unknown): string {
-  if (v === null || v === undefined) return "\u2014";
-  if (typeof v === "number") return v.toLocaleString("en-US");
-  if (typeof v === "boolean") return v ? "Yes" : "No";
-  if (typeof v === "string") return v;
-  return String(v);
+  if (!snapshots || snapshots.length === 0) return { selected: null, isLatest: true };
+  const latest = snapshots[0];
+  if (selectedId === null) return { selected: latest, isLatest: true };
+  const found = snapshots.find((s) => s.id === selectedId) ?? null;
+  return { selected: found, isLatest: found ? found.id === latest.id : true };
 }
 
 export function humanLabel(key: string): string {
-  return key
-    .replace(/_/g, " ")
-    .replace(/([a-z])([A-Z])/g, "$1 $2")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+  return key.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
+export function formatValue(v: unknown): string {
+  if (v == null) return "—";
+  if (typeof v === "number") return Number.isFinite(v) ? String(v) : "—";
+  if (typeof v === "string") return v;
+  if (typeof v === "boolean") return v ? "Yes" : "No";
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
 }

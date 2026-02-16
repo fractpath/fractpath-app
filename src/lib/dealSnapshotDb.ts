@@ -28,26 +28,30 @@ export async function insertDealSnapshot(
   const validation = validateFullDealSnapshotV1(fullSnapshot);
 
   if (!validation.ok) {
+    const v = validation as SnapshotValidationError;
     return {
       ok: false,
-      error: (validation as SnapshotValidationError).error,
+      error: v.error,
       code: "VALIDATION_FAILED",
-      detail: (validation as SnapshotValidationError).code,
+      detail: v.code,
     };
   }
 
   const { contract_version, schema_version, input_hash, output_hash, snapshot } =
     validation;
 
-  const { data, error } = await (supabase.from("deal_snapshots") as any).insert({
-    deal_id: dealId,
-    created_by: userId,
-    contract_version,
-    schema_version,
-    input_hash,
-    output_hash,
-    snapshot_json: snapshot,
-  }).select("id, deal_id, created_at").single();
+  const { data, error } = await (supabase.from("deal_snapshots") as any)
+    .insert({
+      deal_id: dealId,
+      created_by: userId,
+      contract_version,
+      schema_version,
+      input_hash,
+      output_hash,
+      snapshot_json: snapshot,
+    })
+    .select("id, deal_id, created_at")
+    .single();
 
   if (error || !data) {
     return {
@@ -64,16 +68,6 @@ export async function insertDealSnapshot(
     deal_id: data.deal_id,
     created_at: data.created_at,
   };
-}
-
-export interface LatestSnapshotResult {
-  ok: true;
-  snapshot: DealSnapshotRow | null;
-}
-
-export interface LatestSnapshotError {
-  ok: false;
-  error: string;
 }
 
 export type DealSnapshotRow = {
@@ -118,6 +112,16 @@ export async function getDealSnapshots(
   return { ok: true, snapshots: (data ?? []) as DealSnapshotRow[] };
 }
 
+export interface LatestSnapshotResult {
+  ok: true;
+  snapshot: DealSnapshotRow | null;
+}
+
+export interface LatestSnapshotError {
+  ok: false;
+  error: string;
+}
+
 export async function getLatestDealSnapshot(
   supabase: SupabaseClient,
   dealId: string,
@@ -140,6 +144,6 @@ export async function getLatestDealSnapshot(
 
   return {
     ok: true,
-    snapshot: data ?? null,
+    snapshot: (data ?? null) as DealSnapshotRow | null,
   };
 }

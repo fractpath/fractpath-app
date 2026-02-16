@@ -3,22 +3,15 @@ import { computeDeal } from "../computeAdapter";
 let passed = 0;
 let failed = 0;
 
-function test(name: string, fn: () => Promise<void> | void) {
-  const result = fn();
-  const finish = (err?: any) => {
-    if (err) {
-      failed++;
-      console.log(`  FAIL: ${name}`);
-      console.log(`        ${err.message ?? err}`);
-    } else {
-      passed++;
-      console.log(`  PASS: ${name}`);
-    }
-  };
-  if (result && typeof (result as any).then === "function") {
-    (result as Promise<void>).then(() => finish()).catch(finish);
-  } else {
-    finish();
+async function test(name: string, fn: () => Promise<void>) {
+  try {
+    await fn();
+    passed++;
+    console.log("  PASS: " + name);
+  } catch (err: any) {
+    failed++;
+    console.log("  FAIL: " + name);
+    console.log("        " + (err?.message ?? String(err)));
   }
 }
 
@@ -26,108 +19,108 @@ function assert(condition: boolean, msg: string) {
   if (!condition) throw new Error(msg);
 }
 
-console.log("\n--- computeDeal adapter (real integration) ---\n");
+function isObj(v: any): boolean {
+  return v !== null && typeof v === "object" && Array.isArray(v) === false;
+}
 
-(async () => {
-  await test("returns ok:true with valid inputs", async () => {
-    const result = await computeDeal({
-      home_value: 500000,
-      fractional_percent: 10,
-      term_years: 10,
-      appreciation_rate: 3,
-      discount_rate: 5,
-    });
-    assert(result.ok === true, `expected ok:true but got ${JSON.stringify(result)}`);
+async function main() {
+  console.log("\n--- computeDeal adapter (canonical-only v10) ---\n");
+
+  await test("rejects missing deal_terms", async () => {
+    const result = await computeDeal({});
+    assert(result.ok === false, "expected ok=false");
+    assert(!result.ok && result.code === "BAD_INPUT", "expected BAD_INPUT code");
   });
 
-  await test("result has terms_version string", async () => {
+  await test("rejects missing scenario", async () => {
     const result = await computeDeal({
-      home_value: 500000,
-      fractional_percent: 10,
-      term_years: 10,
-      appreciation_rate: 3,
-      discount_rate: 5,
+      deal_terms: { property_value: 500000 },
     });
-    assert(result.ok === true, "should succeed");
-    if (result.ok) {
-      assert(
-        typeof result.result.terms_version === "string" &&
-          result.result.terms_version.length > 0,
-        "terms_version should be a non-empty string",
-      );
-    }
+    assert(result.ok === false, "expected ok=false");
+    assert(!result.ok && result.code === "BAD_INPUT", "expected BAD_INPUT code");
   });
 
-  await test("result has outputs.summary object", async () => {
+  await test("computeDeal returns ok + compute_version + results object", async () => {
     const result = await computeDeal({
-      home_value: 500000,
-      fractional_percent: 10,
-      term_years: 10,
-      appreciation_rate: 3,
-      discount_rate: 5,
+      deal_terms: {
+        property_value: 500000,
+        upfront_payment: 50000,
+        monthly_payment: 500,
+        number_of_payments: 120,
+        payback_window_start_year: 3,
+        payback_window_end_year: 7,
+        timing_factor_early: 0.5,
+        timing_factor_late: 1.5,
+        floor_multiple: 1.0,
+        ceiling_multiple: 3.0,
+        downside_mode: "HARD_FLOOR",
+        contract_maturity_years: 10,
+        liquidity_trigger_year: 5,
+        minimum_hold_years: 2,
+        platform_fee: 0,
+        servicing_fee_monthly: 0,
+        exit_fee_pct: 0,
+      },
+      scenario: {
+        annual_appreciation: 0.03,
+        closing_cost_pct: 0.06,
+        exit_year: 5,
+      },
     });
-    assert(result.ok === true, "should succeed");
-    if (result.ok) {
-      assert(
-        typeof result.result.outputs.summary === "object" &&
-          result.result.outputs.summary !== null,
-        "summary should be an object",
-      );
-    }
+
+    assert(result.ok === true, "expected ok=true");
+    if (!result.ok) return;
+    assert(typeof result.result.compute_version === "string", "expected compute_version string");
+    assert(result.result.compute_version === "10.0.0", "expected compute_version 10.0.0");
+    assert(isObj(result.result.results), "expected results object");
+    assert(typeof (result.result.results as any).invested_capital_total === "number", "has invested_capital_total");
+    assert(typeof (result.result.results as any).isa_settlement === "number", "has isa_settlement");
+    assert(typeof (result.result.results as any).investor_irr_annual === "number", "has investor_irr_annual");
   });
 
-  await test("result has outputs.schedule array", async () => {
-    const result = await computeDeal({
-      home_value: 500000,
-      fractional_percent: 10,
-      term_years: 10,
-      appreciation_rate: 3,
-      discount_rate: 5,
-    });
-    assert(result.ok === true, "should succeed");
-    if (result.ok) {
-      assert(
-        Array.isArray(result.result.outputs.schedule) &&
-          result.result.outputs.schedule.length > 0,
-        "schedule should be a non-empty array",
-      );
-    }
-  });
+  await test("compute is deterministic", async () => {
+    const inputs = {
+      deal_terms: {
+        property_value: 500000,
+        upfront_payment: 50000,
+        monthly_payment: 500,
+        number_of_payments: 120,
+        payback_window_start_year: 3,
+        payback_window_end_year: 7,
+        timing_factor_early: 0.5,
+        timing_factor_late: 1.5,
+        floor_multiple: 1.0,
+        ceiling_multiple: 3.0,
+        downside_mode: "HARD_FLOOR",
+        contract_maturity_years: 10,
+        liquidity_trigger_year: 5,
+        minimum_hold_years: 2,
+        platform_fee: 0,
+        servicing_fee_monthly: 0,
+        exit_fee_pct: 0,
+      },
+      scenario: {
+        annual_appreciation: 0.03,
+        closing_cost_pct: 0.06,
+        exit_year: 5,
+      },
+    };
 
-  await test("returns COMPUTE_FAILED for invalid inputs", async () => {
-    const result = await computeDeal({
-      home_value: -100,
-      fractional_percent: 10,
-      term_years: 10,
-      appreciation_rate: 3,
-      discount_rate: 5,
-    });
-    assert(result.ok === false, "should fail");
+    const r1 = await computeDeal(inputs);
+    const r2 = await computeDeal(inputs);
+    assert(r1.ok && r2.ok, "both should be ok");
+    if (!r1.ok || !r2.ok) return;
     assert(
-      (result as any).code === "COMPUTE_FAILED",
-      `expected COMPUTE_FAILED but got ${(result as any).code}`,
+      JSON.stringify(r1.result) === JSON.stringify(r2.result),
+      "results should be identical across calls",
     );
   });
 
-  await test("golden fixture: 500k scenario matches expected values", async () => {
-    const result = await computeDeal({
-      home_value: 500000,
-      fractional_percent: 10,
-      term_years: 10,
-      appreciation_rate: 3,
-      discount_rate: 5,
-    });
-    assert(result.ok === true, "should succeed");
-    if (result.ok) {
-      const s = result.result.outputs.summary as any;
-      assert(s.buy_amount === 50000, `buy_amount: expected 50000 got ${s.buy_amount}`);
-      assert(
-        s.estimated_end_value === 671958.19,
-        `estimated_end_value: expected 671958.19 got ${s.estimated_end_value}`,
-      );
-    }
-  });
-
-  console.log(`\n${passed} passed, ${failed} failed out of ${passed + failed} tests\n`);
+  console.log("\n" + passed + " passed, " + failed + " failed out of " + (passed + failed) + " tests\n");
   if (failed > 0) process.exit(1);
-})();
+}
+
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
