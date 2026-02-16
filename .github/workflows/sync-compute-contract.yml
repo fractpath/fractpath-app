@@ -1,0 +1,61 @@
+name: Sync Canonical Compute Contract from calculator-widget
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 8 * * *" # daily @ 08:23 UTC
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-compute-contract
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fractpath-app
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Clone calculator-widget (source of truth)
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/calc-widget
+          git clone --depth 1 https://github.com/fractpath/fractpath-calculator-widget.git /tmp/calc-widget
+          test -d /tmp/calc-widget/docs/contracts
+
+      - name: Mirror docs/contracts into this repo
+        run: |
+          set -euo pipefail
+          mkdir -p docs/contracts
+          rsync -av --delete /tmp/calc-widget/docs/contracts/ docs/contracts/
+
+      - name: Install GitHub CLI
+        uses: cli/cli@v2
+
+      - name: Create PR if changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if git status --porcelain | grep -q .; then
+            BRANCH="sync/compute-contract-$(date +%Y%m%d)"
+            git checkout -b "$BRANCH"
+            git add docs/contracts
+            git -c user.name="fractpath-sync-bot" -c user.email="sync-bot@fractpath.local" \
+              commit -m "chore(contracts): sync canonical compute contract from calculator-widget"
+            git push -u origin "$BRANCH" --force
+            gh pr create \
+              --title "chore(contracts): sync canonical compute contract" \
+              --body "Automated mirror from fractpath-calculator-widget/docs/contracts.\n\nDo not edit in fractpath-app; edit in compute repo only." \
+              --base main \
+              --head "$BRANCH" \
+              || true
+          else
+            echo "No contract changes."
+          fi
