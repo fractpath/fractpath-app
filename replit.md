@@ -40,9 +40,11 @@ FractPath is a Next.js application that utilizes API routes for backend logic an
 - **Snapshot Comparison:** A read-only comparison view at `/deal/[dealId]/compare?a=<id>&b=<id>` shows field-level diffs between two snapshots of the same deal.
 - **Historical Snapshot Mode:** Viewing a historical snapshot hides the calculator and shows an amber banner with a "Back to latest" link. Uses `computeHistoricalState` pure helper.
 - **Counterparty Counter Flow:** COUNTERPARTY users see the calculator widget on latest snapshot view. Submitting creates a snapshot via `/api/deals/[dealId]/snapshot/propose` (COUNTERPARTY-only), then creates a COUNTER deal_version via existing `/api/deals/[dealId]/counter`. VIEWER never sees calculator. Base snapshot ID auto-selected from current view.
-- **Compute Endpoint:** `POST /api/deals/[dealId]/snapshot/compute` — OWNER-only. Accepts `{ inputs }`, runs compute adapter (backed by `fractpath-calculator-widget` when installed), persists full snapshot (inputs + outputs + terms_version) atomically via `insertDealSnapshot`, records `DEAL_SNAPSHOT_COMPUTED` audit event. Returns 501 when calculator package is not yet integrated.
+- **Compute Endpoint:** `POST /api/deals/[dealId]/snapshot/compute` — OWNER-only. Accepts `{ inputs }` with `deal_terms` + `scenario`, runs canonical compute via `@fractpath/compute`, persists full snapshot (inputs + outputs with `{ results: DealResults }` + `compute_version`) atomically via `insertDealSnapshot`, records `DEAL_SNAPSHOT_COMPUTED` audit event. Uses `ensureScenario()` for defensive defaults.
 - **Fork Endpoint:** `POST /api/deals/[dealId]/fork` — Any authenticated user with read access (VIEWER, COUNTERPARTY) can fork a deal they don't own. Creates a new deal owned by requester, copies latest baseline snapshot, records `DEAL_CREATED` event with fork provenance. OWNER self-fork is blocked (use compute instead).
-- **Compute Adapter:** `src/lib/computeAdapter.ts` — Imports `computeDeal` directly from `fractpath-calculator-widget` (local package at `packages/fractpath-calculator-widget`). Returns `COMPUTE_FAILED` on invalid inputs. Widget is the single source of truth for all economic logic.
+- **Compute Adapter:** `src/lib/computeAdapter.ts` — Imports `computeDeal` from `@fractpath/compute` (local package at `packages/compute`). Accepts `{ deal_terms, scenario }`, returns `{ ok, result: { compute_version, results } }`. Returns `COMPUTE_FAILED` on invalid inputs.
+- **Default Scenario:** `src/lib/defaultScenario.ts` — `getDefaultScenario()` provides baseline `deal_terms` and `scenario` for new deals. `ensureScenario()` defensively injects missing fields to prevent compute failures.
+- **Recompute Button:** `src/components/deal/RecomputeSnapshotButton.tsx` — Client component visible to OWNER on latest snapshot. Calls compute endpoint to regenerate snapshot with current inputs.
 - **Version Timeline Cards:** VERSION entries in the timeline render as styled cards with type-specific color badges (Offer=blue, Counter=purple, Accepted=green, Rejected=red), version number, note, timestamp, and compare link when both snapshots exist. SNAPSHOT and EVENT entries retain original rendering.
 
 **Performance & Stability (APP-085 verified):**
@@ -62,8 +64,15 @@ FractPath is a Next.js application that utilizes API routes for backend logic an
 - Golden fixture tests lock 3 scenarios with exact outputs (13 tests total).
 - Installed as local dependency: `"fractpath-calculator-widget": "file:packages/fractpath-calculator-widget"`.
 
+**Canonical Compute Package (`packages/compute` / `@fractpath/compute`):**
+- v10.0.0 canonical compute engine wrapping the widget package.
+- Exports `computeDeal(terms: DealTerms, scenario: ScenarioAssumptions)` → `DealResults` with `compute_version: "10.0.0"`.
+- All new compute flows use this package exclusively; legacy widget patterns purged from production code.
+- Sanity guards in view model: IRR clamped to |x| ≤ 1, multiples to 0-10x, all money fields must be finite.
+
 ## External Dependencies
 - **Next.js:** React framework for server-side rendering and API routes.
 - **Supabase:** Provides PostgreSQL database, authentication services, and Row Level Security (RLS).
 - **HubSpot:** Integrates for sales follow-up and scenario summary distribution.
-- **fractpath-calculator-widget:** Local package providing the compute engine (see above).
+- **@fractpath/compute:** Local package providing canonical v10 compute engine (see above).
+- **fractpath-calculator-widget:** Legacy local package (underlying engine, wrapped by @fractpath/compute).
