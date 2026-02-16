@@ -31,15 +31,17 @@ function makeArgs(overrides: Record<string, unknown> = {}) {
 
 console.log("\n--- null / missing display ---\n");
 
-test("null outputs returns fallback KPI", () => {
+test("null outputs returns Not computed", () => {
   const vm = buildDealSummaryViewModel(makeArgs({ outputs: null }));
   assert(vm.kpis.length >= 1, "at least one kpi");
   assert(vm.kpis[0].label === "Status", "label is Status");
+  assert(vm.kpis[0].value === "Not computed", "value is Not computed");
 });
 
-test("empty outputs returns fallback KPI", () => {
+test("empty outputs returns Not computed", () => {
   const vm = buildDealSummaryViewModel(makeArgs({ outputs: {} }));
   assert(vm.kpis[0].label === "Status", "label is Status");
+  assert(vm.kpis[0].value === "Not computed", "value is Not computed");
 });
 
 console.log("\n--- KPI extraction ---\n");
@@ -76,12 +78,45 @@ test("extracts multiple KPIs from canonical results", () => {
   assert(vm.kpis.length >= 3, "at least 3 KPIs from rich results");
 });
 
-test("fallback Status when results has no known keys", () => {
+console.log("\n--- sanity guards ---\n");
+
+test("omits IRR when abs > 1 (100%)", () => {
+  const vm = buildDealSummaryViewModel(makeArgs({
+    outputs: { results: { invested_capital_total: 50000, investor_irr_annual: 1.5 } },
+  }));
+  const labels = vm.kpis.map((k) => k.label);
+  assert(!labels.includes("Investor IRR (annual)"), "IRR > 100% should be omitted");
+});
+
+test("omits multiple when > 10", () => {
+  const vm = buildDealSummaryViewModel(makeArgs({
+    outputs: { results: { invested_capital_total: 50000, investor_multiple: 15 } },
+  }));
+  const labels = vm.kpis.map((k) => k.label);
+  assert(!labels.includes("Investor multiple"), "multiple > 10 should be omitted");
+});
+
+test("omits multiple when negative", () => {
+  const vm = buildDealSummaryViewModel(makeArgs({
+    outputs: { results: { invested_capital_total: 50000, investor_multiple: -1 } },
+  }));
+  const labels = vm.kpis.map((k) => k.label);
+  assert(!labels.includes("Investor multiple"), "negative multiple should be omitted");
+});
+
+test("omits NaN money fields", () => {
+  const vm = buildDealSummaryViewModel(makeArgs({
+    outputs: { results: { invested_capital_total: NaN, isa_settlement: Infinity } },
+  }));
+  assert(vm.kpis[0].label === "Status", "NaN/Infinity should yield Status fallback");
+});
+
+test("shows Computed (insufficient data) when results has no renderable KPIs", () => {
   const vm = buildDealSummaryViewModel(makeArgs({
     outputs: { results: { unknown_field: 42 } },
   }));
   assert(vm.kpis[0].label === "Status", "fallback label");
-  assert(vm.kpis[0].value === "Computed", "fallback value");
+  assert(vm.kpis[0].value === "Computed (insufficient data)", "fallback value: " + vm.kpis[0].value);
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed out of " + (passed + failed) + " tests\n");

@@ -11,6 +11,7 @@ import { ShareDealCard } from "@/components/ShareDealCard";
 import { DealSummary } from "@/components/deal/DealSummary";
 import { buildDealSummaryViewModel } from "@/lib/dealSummaryViewModel";
 import { DealCalculatorEmbed } from "@/components/deal/DealCalculatorEmbed";
+import { RecomputeSnapshotButton } from "@/components/deal/RecomputeSnapshotButton";
 import { VersionTimelineCard } from "@/components/deal/VersionTimelineCard";
 import { shouldRenderDealCalculator } from "@/lib/dealCalculatorGating";
 import { selectBaseSnapshotId } from "@/lib/counterBaseSnapshot";
@@ -220,6 +221,13 @@ export default async function DealPage({ params, searchParams }: PageProps) {
           />
         </div>
       </section>
+
+      {role === "OWNER" && isLatest && !readOnly ? (
+        <RecomputeSnapshotButton
+          dealId={dealId}
+          initialInputs={display?.inputs ? (snapshotRow as any)?.snapshot_json?.inputs ?? null : null}
+        />
+      ) : null}
 
       {shouldRenderDealCalculator({ role, isLatest }) ? (
         <DealCalculatorEmbed

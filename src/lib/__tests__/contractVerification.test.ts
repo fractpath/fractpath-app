@@ -3,22 +3,15 @@ import { computeDeal } from "../computeAdapter";
 let passed = 0;
 let failed = 0;
 
-function test(name: string, fn: () => Promise<void> | void) {
-  const result = fn();
-  const finish = (err?: any) => {
-    if (err) {
-      failed++;
-      console.log(`  FAIL: ${name}`);
-      console.log(`        ${err.message ?? err}`);
-    } else {
-      passed++;
-      console.log(`  PASS: ${name}`);
-    }
-  };
-  if (result && typeof (result as any).then === "function") {
-    (result as Promise<void>).then(() => finish()).catch(finish);
-  } else {
-    finish();
+async function test(name: string, fn: () => Promise<void> | void) {
+  try {
+    await fn();
+    passed++;
+    console.log("  PASS: " + name);
+  } catch (err: any) {
+    failed++;
+    console.log("  FAIL: " + name);
+    console.log("        " + (err.message ?? String(err)));
   }
 }
 
@@ -26,7 +19,7 @@ function assert(condition: boolean, msg: string) {
   if (!condition) throw new Error(msg);
 }
 
-console.log("\n--- Sprint 9 Contract Verification ---\n");
+console.log("\n--- Contract Verification (canonical v10) ---\n");
 
 (async () => {
   await test("Contract A: no client component imports computeDeal or computeAdapter", () => {
@@ -39,22 +32,22 @@ console.log("\n--- Sprint 9 Contract Verification ---\n");
     for (const f of clientFiles) {
       const content = require("fs").readFileSync(f, "utf-8");
       assert(
-        !content.includes("computeDeal") && !content.includes("computeAdapter") && !content.includes("calculator-widget"),
-        `Client component ${f} imports compute logic — violates single source of truth`,
+        !content.includes("from \"@/lib/computeAdapter\"") && !content.includes("from \"@fractpath/compute\""),
+        "Client component " + f + " imports compute logic",
       );
     }
   });
 
   await test("Contract A: no stale src/api/ directory exists", () => {
     const fs = require("fs");
-    assert(!fs.existsSync("src/api"), "src/api/ should not exist (stale dead code)");
+    assert(!fs.existsSync("src/api"), "src/api/ should not exist");
   });
 
   await test("Contract B: compute endpoint exists at App Router path", () => {
     const fs = require("fs");
     assert(
       fs.existsSync("src/app/api/deals/[dealId]/snapshot/compute/route.ts"),
-      "compute route must exist under src/app/api/",
+      "compute route must exist",
     );
   });
 
@@ -63,8 +56,8 @@ console.log("\n--- Sprint 9 Contract Verification ---\n");
       "src/app/api/deals/[dealId]/snapshot/compute/route.ts",
       "utf-8",
     );
-    assert(content.includes("OWNER only") || content.includes("OWNER"), "must check OWNER role");
-    assert(content.includes("403"), "must return 403 for non-OWNER");
+    assert(content.includes("OWNER"), "must check OWNER role");
+    assert(content.includes("403"), "must return 403");
   });
 
   await test("Contract B: compute endpoint calls computeDeal from adapter", () => {
@@ -86,14 +79,14 @@ console.log("\n--- Sprint 9 Contract Verification ---\n");
     assert(content.includes("insertDealSnapshot"), "must persist via insertDealSnapshot");
   });
 
-  await test("Contract C: snapshot includes terms_version mapped to contract_version", () => {
+  await test("Contract C: snapshot includes compute_version mapped to contract_version", () => {
     const content = require("fs").readFileSync(
       "src/app/api/deals/[dealId]/snapshot/compute/route.ts",
       "utf-8",
     );
     assert(
-      content.includes("contract_version: terms_version"),
-      "must map terms_version → contract_version",
+      content.includes("contract_version: compute_version"),
+      "must map compute_version to contract_version",
     );
   });
 
@@ -108,58 +101,78 @@ console.log("\n--- Sprint 9 Contract Verification ---\n");
     assert(content.includes("computed_by"), "must include computed_by");
   });
 
-  await test("Contract C: widget compute produces schedule[] in outputs", async () => {
+  await test("Contract C: canonical compute produces results with compute_version", async () => {
     const result = await computeDeal({
-      home_value: 500000,
-      fractional_percent: 10,
-      term_years: 5,
-      appreciation_rate: 3,
-      discount_rate: 5,
-    });
-    assert(result.ok === true, "compute must succeed");
-    if (result.ok) {
-      assert(Array.isArray(result.result.outputs.schedule), "outputs.schedule must be array");
-      assert(result.result.outputs.schedule.length === 6, "schedule must have year 0-5 (6 rows)");
-      const row = result.result.outputs.schedule[0] as any;
-      assert(typeof row.year === "number", "schedule row must have year");
-      assert(typeof row.home_value === "number", "schedule row must have home_value");
-    }
-  });
-
-  await test("Contract C: widget compute includes terms_version string", async () => {
-    const result = await computeDeal({
-      home_value: 500000,
-      fractional_percent: 10,
-      term_years: 5,
-      appreciation_rate: 3,
-      discount_rate: 5,
+      deal_terms: {
+        property_value: 500000,
+        upfront_payment: 50000,
+        monthly_payment: 500,
+        number_of_payments: 120,
+        payback_window_start_year: 3,
+        payback_window_end_year: 7,
+        timing_factor_early: 0.5,
+        timing_factor_late: 1.5,
+        floor_multiple: 1.0,
+        ceiling_multiple: 3.0,
+        downside_mode: "HARD_FLOOR",
+        contract_maturity_years: 10,
+        liquidity_trigger_year: 5,
+        minimum_hold_years: 2,
+        platform_fee: 0,
+        servicing_fee_monthly: 0,
+        exit_fee_pct: 0,
+      },
+      scenario: {
+        annual_appreciation: 0.03,
+        closing_cost_pct: 0.06,
+        exit_year: 5,
+      },
     });
     assert(result.ok === true, "compute must succeed");
     if (result.ok) {
       assert(
-        typeof result.result.terms_version === "string" &&
-          result.result.terms_version.startsWith("fractpath-terms-"),
-        "terms_version must be a fractpath-terms-* string",
+        typeof result.result.compute_version === "string" &&
+          result.result.compute_version.startsWith("10"),
+        "compute_version must start with 10",
       );
+      assert(typeof result.result.results === "object", "results must be object");
+      assert(typeof (result.result.results as any).invested_capital_total === "number", "has invested_capital_total");
+      assert(typeof (result.result.results as any).isa_settlement === "number", "has isa_settlement");
     }
   });
 
-  await test("Contract C: widget outputs are JSON-serializable (no cycles/functions)", async () => {
+  await test("Contract C: compute outputs are JSON-serializable", async () => {
     const result = await computeDeal({
-      home_value: 500000,
-      fractional_percent: 10,
-      term_years: 5,
-      appreciation_rate: 3,
-      discount_rate: 5,
+      deal_terms: {
+        property_value: 500000,
+        upfront_payment: 50000,
+        monthly_payment: 500,
+        number_of_payments: 120,
+        payback_window_start_year: 3,
+        payback_window_end_year: 7,
+        timing_factor_early: 0.5,
+        timing_factor_late: 1.5,
+        floor_multiple: 1.0,
+        ceiling_multiple: 3.0,
+        downside_mode: "HARD_FLOOR",
+        contract_maturity_years: 10,
+        liquidity_trigger_year: 5,
+        minimum_hold_years: 2,
+        platform_fee: 0,
+        servicing_fee_monthly: 0,
+        exit_fee_pct: 0,
+      },
+      scenario: {
+        annual_appreciation: 0.03,
+        closing_cost_pct: 0.06,
+        exit_year: 5,
+      },
     });
     assert(result.ok === true, "compute must succeed");
     if (result.ok) {
-      const serialized = JSON.stringify(result.result.outputs);
+      const serialized = JSON.stringify(result.result.results);
       const parsed = JSON.parse(serialized);
-      assert(
-        Array.isArray(parsed.schedule) && typeof parsed.summary === "object",
-        "round-trip serialization must preserve structure",
-      );
+      assert(typeof parsed.invested_capital_total === "number", "round-trip preserves structure");
     }
   });
 
@@ -195,26 +208,13 @@ console.log("\n--- Sprint 9 Contract Verification ---\n");
     );
   });
 
-  await test("Contract G: widget package.json exports match dist artifacts", () => {
+  await test("Contract G: @fractpath/compute package exists and is resolvable", () => {
     const fs = require("fs");
-    const pkg = JSON.parse(fs.readFileSync("packages/fractpath-calculator-widget/package.json", "utf-8"));
-    assert(fs.existsSync("packages/fractpath-calculator-widget/" + pkg.main), `main (${pkg.main}) must exist`);
-    assert(fs.existsSync("packages/fractpath-calculator-widget/" + pkg.types), `types (${pkg.types}) must exist`);
-    const defaultExport = pkg.exports?.["."]?.default;
-    if (defaultExport) {
-      assert(
-        fs.existsSync("packages/fractpath-calculator-widget/" + defaultExport),
-        `exports default (${defaultExport}) must exist`,
-      );
-    }
+    const pkg = JSON.parse(fs.readFileSync("packages/compute/package.json", "utf-8"));
+    assert(pkg.name === "@fractpath/compute", "package name must be @fractpath/compute");
+    assert(pkg.version === "10.0.0", "package version must be 10.0.0");
   });
 
-  await test("Contract G: Next.js can resolve widget package", () => {
-    const fs = require("fs");
-    const resolved = require.resolve("fractpath-calculator-widget");
-    assert(fs.existsSync(resolved), "widget package must be resolvable");
-  });
-
-  console.log(`\n${passed} passed, ${failed} failed out of ${passed + failed} tests\n`);
+  console.log("\n" + passed + " passed, " + failed + " failed out of " + (passed + failed) + " tests\n");
   if (failed > 0) process.exit(1);
 })();

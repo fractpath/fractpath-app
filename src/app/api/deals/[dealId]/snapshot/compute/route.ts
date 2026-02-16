@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { insertDealSnapshot } from "@/lib/dealSnapshotDb";
 import { computeDeal } from "@/lib/computeAdapter";
+import { ensureScenario } from "@/lib/defaultScenario";
 
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
@@ -47,7 +48,8 @@ export async function POST(
     return jsonError("inputs is required and must be a JSON object", 400);
   }
 
-  // Canonical shape required now
+  body.inputs = ensureScenario(body.inputs);
+
   if (
     !("deal_terms" in body.inputs) ||
     !body.inputs.deal_terms ||
@@ -56,17 +58,6 @@ export async function POST(
   ) {
     return jsonError(
       "inputs.deal_terms is required and must be a JSON object",
-      400,
-    );
-  }
-  if (
-    !("scenario" in body.inputs) ||
-    !body.inputs.scenario ||
-    typeof body.inputs.scenario !== "object" ||
-    Array.isArray(body.inputs.scenario)
-  ) {
-    return jsonError(
-      "inputs.scenario is required and must be a JSON object",
       400,
     );
   }

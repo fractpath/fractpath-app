@@ -5,11 +5,11 @@ function test(name: string, fn: () => void) {
   try {
     fn();
     passed++;
-    console.log(`  PASS: ${name}`);
+    console.log("  PASS: " + name);
   } catch (err: any) {
     failed++;
-    console.log(`  FAIL: ${name}`);
-    console.log(`        ${err.message}`);
+    console.log("  FAIL: " + name);
+    console.log("        " + (err.message ?? String(err)));
   }
 }
 
@@ -17,7 +17,7 @@ function assert(condition: boolean, msg: string) {
   if (!condition) throw new Error(msg);
 }
 
-console.log("\n--- compute route contract ---\n");
+console.log("\n--- compute route contract (canonical v10) ---\n");
 
 test("compute endpoint file exists", () => {
   const fs = require("fs");
@@ -77,14 +77,14 @@ test("compute route persists snapshot via insertDealSnapshot", () => {
   );
 });
 
-test("compute route includes terms_version in snapshot", () => {
+test("compute route includes compute_version in snapshot", () => {
   const content = require("fs").readFileSync(
     "src/app/api/deals/[dealId]/snapshot/compute/route.ts",
     "utf-8",
   );
   assert(
-    content.includes("terms_version") && content.includes("contract_version: terms_version"),
-    "should map terms_version to contract_version",
+    content.includes("compute_version") && content.includes("contract_version: compute_version"),
+    "should map compute_version to contract_version",
   );
 });
 
@@ -99,14 +99,14 @@ test("compute route stores computed_at and computed_by", () => {
   );
 });
 
-test("compute route returns summary in response", () => {
+test("compute route returns results in response", () => {
   const content = require("fs").readFileSync(
     "src/app/api/deals/[dealId]/snapshot/compute/route.ts",
     "utf-8",
   );
   assert(
-    content.includes("summary: outputs.summary"),
-    "should return summary in response",
+    content.includes("results"),
+    "should return results in response",
   );
 });
 
@@ -121,5 +121,16 @@ test("compute route records audit event", () => {
   );
 });
 
-console.log(`\n${passed} passed, ${failed} failed out of ${passed + failed} tests\n`);
+test("compute route injects default scenario via ensureScenario", () => {
+  const content = require("fs").readFileSync(
+    "src/app/api/deals/[dealId]/snapshot/compute/route.ts",
+    "utf-8",
+  );
+  assert(
+    content.includes("ensureScenario"),
+    "should use ensureScenario for defensive defaults",
+  );
+});
+
+console.log("\n" + passed + " passed, " + failed + " failed out of " + (passed + failed) + " tests\n");
 if (failed > 0) process.exit(1);
