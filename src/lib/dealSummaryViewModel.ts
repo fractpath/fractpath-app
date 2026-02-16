@@ -15,7 +15,7 @@ export type DealSummaryViewModel = {
 };
 
 function isRecord(v: unknown): v is Record<string, unknown> {
-  return !!v && typeof v === "object" && !Array.isArray(v);
+  return v !== null && typeof v === "object" && Array.isArray(v) === false;
 }
 
 function asNumber(v: unknown): number | null {
@@ -44,19 +44,13 @@ function extractCanonicalResults(
 ): Record<string, unknown> | null {
   if (!outputs || !isRecord(outputs)) return null;
 
-  // Preferred canonical shape: { results: DealResults }
-  if (isRecord((outputs as any).results)) {
-    return (outputs as any).results;
+  // Canonical shape only: { results: DealResults }
+  const results = (outputs as any).results;
+  if (isRecord(results)) {
+    return results as Record<string, unknown>;
   }
 
-    if (
-    "isa_settlement" in outputs ||
-    "invested_capital_total" in outputs ||
-    "projected_fmv" in outputs
-  ) {
-    return outputs;
-  }
-
+  // No legacy fallback support.
   return null;
 }
 
@@ -76,7 +70,7 @@ export function buildDealSummaryViewModel(args: {
 
   const kpis: Kpi[] = [];
 
-  const invested = asNumber(results.invested_capital_total);
+  const invested = asNumber((results as any).invested_capital_total);
   if (invested !== null) {
     kpis.push({
       label: "Invested capital",
@@ -84,7 +78,7 @@ export function buildDealSummaryViewModel(args: {
     });
   }
 
-  const fmv = asNumber(results.projected_fmv);
+  const fmv = asNumber((results as any).projected_fmv);
   if (fmv !== null) {
     kpis.push({
       label: "Projected FMV",
@@ -92,7 +86,7 @@ export function buildDealSummaryViewModel(args: {
     });
   }
 
-  const settlement = asNumber(results.isa_settlement);
+  const settlement = asNumber((results as any).isa_settlement);
   if (settlement !== null) {
     kpis.push({
       label: "ISA settlement",
@@ -100,7 +94,7 @@ export function buildDealSummaryViewModel(args: {
     });
   }
 
-  const multiple = asNumber(results.investor_multiple);
+  const multiple = asNumber((results as any).investor_multiple);
   if (multiple !== null) {
     kpis.push({
       label: "Investor multiple",
@@ -108,7 +102,7 @@ export function buildDealSummaryViewModel(args: {
     });
   }
 
-  const irr = asNumber(results.investor_irr_annual);
+  const irr = asNumber((results as any).investor_irr_annual);
   if (irr !== null) {
     kpis.push({
       label: "Investor IRR (annual)",
@@ -116,7 +110,7 @@ export function buildDealSummaryViewModel(args: {
     });
   }
 
-  const profit = asNumber(results.investor_profit);
+  const profit = asNumber((results as any).investor_profit);
   if (profit !== null) {
     kpis.push({
       label: "Investor profit",
@@ -124,7 +118,7 @@ export function buildDealSummaryViewModel(args: {
     });
   }
 
-  const vested = asNumber(results.vested_equity_percentage);
+  const vested = asNumber((results as any).vested_equity_percentage);
   if (vested !== null) {
     kpis.push({
       label: "Vested equity",
