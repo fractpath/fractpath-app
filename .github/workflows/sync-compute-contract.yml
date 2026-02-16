@@ -35,8 +35,7 @@ jobs:
           mkdir -p docs/contracts
           rsync -av --delete /tmp/calc-widget/docs/contracts/ docs/contracts/
 
-      - name: Install GitHub CLI
-        uses: cli/cli@v2
+
 
       - name: Create PR if changes
         env:
