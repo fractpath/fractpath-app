@@ -23,100 +23,101 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === "object" && !Array.isArray(v);
 }
 
-console.log("\n=== DraftSnapshotV1 -> FullDealSnapshotV1 Mapping Tests (canonical-only v10) ===\n");
+console.log(
+  "\n=== Draft -> Canonical Inputs Mapping Tests (v10 canonical envelope) ===\n",
+);
 
-test("maps draft fields to canonical v10 shape", () => {
+test("returns { inputs: { deal_terms, scenario } } envelope", () => {
   const draft = {
-    calculator_schema_version: "1.0.0",
-    inputs: { home_value: 500000, equity_pct: 15 },
-    result: { monthly_payment: 1200, total_equity: 75000 },
-    engine_version: "0.3.0",
+    inputs: { property_value: 500000, upfront_payment: 50000 },
   };
-  const result = mapDraftToDealSnapshot(draft);
 
-  assert(result.contract_version === "1.0.0", "contract_version from calculator_schema_version");
-  assert(result.schema_version === "10", "schema_version is 10");
-  assert(isRecord(result.inputs), "inputs is object");
-  assert(isRecord((result.inputs as any).deal_terms), "inputs.deal_terms exists");
-  assert((result.inputs as any).deal_terms.home_value === 500000, "deal_terms.home_value preserved");
-  assert(isRecord(result.outputs), "outputs is object");
-  assert(isRecord((result.outputs as any).results), "outputs.results exists");
-  assert((result.outputs as any).results.monthly_payment === 1200, "results.monthly_payment preserved");
+  const mapped = mapDraftToDealSnapshot(draft as any);
+
+  assert(isRecord(mapped), "mapped is object");
+  assert(isRecord((mapped as any).inputs), "mapped.inputs is object");
+  assert(
+    isRecord((mapped as any).inputs.deal_terms),
+    "inputs.deal_terms is object",
+  );
+  assert(
+    isRecord((mapped as any).inputs.scenario),
+    "inputs.scenario is object",
+  );
 });
 
-test("uses contractVersionOverride when provided", () => {
+test("wraps flat draft.inputs as deal_terms when no deal_terms nesting exists", () => {
   const draft = {
-    calculator_schema_version: "1.0.0",
-    inputs: { home_value: 500000 },
-    result: { monthly_payment: 1200 },
+    inputs: { property_value: 500000, upfront_payment: 50000 },
   };
-  const result = mapDraftToDealSnapshot(draft, "2.0.0");
-  assert(result.contract_version === "2.0.0", "expected override 2.0.0, got " + result.contract_version);
+
+  const mapped = mapDraftToDealSnapshot(draft as any);
+  const dt = (mapped as any).inputs.deal_terms;
+
+  assert(dt.property_value === 500000, "property_value preserved");
+  assert(dt.upfront_payment === 50000, "upfront_payment preserved");
 });
 
-test("falls back to calculator_schema_version for contract_version", () => {
+test("preserves already-nested inputs.deal_terms", () => {
   const draft = {
-    calculator_schema_version: "3.5.0",
-    inputs: { home_value: 500000 },
-    result: { monthly_payment: 1200 },
+    inputs: { deal_terms: { property_value: 600000 } },
   };
-  const result = mapDraftToDealSnapshot(draft);
-  assert(result.contract_version === "3.5.0", "expected 3.5.0, got " + result.contract_version);
+
+  const mapped = mapDraftToDealSnapshot(draft as any);
+  const dt = (mapped as any).inputs.deal_terms;
+
+  assert(isRecord(dt), "deal_terms is object");
+  assert(dt.property_value === 600000, "nested property_value preserved");
 });
 
-test("defaults contract_version to 10.0.0 when no version provided", () => {
+test("preserves inputs.scenario when present", () => {
   const draft = {
-    inputs: { home_value: 500000 },
-    result: { monthly_payment: 1200 },
+    inputs: {
+      deal_terms: { property_value: 500000 },
+      scenario: { exit_year: 5, annual_appreciation: 0.03 },
+    },
   };
-  const result = mapDraftToDealSnapshot(draft);
-  assert(result.contract_version === "10.0.0", "expected 10.0.0, got " + result.contract_version);
+
+  const mapped = mapDraftToDealSnapshot(draft as any);
+  const sc = (mapped as any).inputs.scenario;
+
+  assert(isRecord(sc), "scenario is object");
+  assert(sc.exit_year === 5, "exit_year preserved");
+  assert(sc.annual_appreciation === 0.03, "annual_appreciation preserved");
 });
 
-test("wraps flat inputs as deal_terms", () => {
+test("falls back to top-level draft.scenario when inputs.scenario is missing", () => {
   const draft = {
-    inputs: { home_value: 500000, equity_pct: 15 },
-    result: {},
+    inputs: { deal_terms: { property_value: 500000 } },
+    scenario: { exit_year: 7 },
   };
-  const mapped = mapDraftToDealSnapshot(draft);
-  const dt = (mapped.inputs as any).deal_terms;
-  assert(isRecord(dt), "deal_terms should be object");
-  assert(dt.home_value === 500000, "home_value");
-  assert(dt.equity_pct === 15, "equity_pct");
+
+  const mapped = mapDraftToDealSnapshot(draft as any);
+  const sc = (mapped as any).inputs.scenario;
+
+  assert(isRecord(sc), "scenario is object");
+  assert(sc.exit_year === 7, "exit_year preserved from top-level scenario");
 });
 
-test("preserves already-nested deal_terms", () => {
+test("defaults scenario to empty object when absent (ensureScenario fills later)", () => {
   const draft = {
-    inputs: { deal_terms: { home_value: 500000 } },
-    result: {},
+    inputs: { deal_terms: { property_value: 500000 } },
   };
-  const mapped = mapDraftToDealSnapshot(draft);
-  const dt = (mapped.inputs as any).deal_terms;
-  assert(isRecord(dt), "deal_terms should be object");
-  assert(dt.home_value === 500000, "home_value preserved from nested");
+
+  const mapped = mapDraftToDealSnapshot(draft as any);
+  const sc = (mapped as any).inputs.scenario;
+
+  assert(isRecord(sc), "scenario is object");
+  assert(Object.keys(sc).length === 0, "scenario should be empty object");
 });
 
-test("preserves opaque extra metadata fields", () => {
-  const draft = {
-    inputs: { home_value: 500000 },
-    result: { monthly_payment: 1200 },
-    engine_version: "0.3.0",
-    some_meta: { custom: true },
-  };
-  const mapped = mapDraftToDealSnapshot(draft);
-  assert(mapped.engine_version === "0.3.0", "engine_version preserved");
-  assert((mapped as any).some_meta?.custom === true, "custom meta preserved");
-});
-
-test("empty result maps to empty results object", () => {
-  const draft = {
-    inputs: { home_value: 500000 },
-  };
-  const mapped = mapDraftToDealSnapshot(draft);
-  const results = (mapped.outputs as any).results;
-  assert(isRecord(results), "results should be object");
-  assert(Object.keys(results).length === 0, "results should be empty");
-});
-
-console.log("\n" + passed + " passed, " + failed + " failed out of " + (passed + failed) + " tests\n");
+console.log(
+  "\n" +
+    passed +
+    " passed, " +
+    failed +
+    " failed out of " +
+    (passed + failed) +
+    " tests\n",
+);
 if (failed > 0) process.exit(1);

@@ -4,76 +4,71 @@ function isRecord(v: unknown): v is AnyRecord {
   return v !== null && typeof v === "object" && Array.isArray(v) === false;
 }
 
+/**
+ * Draft snapshot payloads are NOT canonical snapshots.
+ * This module's job is to extract canonical compute inputs:
+ *   { deal_terms, scenario }
+ *
+ * Do NOT synthesize outputs/results here.
+ * Do NOT set contract_version/schema_version here.
+ * Canonical snapshot assembly happens at the boundary where we call compute + insertDealSnapshot.
+ */
+
 export type DraftSnapshotV1 = {
-  contractVersion?: string | null;
-  calculator_schema_version?: string | null;
   inputs?: unknown;
-  result?: unknown;
+  // Some older drafts may store scenario separately
+  scenario?: unknown;
   meta?: AnyRecord;
   [k: string]: unknown;
 };
 
-export type FullDealSnapshotV1 = {
-  contract_version: string;
-  schema_version: string;
-  inputs: AnyRecord;
-  outputs: AnyRecord;
-  [k: string]: unknown;
+export type CanonicalInputsEnvelope = {
+  inputs: {
+    deal_terms: AnyRecord;
+    scenario: AnyRecord;
+  };
 };
 
-export function draftToDealSnapshot(
-  draft: DraftSnapshotV1,
-  contractVersionOverride?: string,
-): FullDealSnapshotV1 {
-  const contract_version =
-    contractVersionOverride ??
-    (typeof draft.contractVersion === "string" &&
-    draft.contractVersion.trim().length > 0
-      ? draft.contractVersion
-      : typeof draft.calculator_schema_version === "string" &&
-          draft.calculator_schema_version.trim().length > 0
-        ? draft.calculator_schema_version
-        : "10.0.0");
-
-  const schema_version = "10";
-
-  const rawInputs = draft.inputs;
-  let dealTerms: AnyRecord = {};
-
+function extractDealTerms(rawInputs: unknown): AnyRecord {
   if (isRecord(rawInputs) && isRecord((rawInputs as any).deal_terms)) {
-    dealTerms = (rawInputs as any).deal_terms as AnyRecord;
-  } else if (isRecord(rawInputs)) {
-    dealTerms = rawInputs;
+    return (rawInputs as any).deal_terms as AnyRecord;
   }
-
-  const inputs: AnyRecord = { deal_terms: dealTerms };
-
-  const rawResult = draft.result;
-  const results: AnyRecord = isRecord(rawResult) ? rawResult : {};
-
-  const outputs: AnyRecord = { results };
-
-  const extra: AnyRecord = {};
-  for (const [k, v] of Object.entries(draft)) {
-    if (
-      k === "contractVersion" ||
-      k === "calculator_schema_version" ||
-      k === "inputs" ||
-      k === "result"
-    )
-      continue;
-    extra[k] = v as unknown;
+  if (isRecord(rawInputs)) {
+    // Treat raw inputs as deal_terms if they look like an object
+    return rawInputs as AnyRecord;
   }
+  return {};
+}
+
+function extractScenario(
+  draft: DraftSnapshotV1,
+  rawInputs: unknown,
+): AnyRecord {
+  // Preferred: inputs.scenario
+  if (isRecord(rawInputs) && isRecord((rawInputs as any).scenario)) {
+    return (rawInputs as any).scenario as AnyRecord;
+  }
+  // Back-compat: top-level scenario
+  if (isRecord(draft.scenario)) {
+    return draft.scenario as AnyRecord;
+  }
+  return {};
+}
+
+export function mapDraftToDealSnapshot(
+  draft: DraftSnapshotV1,
+): CanonicalInputsEnvelope {
+  const rawInputs = draft?.inputs;
+
+  const deal_terms = extractDealTerms(rawInputs);
+  const scenario = extractScenario(draft, rawInputs);
 
   return {
-    contract_version,
-    schema_version,
-    inputs,
-    outputs,
-    ...extra,
+    inputs: {
+      deal_terms,
+      scenario,
+    },
   };
 }
 
-export const mapDraftToDealSnapshot = draftToDealSnapshot;
-
-export default draftToDealSnapshot;
+export default mapDraftToDealSnapshot;

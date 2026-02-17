@@ -5,35 +5,18 @@ import { validateDraftSnapshotV1 } from "@/lib/draftSnapshot";
 import { mapDraftToDealSnapshot } from "@/lib/draftToDealSnapshot";
 import { insertDealSnapshot } from "@/lib/dealSnapshotDb";
 import { computeDeal } from "@/lib/computeAdapter";
+import {
+  ensureScenario,
+  getDefaultDealTerms,
+  getDefaultScenario,
+} from "@/lib/defaultScenario";
 
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
 }
 
-interface CanonicalSnapshot {
-  compute_version: string;
-  computed_at: string;
-  inputs: Record<string, unknown>;
-  assumptions: Record<string, unknown>;
-  outputs: Record<string, unknown>; // expected to be an object; typically { results: ... }}
-}
-
-
-function isValidCanonicalSnapshot(cs: unknown): cs is CanonicalSnapshot {
-  if (!cs || typeof cs !== "object" || Array.isArray(cs)) return false;
-  const c = cs as Record<string, unknown>;
-  if (
-    typeof c.compute_version !== "string" ||
-    c.compute_version.trim().length === 0
-  )
-    return false;
-  if (typeof c.computed_at !== "string" || c.computed_at.trim().length === 0)
-    return false;
-  if (!c.inputs || typeof c.inputs !== "object" || Array.isArray(c.inputs))
-    return false;
-  if (!c.outputs || typeof c.outputs !== "object" || Array.isArray(c.outputs))
-    return false;
-  return true;
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === "object" && !Array.isArray(v);
 }
 
 export async function POST(request: NextRequest) {
@@ -77,6 +60,7 @@ export async function POST(request: NextRequest) {
     return jsonError("Token has expired", 410);
   }
 
+  // If already redeemed, return the previously-created deal if we can find it.
   if (draft.redeemed_at || draft.redeemed_by_user_id) {
     const { data: existingDeal } = await (service.from("deals") as any)
       .select("id")
@@ -98,80 +82,54 @@ export async function POST(request: NextRequest) {
   }
 
   const draftPayload = draft.snapshot_json;
-  if (!draftPayload || typeof draftPayload !== "object") {
+  if (!isRecord(draftPayload)) {
     return jsonError("Draft snapshot payload is invalid", 422);
   }
 
-  const canonicalSnapshot: unknown = draftPayload.canonicalSnapshot ?? null;
-  const dealTermsDefaultsUsed: unknown =
-    draftPayload.deal_terms_defaults_used ?? null;
-
-  let snapshotSource: "canonical_snapshot" | "app_compute";
-  let fullSnapshot: Record<string, unknown>;
-
-  if (canonicalSnapshot && isValidCanonicalSnapshot(canonicalSnapshot)) {
-    snapshotSource = "canonical_snapshot";
-
-    const cs = canonicalSnapshot as CanonicalSnapshot;
-
-    fullSnapshot = {
-      contract_version: cs.compute_version,
-      schema_version: "1",
-      inputs: cs.inputs,
-      outputs: cs.outputs,
-      computed_at: cs.computed_at,
-      computed_by: "canonical",
-      snapshot_source: snapshotSource,
-      deal_terms_defaults_used: dealTermsDefaultsUsed,
-      canonicalSnapshot: canonicalSnapshot,
-      draft_snapshot_json: draftPayload,
-    };
-  } else {
-    snapshotSource = "app_compute";
-
-    const draftValidation = validateDraftSnapshotV1(draftPayload);
-    if (!draftValidation.ok) {
-      return jsonError(
-        `Draft payload invalid for compute: ${draftValidation.error}`,
-        422,
-      );
-    }
-
-    const mapped = mapDraftToDealSnapshot(draftValidation.snapshot as any);
-
-    const computeResult = await computeDeal(mapped.inputs);
-    if (!computeResult.ok) {
-      const status = computeResult.code === "NOT_INTEGRATED" ? 501 : 500;
-      return jsonError(`Compute failed: ${computeResult.error}`, status);
-    }
-
-    const { compute_version, results } = computeResult.result;
-
-      const computedAt = new Date().toISOString();
-
-      const canonicalOutputs: Record<string, unknown> = { results };
-
-      const synthesizedCanonical = {
-        compute_version,
-        computed_at: computedAt,
-        inputs: mapped.inputs,
-        assumptions: {},
-        outputs: canonicalOutputs,
-      };
-
-      fullSnapshot = {
-        contract_version: compute_version,
-        schema_version: "1",
-        inputs: mapped.inputs,
-        outputs: canonicalOutputs,
-        computed_at: computedAt,
-        computed_by: user.id,
-        snapshot_source: snapshotSource,
-        deal_terms_defaults_used: dealTermsDefaultsUsed,
-        canonicalSnapshot: synthesizedCanonical,
-        draft_snapshot_json: draftPayload,
-      };
+  // We do NOT trust inbound "canonicalSnapshot" blobs.
+  // Always recompute in-app via @fractpath/compute to guarantee canonical v10 shape.
+  const draftValidation = validateDraftSnapshotV1(draftPayload);
+  if (!draftValidation.ok) {
+    return jsonError(
+      `Draft payload invalid for compute: ${draftValidation.error}`,
+      422,
+    );
   }
+
+  const mapped = mapDraftToDealSnapshot(draftValidation.snapshot as any);
+
+  // mapDraftToDealSnapshot should return { inputs: { deal_terms, scenario } }
+  // but we defensively ensure the canonical envelope.
+  const canonicalInputs = ensureScenario(
+    isRecord(mapped) && isRecord((mapped as any).inputs)
+      ? ((mapped as any).inputs as Record<string, unknown>)
+      : {
+          deal_terms: getDefaultDealTerms(),
+          scenario: getDefaultScenario(),
+        },
+  );
+
+  const computeResult = await computeDeal(canonicalInputs);
+  if (!computeResult.ok) {
+    const status = computeResult.code === "NOT_INTEGRATED" ? 501 : 500;
+    return jsonError(`Compute failed: ${computeResult.error}`, status);
+  }
+
+  const { compute_version, results } = computeResult.result;
+  const computedAt = new Date().toISOString();
+
+  // Canonical-only snapshot shape
+  const fullSnapshot: Record<string, unknown> = {
+    schema_version: "1",
+    inputs: canonicalInputs,
+    outputs: { results },
+    compute_version,
+    computed_at: computedAt,
+    computed_by: user.id,
+  };
+
+  const dealTermsDefaultsUsed: unknown =
+    (draftPayload as any).deal_terms_defaults_used ?? null;
 
   const { data: newDeal, error: insertDealError } = await (
     service.from("deals") as any
@@ -211,49 +169,73 @@ export async function POST(request: NextRequest) {
   const snapshotResult = await insertDealSnapshot(
     service,
     newDeal.id,
-    snapshotSource === "canonical_snapshot" ? "canonical" : user.id,
+    user.id,
     fullSnapshot,
   );
 
   if (!snapshotResult.ok) {
-    console.error("snapshot insert error:", snapshotResult.error);
+    console.error(
+      "snapshot insert error:",
+      snapshotResult.error,
+      snapshotResult.detail,
+    );
     return jsonError("Failed to persist snapshot", 500);
   }
 
+  // Audit events: deal created + snapshot computed + provenance
   try {
     const { error: eventError } = await (
       service.from("deal_events") as any
-    ).insert({
-      deal_id: newDeal.id,
-      event_type: "DEAL_CREATED",
-      payload: {
-        source: "resume",
-        draft_id: draft.id,
-        snapshot_id: snapshotResult.id,
-        snapshot_source: snapshotSource,
+    ).insert([
+      {
+        deal_id: newDeal.id,
+        event_type: "DEAL_CREATED",
+        payload: {
+          source: "resume",
+          draft_id: draft.id,
+          snapshot_id: snapshotResult.id,
+          draft_source: draft.source ?? null,
+          deal_terms_defaults_used: dealTermsDefaultsUsed,
+        },
+        created_by: user.id,
       },
-      created_by: user.id,
-    });
+      {
+        deal_id: newDeal.id,
+        event_type: "DEAL_SNAPSHOT_COMPUTED",
+        payload: {
+          source: "resume",
+          draft_id: draft.id,
+          snapshot_id: snapshotResult.id,
+          compute_version,
+          computed_at: computedAt,
+        },
+        created_by: user.id,
+      },
+    ]);
 
     if (eventError) {
       console.error("deal_events insert error:", eventError.message);
     }
   } catch (eventErr: any) {
-    console.error("deal_events insert exception:", eventErr.message);
+    console.error("deal_events insert exception:", eventErr?.message);
   }
 
-  const { data: redeemData, error: redeemError } = await (
-    service.from("draft_tokens") as any
-  )
-    .update({
-      redeemed_at: new Date().toISOString(),
-      redeemed_by_user_id: user.id,
-    })
-    .eq("id", draft.id)
-    .is("redeemed_at", null);
+  // Mark token redeemed (best-effort).
+  // If draft_tokens is append-only, this may fail; we do not block the user flow.
+  try {
+    const { error: redeemError } = await (service.from("draft_tokens") as any)
+      .update({
+        redeemed_at: new Date().toISOString(),
+        redeemed_by_user_id: user.id,
+      })
+      .eq("id", draft.id)
+      .is("redeemed_at", null);
 
-  if (redeemError) {
-    console.error("draft redeem update error:", redeemError.message);
+    if (redeemError) {
+      console.error("draft redeem update error:", redeemError.message);
+    }
+  } catch (e: any) {
+    console.error("draft redeem update exception:", e?.message);
   }
 
   return NextResponse.json(

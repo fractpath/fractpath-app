@@ -32,7 +32,7 @@ export interface ScenarioAssumptions {
   annual_appreciation: number;
   closing_cost_pct: number;
   exit_year: number;
-  fmv_override?: number;
+  fmv_override?: number | null;
 }
 
 export interface DealResults {

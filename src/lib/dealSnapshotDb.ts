@@ -37,14 +37,23 @@ export async function insertDealSnapshot(
     };
   }
 
-  const { contract_version, schema_version, input_hash, output_hash, snapshot } =
-    validation;
+  const {
+    compute_version,
+    // keep for legacy visibility, but we will mirror contract_version to compute_version in the DB column
+    schema_version,
+    input_hash,
+    output_hash,
+    snapshot,
+  } = validation;
 
   const { data, error } = await (supabase.from("deal_snapshots") as any)
     .insert({
       deal_id: dealId,
       created_by: userId,
-      contract_version,
+
+      // DB column is legacy-named; store canonical value for compatibility
+      contract_version: compute_version,
+
       schema_version,
       input_hash,
       output_hash,

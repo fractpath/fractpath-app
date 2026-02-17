@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
-import { getLatestDealSnapshot } from "@/lib/dealSnapshotDb";
+import { computeDeal } from "@/lib/computeAdapter";
+import {
+  insertDealSnapshot,
+  getLatestDealSnapshot,
+} from "@/lib/dealSnapshotDb";
+import {
+  ensureScenario,
+  getDefaultDealTerms,
+  getDefaultScenario,
+} from "@/lib/defaultScenario";
 
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
@@ -11,6 +20,10 @@ function isUuid(v: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     v,
   );
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === "object" && !Array.isArray(v);
 }
 
 export async function POST(
@@ -107,36 +120,90 @@ export async function POST(
     return jsonError("Failed to assign ownership on forked deal", 500);
   }
 
-  // Copy latest snapshot as a baseline if one exists
+  // Canonical fork baseline:
+  // - Prefer source snapshot inputs if present
+  // - Otherwise fall back to defaults
+  // - Always recompute via @fractpath/compute and insert a canonical snapshot
   let baselineSnapshotId: string | null = null;
-  const latestResult = await getLatestDealSnapshot(service, dealId);
 
-  if (latestResult.ok && latestResult.snapshot) {
-    const src = latestResult.snapshot;
+  try {
+    const latestResult = await getLatestDealSnapshot(service, dealId);
 
-    const { data: copiedSnap, error: snapError } = await (
-      service.from("deal_snapshots") as any
-    )
-      .insert({
-        deal_id: newDeal.id,
-        created_by: user.id,
-        contract_version: src.contract_version,
-        schema_version: src.schema_version,
-        input_hash: src.input_hash,
-        output_hash: src.output_hash,
-        snapshot_json: src.snapshot_json,
-      })
-      .select("id")
-      .single();
+    let canonicalInputs: Record<string, unknown> | null = null;
 
-    if (snapError) {
-      console.error("snapshot copy error:", snapError.message);
-    } else {
-      baselineSnapshotId = copiedSnap?.id ?? null;
+    if (latestResult.ok && latestResult.snapshot) {
+      const srcJson = (latestResult.snapshot as any).snapshot_json;
+      if (isRecord(srcJson) && isRecord((srcJson as any).inputs)) {
+        canonicalInputs = ensureScenario((srcJson as any).inputs);
+      }
     }
+
+    if (!canonicalInputs) {
+      canonicalInputs = ensureScenario({
+        deal_terms: getDefaultDealTerms(),
+        scenario: getDefaultScenario(),
+      });
+    }
+
+    const computeResult = await computeDeal(canonicalInputs);
+
+    if (computeResult.ok) {
+      const { compute_version, results } = computeResult.result;
+      const computedAt = new Date().toISOString();
+
+      const fullSnapshot = {
+        schema_version: "1",
+        inputs: canonicalInputs,
+        outputs: { results },
+
+        // Canonical v10 fields
+        compute_version,
+        computed_at: computedAt,
+        computed_by: user.id,
+      };
+
+      const snapInsert = await insertDealSnapshot(
+        service as any,
+        newDeal.id,
+        user.id,
+        fullSnapshot,
+      );
+
+      if (snapInsert.ok) {
+        baselineSnapshotId = snapInsert.id;
+
+        // Optional audit event for baseline compute
+        try {
+          await (service.from("deal_events") as any).insert({
+            deal_id: newDeal.id,
+            event_type: "DEAL_SNAPSHOT_COMPUTED",
+            payload: {
+              snapshot_id: snapInsert.id,
+              compute_version,
+              computed_at: computedAt,
+              source: "fork",
+              forked_from_deal_id: dealId,
+            },
+            created_by: user.id,
+          });
+        } catch (eventErr: any) {
+          console.error("deal_events insert error:", eventErr?.message);
+        }
+      } else {
+        console.error(
+          "fork snapshot insert failed:",
+          snapInsert.error,
+          snapInsert.detail,
+        );
+      }
+    } else {
+      console.error("fork compute failed:", computeResult.error);
+    }
+  } catch (e: any) {
+    console.error("fork baseline compute error:", e?.message ?? e);
   }
 
-  // Audit event
+  // Audit event: deal created via fork
   const { error: eventError } = await (
     service.from("deal_events") as any
   ).insert({

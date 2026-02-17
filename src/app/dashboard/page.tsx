@@ -1,3 +1,4 @@
+// src/app/dashboard/page.tsx
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
@@ -42,21 +43,32 @@ const NEXT_STEPS: Record<Persona, string[]> = {
   ],
 };
 
-export default async function DashboardPage({
-  searchParams,
-}: {
-  searchParams?: Record<string, string | string[] | undefined>;
-}) {
+type SearchParams = Record<string, string | string[] | undefined>;
+
+type PageProps = {
+  searchParams?: SearchParams | Promise<SearchParams>;
+};
+
+export default async function DashboardPage({ searchParams }: PageProps) {
+  // Next.js 16 App Router: searchParams may be a Promise depending on runtime path
+  const resolvedSearchParams = (await Promise.resolve(searchParams as any)) as
+    | SearchParams
+    | undefined;
+
   const draftToken = (await cookies()).get("fractpath_draft_token")?.value;
   if (draftToken) {
     redirect(`/resume?token=${encodeURIComponent(draftToken)}`);
   }
 
   const createFailed =
-    (typeof searchParams?.create === "string" ? searchParams?.create : null) ===
-    "failed";
+    (typeof resolvedSearchParams?.create === "string"
+      ? resolvedSearchParams.create
+      : null) === "failed";
+
   const createCode =
-    typeof searchParams?.code === "string" ? searchParams?.code : null;
+    typeof resolvedSearchParams?.code === "string"
+      ? resolvedSearchParams.code
+      : null;
 
   const supabase = await createClient();
 

@@ -18,10 +18,7 @@ import { selectBaseSnapshotId } from "@/lib/counterBaseSnapshot";
 import { getDealSnapshots } from "@/lib/dealSnapshotDb";
 import { getDealVersions } from "@/lib/dealVersionDb";
 import { getDealEvents, buildDealTimeline } from "@/lib/dealTimeline";
-import {
-  extractSnapshotDisplay,
-  selectSnapshot,
-} from "@/lib/dealSnapshotDisplay";
+import { extractSnapshotDisplay } from "@/lib/dealSnapshotDisplay";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -46,6 +43,36 @@ function isUuid(v: string | undefined): v is string {
       v,
     )
   );
+}
+
+function isFiniteNumber(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v);
+}
+
+/**
+ * A snapshot counts as "computed" if it has canonical outputs.results AND at least
+ * one anchor KPI is a finite number. This avoids treating "present but garbage" rows
+ * as the default snapshot.
+ */
+function hasValidComputedResults(
+  results: Record<string, unknown> | null | undefined,
+): boolean {
+  if (!results) return false;
+
+  const invested = (results as any).invested_capital_total;
+  const settlement = (results as any).isa_settlement;
+  const fmv = (results as any).projected_fmv;
+  const multiple = (results as any).investor_multiple;
+  const irr = (results as any).investor_irr_annual;
+
+  // any one anchor KPI is sufficient to consider it computed
+  if (isFiniteNumber(invested)) return true;
+  if (isFiniteNumber(settlement)) return true;
+  if (isFiniteNumber(fmv)) return true;
+  if (isFiniteNumber(multiple)) return true;
+  if (isFiniteNumber(irr)) return true;
+
+  return false;
 }
 
 export default async function DealPage({ params, searchParams }: PageProps) {
@@ -108,7 +135,11 @@ export default async function DealPage({ params, searchParams }: PageProps) {
       .maybeSingle();
 
     const grantRole = grantRes.data?.role;
-    if (grantRole === "OWNER" || grantRole === "VIEWER" || grantRole === "COUNTERPARTY") {
+    if (
+      grantRole === "OWNER" ||
+      grantRole === "VIEWER" ||
+      grantRole === "COUNTERPARTY"
+    ) {
       role = grantRole;
     }
   }
@@ -117,10 +148,34 @@ export default async function DealPage({ params, searchParams }: PageProps) {
 
   const snapshotsResult = await getDealSnapshots(supabase, dealId, 20);
   const snapshots = snapshotsResult.ok ? snapshotsResult.snapshots : [];
-  const latestSnapshotId = snapshots.length > 0 ? snapshots[0].id : null;
+
   const selectedSnapshotId = getParam(resolvedSearchParams, "snapshot");
-  const { selected: snapshotRow, isLatest } = selectSnapshot(snapshots, selectedSnapshotId);
-  const display = extractSnapshotDisplay(snapshotRow);
+
+  // Find the newest snapshot that looks like a valid computed canonical snapshot.
+  const latestComputedSnapshot =
+    snapshots.find((s) => {
+      const d = extractSnapshotDisplay(s as any);
+      return hasValidComputedResults(d?.outputs ?? null);
+    }) ?? null;
+
+  // Default selection behavior:
+  // - If user explicitly selected a snapshot via query param, honor it.
+  // - Otherwise, default to latest *computed* snapshot (fallback to newest row).
+  const effectiveSnapshotRow =
+    selectedSnapshotId != null
+      ? (snapshots.find((s) => s.id === selectedSnapshotId) ?? null)
+      : (latestComputedSnapshot ??
+        (snapshots.length > 0 ? snapshots[0] : null));
+
+  // "Latest" in UI/gating should mean latest computed snapshot (not merely latest row).
+  const latestSnapshotId =
+    (latestComputedSnapshot ?? (snapshots.length > 0 ? snapshots[0] : null))
+      ?.id ?? null;
+  const isLatest = effectiveSnapshotRow
+    ? effectiveSnapshotRow.id === latestSnapshotId
+    : true;
+
+  const display = extractSnapshotDisplay(effectiveSnapshotRow as any);
   const summaryVm = buildDealSummaryViewModel(display ?? {});
 
   const [versionsResult, eventsResult] = await Promise.all([
@@ -195,16 +250,18 @@ export default async function DealPage({ params, searchParams }: PageProps) {
           <h2 className="text-base font-semibold">Scenario snapshot</h2>
           <div className="text-xs text-muted-foreground">
             {isLatest
-              ? "Latest saved snapshot (read-only; no recompute)"
+              ? "Latest computed snapshot (read-only; no recompute)"
               : "Viewing older snapshot"}
           </div>
         </div>
 
-        {!isLatest && snapshotRow ? (
+        {!isLatest && effectiveSnapshotRow ? (
           <div className="mt-2 flex items-center justify-between rounded-md bg-muted/50 px-3 py-2">
             <span className="text-xs text-muted-foreground">
               You are viewing a previous snapshot from{" "}
-              {new Date(snapshotRow.created_at).toLocaleString()}
+              {new Date(
+                (effectiveSnapshotRow as any).created_at,
+              ).toLocaleString()}
             </span>
             <Link
               className="text-xs font-medium underline"
@@ -216,16 +273,18 @@ export default async function DealPage({ params, searchParams }: PageProps) {
         ) : null}
 
         <div className="mt-4">
-          <DealSummary
-            vm={summaryVm}
-          />
+          <DealSummary vm={summaryVm} />
         </div>
       </section>
 
       {role === "OWNER" && isLatest && !readOnly ? (
         <RecomputeSnapshotButton
           dealId={dealId}
-          initialInputs={display?.inputs ? (snapshotRow as any)?.snapshot_json?.inputs ?? null : null}
+          initialInputs={
+            display?.inputs
+              ? ((effectiveSnapshotRow as any)?.snapshot_json?.inputs ?? null)
+              : null
+          }
         />
       ) : null}
 
@@ -233,10 +292,12 @@ export default async function DealPage({ params, searchParams }: PageProps) {
         <DealCalculatorEmbed
           dealId={dealId}
           role={role}
-          currentSnapshotId={selectBaseSnapshotId({
-            selectedSnapshotId: selectedSnapshotId,
-            latestSnapshotId: latestSnapshotId,
-          }) ?? undefined}
+          currentSnapshotId={
+            selectBaseSnapshotId({
+              selectedSnapshotId: selectedSnapshotId,
+              latestSnapshotId: latestSnapshotId,
+            }) ?? undefined
+          }
         />
       ) : null}
 
@@ -250,11 +311,11 @@ export default async function DealPage({ params, searchParams }: PageProps) {
           </div>
 
           <div className="mt-3 space-y-1">
-            {snapshots.map((s, i) => {
-              const isCurrent = snapshotRow?.id === s.id;
+            {snapshots.map((s) => {
+              const isCurrent = effectiveSnapshotRow?.id === s.id;
               const modeParam = isSharedMode ? "&mode=shared" : "";
               const href =
-                i === 0
+                s.id === latestSnapshotId
                   ? `/deal/${dealId}${isSharedMode ? "?mode=shared" : ""}`
                   : `/deal/${dealId}?snapshot=${s.id}${modeParam}`;
 
@@ -269,7 +330,7 @@ export default async function DealPage({ params, searchParams }: PageProps) {
                   }`}
                 >
                   <span className="flex items-center gap-2">
-                    {i === 0 ? (
+                    {s.id === latestSnapshotId ? (
                       <span className="rounded bg-primary/20 px-1.5 py-0.5 text-[10px] font-medium">
                         Latest
                       </span>
@@ -302,39 +363,53 @@ export default async function DealPage({ params, searchParams }: PageProps) {
           </p>
         ) : (
           <div className="mt-4 space-y-2">
-            {timeline.map((entry) => entry.type === "VERSION" ? (
-              <VersionTimelineCard key={`${entry.type}-${entry.id}`} entry={entry} />
-            ) : (
-              <div
-                key={`${entry.type}-${entry.id}`}
-                className="flex items-start gap-3 rounded-md px-3 py-2 text-xs hover:bg-muted/50"
-              >
-                <span className={`mt-0.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                  entry.type === "SNAPSHOT"
-                    ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                    : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
-                }`}>
-                  {entry.type === "SNAPSHOT" ? "SNAP" : "EVT"}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline justify-between gap-2">
-                    {entry.href ? (
-                      <Link href={entry.href} className="font-medium underline">
-                        {entry.title}
-                      </Link>
-                    ) : (
-                      <span className="font-medium">{entry.title}</span>
-                    )}
-                    <span className="shrink-0 text-muted-foreground">
-                      {entry.created_at ? new Date(entry.created_at).toLocaleString() : "\u2014"}
-                    </span>
+            {timeline.map((entry) =>
+              entry.type === "VERSION" ? (
+                <VersionTimelineCard
+                  key={`${entry.type}-${entry.id}`}
+                  entry={entry}
+                />
+              ) : (
+                <div
+                  key={`${entry.type}-${entry.id}`}
+                  className="flex items-start gap-3 rounded-md px-3 py-2 text-xs hover:bg-muted/50"
+                >
+                  <span
+                    className={`mt-0.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                      entry.type === "SNAPSHOT"
+                        ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                        : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                    }`}
+                  >
+                    {entry.type === "SNAPSHOT" ? "SNAP" : "EVT"}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline justify-between gap-2">
+                      {entry.href ? (
+                        <Link
+                          href={entry.href}
+                          className="font-medium underline"
+                        >
+                          {entry.title}
+                        </Link>
+                      ) : (
+                        <span className="font-medium">{entry.title}</span>
+                      )}
+                      <span className="shrink-0 text-muted-foreground">
+                        {entry.created_at
+                          ? new Date(entry.created_at).toLocaleString()
+                          : "—"}
+                      </span>
+                    </div>
+                    {entry.subtitle ? (
+                      <div className="mt-0.5 text-muted-foreground">
+                        {entry.subtitle}
+                      </div>
+                    ) : null}
                   </div>
-                  {entry.subtitle ? (
-                    <div className="mt-0.5 text-muted-foreground">{entry.subtitle}</div>
-                  ) : null}
                 </div>
-              </div>
-            ))}
+              ),
+            )}
           </div>
         )}
       </section>

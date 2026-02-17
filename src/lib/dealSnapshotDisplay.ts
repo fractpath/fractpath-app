@@ -3,6 +3,8 @@
  * Supported snapshot_json shape:
  *   snapshot_json.inputs  (object)
  *   snapshot_json.outputs.results (object)
+ *   snapshot_json.compute_version (string)   // preferred
+ *   snapshot_json.outputs.results.compute_version (string) // fallback (legacy rows)
  *
  * Non-negotiable: do NOT read legacy fields (chart_series, outputs.summary, outputs.schedule).
  */
@@ -12,18 +14,25 @@ type AnyRecord = Record<string, unknown>;
 export type SnapshotRowLike = {
   id?: string;
   created_at?: string;
+  // legacy column (may exist)
   contract_version?: string | null;
+  // canonical column (may exist depending on DB schema)
+  compute_version?: string | null;
   schema_version?: string | null;
   snapshot_json?: unknown;
 } | null;
 
 export type SnapshotDisplayData = {
-  contractVersion: string | null;
+  // Canonical v10
+  computeVersion: string | null;
   schemaVersion: string | null;
   createdAt: string | null;
   inputs: AnyRecord | null;
   // Canonical-only: DealResults (snapshot_json.outputs.results)
   outputs: AnyRecord | null;
+
+  // Optional backward visibility (do not use for gating)
+  contractVersion: string | null;
 };
 
 function isRecord(v: unknown): v is AnyRecord {
@@ -34,21 +43,43 @@ function safeRecord(v: unknown): AnyRecord | null {
   return isRecord(v) ? (v as AnyRecord) : null;
 }
 
-export function extractSnapshotDisplay(snapshotRow: SnapshotRowLike): SnapshotDisplayData | null {
+function safeString(v: unknown): string | null {
+  return typeof v === "string" && v.trim().length > 0 ? v : null;
+}
+
+export function extractSnapshotDisplay(
+  snapshotRow: SnapshotRowLike,
+): SnapshotDisplayData | null {
   if (snapshotRow === null) return null;
 
   const json = safeRecord((snapshotRow as any).snapshot_json) ?? {};
   const inputs = safeRecord((json as any).inputs);
 
   const outputsContainer = safeRecord((json as any).outputs);
-  const results = outputsContainer ? safeRecord((outputsContainer as any).results) : null;
+  const results = outputsContainer
+    ? safeRecord((outputsContainer as any).results)
+    : null;
+
+  // Canonical compute_version precedence:
+  // 1) snapshot_json.compute_version (new canonical)
+  // 2) snapshot_json.outputs.results.compute_version (legacy rows still have v10 DealResults)
+  // 3) row.compute_version (if present in schema)
+  const computeVersion =
+    safeString((json as any).compute_version) ??
+    safeString((results as any)?.compute_version) ??
+    safeString((snapshotRow as any).compute_version) ??
+    null;
+
+  const contractVersion =
+    safeString((snapshotRow as any).contract_version) ?? null;
 
   return {
-    contractVersion: ((snapshotRow as any).contract_version ?? null) as any,
+    computeVersion,
     schemaVersion: ((snapshotRow as any).schema_version ?? null) as any,
     createdAt: ((snapshotRow as any).created_at ?? null) as any,
     inputs,
     outputs: results,
+    contractVersion,
   };
 }
 
@@ -56,7 +87,8 @@ export function selectSnapshot<T extends { id: string }>(
   snapshots: T[],
   selectedId: string | null,
 ): { selected: T | null; isLatest: boolean } {
-  if (!snapshots || snapshots.length === 0) return { selected: null, isLatest: true };
+  if (!snapshots || snapshots.length === 0)
+    return { selected: null, isLatest: true };
   const latest = snapshots[0];
   if (selectedId === null) return { selected: latest, isLatest: true };
   const found = snapshots.find((s) => s.id === selectedId) ?? null;
