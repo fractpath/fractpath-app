@@ -42,26 +42,44 @@ export default function Home() {
         }),
       });
 
-      const data = (await res.json()) as SubmitResponse;
+      // IMPORTANT: don't assume JSON (401 redirects / Next error pages can be HTML)
+      const raw = await res.text();
+      let data: SubmitResponse | null = null;
 
-      if (!res.ok || !data.ok) {
-        setStatus("error");
-        setMessage(!data.ok ? data.error : `HTTP ${res.status}`);
-        return;
+      try {
+        data = raw ? (JSON.parse(raw) as SubmitResponse) : null;
+      } catch {
+        // leave as null; we'll surface status + snippet below
+      }
+
+      if (!res.ok) {
+        const snippet = raw ? raw.slice(0, 200) : "";
+        throw new Error(`HTTP ${res.status}${snippet ? `: ${snippet}` : ""}`);
+      }
+
+      if (!data) {
+        throw new Error("Expected JSON response but got empty/non-JSON body.");
+      }
+
+      if (!data.ok) {
+        throw new Error(data.error || "Unknown server error");
       }
 
       if (!data.dealId) {
-        setStatus("error");
-        setMessage("Deal was created but no deal ID was returned.");
-        return;
+        throw new Error("Deal was created but no deal ID was returned.");
       }
 
       setStatus("success");
       setMessage("Deal created. Redirecting...");
       window.location.assign(`/deal/${data.dealId}`);
-    } catch {
+    } catch (err: any) {
+      console.error("SUBMIT_CLIENT_FAILED", err);
       setStatus("error");
-      setMessage("Submission failed.");
+      setMessage(
+        err?.message
+          ? `Submission failed: ${err.message}`
+          : "Submission failed.",
+      );
     }
   }
 
