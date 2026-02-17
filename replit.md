@@ -32,7 +32,8 @@ FractPath is a Next.js application that utilizes API routes for backend logic an
 **Feature Specifications:**
 - **Homeowner Intake:** Primary data collection form.
 - **User Dashboard:** Role-specific content and access to scenarios.
-- **Deal Resume:** `POST /api/deals/resume` — Converts marketing drafts into authenticated deals. Dual-path: if `canonicalSnapshot` is present in the draft payload, persists it opaquely as the authoritative record (snapshot_source = "canonical_snapshot") without recomputation; if absent, computes via `computeDeal` adapter (snapshot_source = "app_compute"). Persists `deal_terms_defaults_used` from the draft payload. Idempotent on already-redeemed tokens.
+- **Deal Resume:** `POST /api/deals/resume` — Converts marketing drafts into authenticated deals. Always recomputes via `computeDeal` adapter (no canonical passthrough). Creates deal record, OWNER access grant, canonical `FullDealSnapshotV1` snapshot, DEAL_CREATED + DEAL_SNAPSHOT_COMPUTED audit events. Marks draft token as redeemed with conditional `.is("redeemed_at", null)`. Idempotent on already-redeemed tokens (returns existing deal). Returns `{ ok, deal_id, snapshot_id, redirect_url }` with 201.
+- **Marketing Lead:** `POST /api/lead` — Marketing-facing adapter that accepts `{ email, home_address, equity_owned, funding_method, sale_timeline }`, constructs a DraftSnapshotV1-compatible payload with stable hashes, mints a draft token, returns `{ ok, token, resumeUrl }`. Includes IP rate limiting.
 - **Share Deal:** Enables generation of read-only share links.
 - **Snapshot Ingestion:** Allows owners to ingest new snapshots for their deals.
 - **Offer/Counter-Offer Creation:** Owners can create OFFER versions; Owners or Counterparties can create COUNTER versions.

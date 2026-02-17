@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { getAppBaseUrlServer } from "@/lib/appBaseUrl";
 
 function isOwnerOnlyError(err: any): boolean {
   const code = err?.code;
@@ -30,7 +31,6 @@ export async function POST(
 
   const { dealId } = await context.params;
 
-  // Parse body (we accept toEmail/recipientEmail/email but don't require it to mint token)
   let body: any = null;
   try {
     body = await request.json();
@@ -49,7 +49,6 @@ export async function POST(
 
   const recipientEmail = recipientEmailRaw.trim().toLowerCase();
 
-  // Mint token via SECURITY DEFINER RPC
   const { data: token, error: rpcErr } = await supabase.rpc(
     "mint_deal_share_token",
     {
@@ -59,7 +58,6 @@ export async function POST(
   );
 
   if (rpcErr || !token) {
-    // Normalize OWNER-only attempts to 403 with canonical body
     if (isOwnerOnlyError(rpcErr)) {
       return NextResponse.json(
         { ok: false, error: "Forbidden (OWNER only)" },
@@ -78,10 +76,8 @@ export async function POST(
     );
   }
 
-  const shareUrl = `https://app.fractpath.com/share?t=${encodeURIComponent(
-    token as string,
-  )}`;
+  const APP = getAppBaseUrlServer();
+  const shareUrl = `${APP}/share?t=${encodeURIComponent(token as string)}`;
 
-  // Recipient email is optional; we return it for UI confirmation/debug
   return NextResponse.json({ ok: true, token, shareUrl, recipientEmail });
 }
