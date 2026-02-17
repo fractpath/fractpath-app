@@ -1,14 +1,12 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useRef } from "react";
 
 interface DealCalculatorEmbedProps {
   dealId: string;
   role?: string;
   currentSnapshotId?: string;
 }
-
-export type SaveSnapshotFn = (snapshot: Record<string, unknown>) => Promise<void>;
 
 export function DealCalculatorEmbed({ dealId, role = "OWNER", currentSnapshotId }: DealCalculatorEmbedProps) {
   const [saving, setSaving] = useState(false);
@@ -17,50 +15,37 @@ export function DealCalculatorEmbed({ dealId, role = "OWNER", currentSnapshotId 
 
   const isCounterparty = role === "COUNTERPARTY";
 
-  const handleSave: SaveSnapshotFn = useCallback(
+  const handleCounterpartySave = useCallback(
     async (snapshot: Record<string, unknown>) => {
       setSaving(true);
       setError(null);
 
       try {
-        if (isCounterparty) {
-          const proposeRes = await fetch(`/api/deals/${dealId}/snapshot/propose`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ snapshot }),
-          });
+        const proposeRes = await fetch(`/api/deals/${dealId}/snapshot/propose`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ snapshot }),
+        });
 
-          if (!proposeRes.ok) {
-            const proposeBody = await proposeRes.json().catch(() => ({}));
-            throw new Error(proposeBody.error ?? `Snapshot propose failed (${proposeRes.status})`);
-          }
+        if (!proposeRes.ok) {
+          const proposeBody = await proposeRes.json().catch(() => ({}));
+          throw new Error(proposeBody.error ?? `Snapshot propose failed (${proposeRes.status})`);
+        }
 
-          const { snapshot_id } = await proposeRes.json();
+        const { snapshot_id } = await proposeRes.json();
 
-          const counterRes = await fetch(`/api/deals/${dealId}/counter`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              proposed_snapshot_id: snapshot_id,
-              base_snapshot_id: currentSnapshotId ?? null,
-            }),
-          });
+        const counterRes = await fetch(`/api/deals/${dealId}/counter`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            proposed_snapshot_id: snapshot_id,
+            base_snapshot_id: currentSnapshotId ?? null,
+          }),
+        });
 
-          if (!counterRes.ok) {
-            const counterBody = await counterRes.json().catch(() => ({}));
-            throw new Error(counterBody.error ?? `Counter creation failed (${counterRes.status})`);
-          }
-        } else {
-          const res = await fetch(`/api/deals/${dealId}/snapshot`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ snapshot }),
-          });
-
-          if (!res.ok) {
-            const body = await res.json().catch(() => ({}));
-            throw new Error(body.error ?? `Save failed (${res.status})`);
-          }
+        if (!counterRes.ok) {
+          const counterBody = await counterRes.json().catch(() => ({}));
+          throw new Error(counterBody.error ?? `Counter creation failed (${counterRes.status})`);
         }
 
         window.location.href = `/deal/${dealId}`;
@@ -69,28 +54,8 @@ export function DealCalculatorEmbed({ dealId, role = "OWNER", currentSnapshotId 
         setSaving(false);
       }
     },
-    [dealId, isCounterparty, currentSnapshotId],
+    [dealId, currentSnapshotId],
   );
-
-  useEffect(() => {
-    const w = window as any;
-    w.__fractpath_saveSnapshot = handleSave;
-    w.__fractpath_dealId = dealId;
-
-    if (containerRef.current) {
-      containerRef.current.dispatchEvent(
-        new CustomEvent("fractpath:calculator-ready", {
-          bubbles: true,
-          detail: { dealId, save: handleSave },
-        }),
-      );
-    }
-
-    return () => {
-      delete w.__fractpath_saveSnapshot;
-      delete w.__fractpath_dealId;
-    };
-  }, [handleSave, dealId]);
 
   const roleLabel = isCounterparty ? "Counterparty" : "Owner only";
 
@@ -130,7 +95,7 @@ export function DealCalculatorEmbed({ dealId, role = "OWNER", currentSnapshotId 
         </p>
         {saving ? (
           <p className="mt-3 text-sm font-medium">
-            {isCounterparty ? "Submitting counter-proposal…" : "Saving snapshot…"}
+            {isCounterparty ? "Submitting counter-proposal..." : "Saving snapshot..."}
           </p>
         ) : null}
       </div>
