@@ -137,17 +137,17 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const byId = new Map<string, Record<string, any>>();
   for (const d of deals) byId.set(d.id, d);
 
-  function labelForDeal(dealId: string) {
-    const d = byId.get(dealId);
-    return (
-      d?.title ||
-      d?.name ||
-      d?.address ||
-      d?.property_address ||
-      d?.home_address ||
-      dealId
-    );
-  }
+  function labelForDeal(dealId: string): { label: string; isFallback: boolean } {
+      const d = byId.get(dealId);
+      const label =
+        d?.title ||
+        d?.name ||
+        d?.address ||
+        d?.property_address ||
+        d?.home_address ||
+        dealId;
+      return { label, isFallback: label === dealId };
+    }
 
   return (
     <main className="mx-auto max-w-3xl p-6">
@@ -209,11 +209,11 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                 >
                   <div className="min-w-0">
                     <div className="text-sm font-medium truncate">
-                      {labelForDeal(id)}
+                      {labelForDeal(id).label}
                     </div>
-                    <div className="text-xs text-muted-foreground truncate">
-                      {id}
-                    </div>
+                    {labelForDeal(id).isFallback ? null : (
+                      <div className="text-xs text-muted-foreground truncate">{id}</div>
+                    )}
                   </div>
                   <Link className="text-sm underline" href={`/deal/${id}`}>
                     Open
@@ -245,11 +245,11 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                 >
                   <div className="min-w-0">
                     <div className="text-sm font-medium truncate">
-                      {labelForDeal(id)}
+                      {labelForDeal(id).label}
                     </div>
-                    <div className="text-xs text-muted-foreground truncate">
-                      {id}
-                    </div>
+                    {labelForDeal(id).isFallback ? null : (
+                      <div className="text-xs text-muted-foreground truncate">{id}</div>
+                    )}
                   </div>
                   <Link
                     className="text-sm underline"
