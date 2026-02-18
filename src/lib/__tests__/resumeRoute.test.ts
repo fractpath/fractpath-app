@@ -88,17 +88,34 @@ test("resume route handles already-redeemed tokens with idempotent deal lookup",
   );
 });
 
-test("resume route validates draft payload before compute", () => {
+test("resume route enforces canonical payload (canonicalSnapshot preferred; canonicalInputs fallback)", () => {
+  // Must reference canonical handoff keys
   assert(
-    content.includes("validateDraftSnapshotV1(picked.draftSnapshot)"),
-    "must validate draft via validateDraftSnapshotV1",
+    content.includes("canonicalSnapshot") ||
+      content.includes("canonicalInputs"),
+    "must reference canonicalSnapshot or canonicalInputs",
   );
-});
 
-test("resume route maps draft via mapDraftToDealSnapshot", () => {
+  // Must NOT use legacy DraftSnapshotV1 gates anymore
   assert(
-    content.includes("mapDraftToDealSnapshot"),
-    "must map draft to canonical inputs envelope",
+    !content.includes("validateDraftSnapshotV1"),
+    "must not use validateDraftSnapshotV1",
+  );
+  assert(
+    !content.includes("mapDraftToDealSnapshot"),
+    "must not use mapDraftToDealSnapshot",
+  );
+
+  // Must support compute fallback
+  assert(
+    content.includes("computeDeal("),
+    "must call computeDeal for canonicalInputs fallback",
+  );
+
+  // Must hard fail to prevent drift
+  assert(
+    content.includes("Missing canonical payload") && content.includes("422"),
+    "must 422 when canonicalSnapshot/canonicalInputs missing",
   );
 });
 
@@ -109,75 +126,32 @@ test("resume route ensures canonical envelope via ensureScenario", () => {
   );
 });
 
-test("resume route ALWAYS recomputes via computeDeal (no canonical passthrough)", () => {
-  assert(
-    content.includes("computeDeal(canonicalInputs)"),
-    "must call computeDeal(canonicalInputs)",
-  );
-
-  // We allow the word "canonicalSnapshot" in comments, but we MUST NOT:
-  // - read draftPayload.canonicalSnapshot
-  // - persist canonicalSnapshot: into the snapshot payload
-  assert(
-    !content.includes("draftPayload.canonicalSnapshot"),
-    "must not read draftPayload.canonicalSnapshot",
-  );
-  const nonCommentLines = content
-    .split("\n")
-    .filter((l: string) => !l.trim().startsWith("//") && !l.trim().startsWith("*"));
-  const nonCommentCode = nonCommentLines.join("\n");
-  assert(
-    !nonCommentCode.includes("canonicalSnapshot:"),
-    "must not persist canonicalSnapshot into snapshot_json (non-comment code)",
-  );
-  assert(
-    !content.includes("isValidCanonicalSnapshot"),
-    "must not include isValidCanonicalSnapshot shortcut",
-  );
-});
-
-test("resume route builds canonical-only snapshot object", () => {
-  assert(
-    content.includes('schema_version: "1"'),
-    'must set schema_version "1"',
-  );
-  assert(
-    content.includes("inputs: canonicalInputs"),
-    "must store inputs: canonicalInputs",
-  );
-  assert(
-    content.includes("outputs: { results }"),
-    "must store outputs: { results }",
-  );
+test("resume route persists a canonical v10 snapshot", () => {
+  // Either passthrough or computed snapshot must be canonical-shaped
+  assert(content.includes("schema_version"), "must set schema_version");
   assert(content.includes("compute_version"), "must store compute_version");
-  assert(content.includes("computed_at"), "must store computed_at");
+  assert(content.includes("inputs"), "must store inputs");
+  assert(content.includes("outputs"), "must store outputs");
+
+  // Compute path sets computed_at explicitly; passthrough may already have it
   assert(
-    content.includes("computed_by: user.id"),
-    "must store computed_by: user.id",
+    content.includes("computed_at"),
+    "must store computed_at (at least on compute path)",
   );
 });
 
-test("resume route persists snapshot via insertDealSnapshot(service, dealId, userId, fullSnapshot)", () => {
+test("resume route persists snapshot via insertDealSnapshot(service, dealId, userId, ...)", () => {
   assert(
     content.includes("insertDealSnapshot("),
     "must call insertDealSnapshot",
   );
   assert(
-    content.includes("service as any") || content.includes("insertDealSnapshot(service"),
+    content.includes("service as any") ||
+      content.includes("insertDealSnapshot(service"),
     "must pass service client to insertDealSnapshot",
   );
-  assert(
-    content.includes("newDeal.id"),
-    "must pass newDeal.id to insertDealSnapshot",
-  );
-  assert(
-    content.includes("user.id"),
-    "must pass user.id to insertDealSnapshot",
-  );
-  assert(
-    content.includes("fullSnapshot"),
-    "must pass fullSnapshot to insertDealSnapshot",
-  );
+  assert(content.includes("newDeal.id"), "must pass newDeal.id");
+  assert(content.includes("user.id"), "must pass user.id");
 });
 
 test("resume route creates deal with source_ref = draft_token:<id>", () => {
@@ -200,14 +174,16 @@ test("resume route creates OWNER grant", () => {
   );
 });
 
-test("resume route records audit events (DEAL_CREATED and DEAL_SNAPSHOT_COMPUTED)", () => {
+test("resume route records audit events (DEAL_CREATED and snapshot event)", () => {
   assert(
     content.includes('"DEAL_CREATED"') && content.includes("deal_events"),
     "must record DEAL_CREATED event",
   );
+  // Either computed or imported snapshot event is acceptable
   assert(
-    content.includes('"DEAL_SNAPSHOT_COMPUTED"'),
-    "must record DEAL_SNAPSHOT_COMPUTED event",
+    content.includes('"DEAL_SNAPSHOT_COMPUTED"') ||
+      content.includes('"DEAL_SNAPSHOT_IMPORTED"'),
+    "must record a snapshot event (computed or imported)",
   );
 });
 
