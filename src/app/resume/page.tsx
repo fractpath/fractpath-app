@@ -8,6 +8,7 @@ type RedeemState =
   | { status: "loading" }
   | { status: "no-token" }
   | { status: "redirecting-login" }
+  | { status: "redirecting-signup" }
   | { status: "redeeming" }
   | { status: "success"; dealId: string; redirectUrl: string }
   | {
@@ -29,7 +30,7 @@ export default function ResumePage() {
         <main
           style={{ maxWidth: 480, margin: "80px auto", padding: "0 16px" }}
         >
-          <p>Loading...</p>
+          <p>Resuming your deal…</p>
         </main>
       }
     >
@@ -61,9 +62,37 @@ function ResumeContent() {
       if (cancelled) return;
 
       if (!user) {
-        setState({ status: "redirecting-login" });
         document.cookie = `fractpath_draft_token=${encodeURIComponent(token!)};path=/;max-age=3600;SameSite=Lax`;
-        router.push("/login?returnTo=/resume");
+
+        let draftEmail = "";
+        try {
+          const infoRes = await fetch(`/api/draft-tokens/info?token=${encodeURIComponent(token!)}`, {
+            cache: "no-store",
+          });
+          if (infoRes.ok) {
+            const info = await infoRes.json();
+            draftEmail = info.email || "";
+          }
+        } catch {}
+
+        const returnTo = `/resume?token=${encodeURIComponent(token!)}`;
+        const emailParam = draftEmail ? `&email=${encodeURIComponent(draftEmail)}` : "";
+
+        const { data: existsData } = draftEmail
+          ? await supabase.auth.signInWithOtp({ email: draftEmail, options: { shouldCreateUser: false } }).catch(() => ({ data: null }))
+          : { data: null };
+
+        const userExists = !!existsData;
+
+        if (cancelled) return;
+
+        if (draftEmail && !userExists) {
+          setState({ status: "redirecting-signup" });
+          router.push(`/signup?returnTo=${encodeURIComponent(returnTo)}${emailParam}&persona=homeowner`);
+        } else {
+          setState({ status: "redirecting-login" });
+          router.push(`/login?returnTo=${encodeURIComponent(returnTo)}${emailParam}`);
+        }
         return;
       }
 
@@ -151,6 +180,18 @@ function ResumeContent() {
         </div>
       )}
 
+      {state.status === "redirecting-signup" && (
+        <div>
+          <h1 style={{ fontSize: "1.5rem", fontWeight: 700 }}>
+            Create Your Account
+          </h1>
+          <p style={{ color: "#666", marginTop: 8 }}>
+            Redirecting you to create an account. Your scenario will be ready
+            after registration.
+          </p>
+        </div>
+      )}
+
       {state.status === "redeeming" && (
         <div>
           <h1 style={{ fontSize: "1.5rem", fontWeight: 700 }}>
@@ -193,7 +234,7 @@ function ResumeContent() {
               <p style={{ margin: 0, fontSize: "0.875rem", color: "#92400e" }}>
                 Your session has expired or you are not signed in.{" "}
                 <a
-                  href="/login?returnTo=/resume"
+                  href={`/login?returnTo=${encodeURIComponent(`/resume?token=${token}`)}`}
                   style={{ color: "#92400e", fontWeight: 600 }}
                 >
                   Sign in to continue.

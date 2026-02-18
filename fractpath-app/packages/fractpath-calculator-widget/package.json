@@ -1,0 +1,23 @@
+{
+  "name": "fractpath-calculator-widget",
+  "version": "0.9.0",
+  "description": "FractPath scenario calculator — pure compute engine",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "test": "npx tsx src/__tests__/compute.test.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "sideEffects": false,
+  "license": "UNLICENSED"
+}

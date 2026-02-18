@@ -36,6 +36,8 @@ export default async function SignupPage({ searchParams }: Props) {
   const error = getParam(sp, "error");
   const personaParam = getParam(sp, "persona")?.toLowerCase() ?? null;
   const prefilledPersona = isValidPersona(personaParam) ? personaParam : null;
+  const prefilledEmail = getParam(sp, "email") ?? "";
+  const returnTo = getParam(sp, "returnTo") ?? "";
 
   return (
     <main style={{ maxWidth: 560, margin: "40px auto", padding: "0 16px" }}>
@@ -66,6 +68,7 @@ export default async function SignupPage({ searchParams }: Props) {
         gap: 12,
       }}>
         <form method="post" action="/auth/signup" style={{ display: "grid", gap: 10 }}>
+          {returnTo && <input type="hidden" name="returnTo" value={returnTo} />}
           <label style={{ display: "grid", gap: 6 }}>
             <span style={{ fontWeight: 600 }}>Email</span>
             <input
@@ -74,6 +77,7 @@ export default async function SignupPage({ searchParams }: Props) {
               required
               placeholder="you@example.com"
               autoComplete="email"
+              defaultValue={prefilledEmail}
               style={{
                 padding: "10px 12px",
                 borderRadius: 10,
@@ -142,7 +146,10 @@ export default async function SignupPage({ searchParams }: Props) {
         </form>
 
         <p style={{ margin: "4px 0 0", fontSize: 13, opacity: 0.75 }}>
-          Already have an account? <a href="/login">Log in</a>
+          Already have an account?{" "}
+          <a href={`/login${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ""}${prefilledEmail ? `${returnTo ? "&" : "?"}email=${encodeURIComponent(prefilledEmail)}` : ""}`}>
+            Log in
+          </a>
         </p>
 
         <p style={{ margin: "8px 0 0", fontSize: 11, opacity: 0.5 }}>

@@ -1,4 +1,3 @@
-// src/app/login/page.tsx
 export default async function LoginPage({
   searchParams,
 }: {
@@ -10,6 +9,9 @@ export default async function LoginPage({
   const rtRaw = sp?.returnTo;
   const returnTo = Array.isArray(rtRaw) ? rtRaw[0] || "" : rtRaw || "";
   const safeReturnTo = typeof returnTo === "string" ? returnTo : "";
+
+  const emailRaw = sp?.email;
+  const prefilledEmail = typeof emailRaw === "string" ? emailRaw : Array.isArray(emailRaw) ? emailRaw[0] || "" : "";
 
   return (
     <main style={{ maxWidth: 420, margin: "48px auto", padding: 16 }}>
@@ -25,6 +27,7 @@ export default async function LoginPage({
           type="email"
           autoComplete="email"
           required
+          defaultValue={prefilledEmail}
           style={{
             width: "100%",
             padding: 10,
@@ -63,6 +66,13 @@ export default async function LoginPage({
           Sign in
         </button>
       </form>
+
+      <p style={{ marginTop: 16, fontSize: 13, opacity: 0.75 }}>
+        Don't have an account?{" "}
+        <a href={`/signup${safeReturnTo ? `?returnTo=${encodeURIComponent(safeReturnTo)}` : ""}${prefilledEmail ? `${safeReturnTo ? "&" : "?"}email=${encodeURIComponent(prefilledEmail)}` : ""}`}>
+          Create one
+        </a>
+      </p>
     </main>
   );
 }

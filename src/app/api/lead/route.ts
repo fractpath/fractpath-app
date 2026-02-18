@@ -36,6 +36,10 @@ function canonicalHash(obj: unknown): string {
   return createHash("sha256").update(json).digest("hex");
 }
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === "object" && !Array.isArray(v);
+}
+
 function isUniqueViolation(err: any): boolean {
   if (err?.code === "23505") return true;
   const msg = String(err?.message ?? "");
@@ -55,6 +59,27 @@ function isRateLimited(ip: string): boolean {
   }
   entry.count += 1;
   return entry.count > RATE_LIMIT_MAX;
+}
+
+function hasCanonicalShape(obj: unknown): boolean {
+  if (!isRecord(obj)) return false;
+  return isRecord((obj as any).deal_terms) && typeof (obj as any).schema_version === "string";
+}
+
+function extractCanonicalSnapshot(body: Record<string, unknown>): Record<string, unknown> | null {
+  if (isRecord(body.draftSnapshot) && hasCanonicalShape(body.draftSnapshot)) {
+    return body.draftSnapshot as Record<string, unknown>;
+  }
+  if (isRecord(body.canonicalSnapshot) && hasCanonicalShape(body.canonicalSnapshot)) {
+    return body.canonicalSnapshot as Record<string, unknown>;
+  }
+  if (isRecord(body.snapshot) && hasCanonicalShape(body.snapshot)) {
+    return body.snapshot as Record<string, unknown>;
+  }
+  if (hasCanonicalShape(body)) {
+    return body;
+  }
+  return null;
 }
 
 export async function POST(request: NextRequest) {
@@ -78,37 +103,68 @@ export async function POST(request: NextRequest) {
     return jsonError("Request body must be a JSON object", 400);
   }
 
-  const email = body.email;
-  if (typeof email !== "string" || email.trim().length === 0) {
+  const email = typeof body.email === "string" ? body.email.trim() : "";
+  if (email.length === 0) {
     return jsonError("email is required", 400);
   }
 
-  const inputs: Record<string, unknown> = {
-    email: email.trim(),
-    home_address: typeof body.home_address === "string" ? body.home_address : "",
-    equity_owned: typeof body.equity_owned === "number" ? body.equity_owned : 0,
-    funding_method: typeof body.funding_method === "string" ? body.funding_method : "exploring",
-    sale_timeline: typeof body.sale_timeline === "string" ? body.sale_timeline : "exploring",
-  };
+  const canonical = extractCanonicalSnapshot(body);
 
-  const result: Record<string, unknown> = {
-    status: "draft",
-    source: "marketing_lead",
-    captured_at: new Date().toISOString(),
-  };
+  let snapshotJson: Record<string, unknown>;
+  let contractVersion: string;
+  let schemaVersion: string;
 
-  const inputs_hash = canonicalHash(inputs);
-  const result_hash = canonicalHash(result);
+  if (canonical) {
+    snapshotJson = { ...canonical };
 
-  const snapshotJson: Record<string, unknown> = {
-    schema_version: "1",
-    engine_version: "marketing-lead-v1",
-    calculator_schema_version: "marketing-lead-v1",
-    inputs,
-    result,
-    inputs_hash,
-    result_hash,
-  };
+    if (!snapshotJson.email && email) {
+      snapshotJson.email = email;
+    }
+    if (!snapshotJson.persona && typeof body.persona === "string") {
+      snapshotJson.persona = body.persona;
+    }
+
+    contractVersion =
+      (typeof snapshotJson.contract_version === "string" && snapshotJson.contract_version) ||
+      (typeof snapshotJson.compute_version === "string" && snapshotJson.compute_version) ||
+      (typeof snapshotJson.engine_version === "string" && snapshotJson.engine_version) ||
+      "10.1.0";
+
+    schemaVersion =
+      typeof snapshotJson.schema_version === "string" && snapshotJson.schema_version.trim().length > 0
+        ? snapshotJson.schema_version
+        : "1";
+  } else {
+    const inputs: Record<string, unknown> = {
+      email,
+      home_address: typeof body.home_address === "string" ? body.home_address : "",
+      equity_owned: typeof body.equity_owned === "number" ? body.equity_owned : 0,
+      funding_method: typeof body.funding_method === "string" ? body.funding_method : "exploring",
+      sale_timeline: typeof body.sale_timeline === "string" ? body.sale_timeline : "exploring",
+    };
+
+    const result: Record<string, unknown> = {
+      status: "draft",
+      source: "marketing_lead",
+      captured_at: new Date().toISOString(),
+    };
+
+    const inputs_hash = canonicalHash(inputs);
+    const result_hash = canonicalHash(result);
+
+    snapshotJson = {
+      schema_version: "1",
+      engine_version: "marketing-lead-v1",
+      calculator_schema_version: "marketing-lead-v1",
+      inputs,
+      result,
+      inputs_hash,
+      result_hash,
+    };
+
+    contractVersion = "marketing-lead-v1";
+    schemaVersion = "1";
+  }
 
   const service = createServiceClient();
 
@@ -123,8 +179,8 @@ export async function POST(request: NextRequest) {
       .insert({
         token,
         snapshot_json: snapshotJson,
-        contract_version: "marketing-lead-v1",
-        schema_version: "1",
+        contract_version: contractVersion,
+        schema_version: schemaVersion,
         expires_at: expiresAt.toISOString(),
         source: "marketing",
       })
