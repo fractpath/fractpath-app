@@ -4,7 +4,6 @@ import { createServiceClient } from "@/lib/supabase/service";
 
 import { validateDraftSnapshotV1 } from "@/lib/draftSnapshot";
 import { mapDraftToDealSnapshot } from "@/lib/draftToDealSnapshot";
-import { validateFullDealSnapshotV1 } from "@/lib/dealSnapshot";
 import { insertDealSnapshot } from "@/lib/dealSnapshotDb";
 import { computeDeal } from "@/lib/computeAdapter";
 
@@ -22,115 +21,47 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
 
-// Normalize wrapper drift without weakening validation.
-// We validate ONLY the DraftSnapshot shape; we do not trust any inbound canonical blobs.
-// However: if a canonicalSnapshot is present, we normalize + validate it as a FullDealSnapshotV1
-// and ingest it verbatim (no recompute).
-function pickDraftSnapshotPayload(raw: unknown): {
-  draftSnapshot: Record<string, unknown> | null;
-  canonicalSnapshot: unknown | null;
-  pickedFrom: "root" | "draftSnapshot" | "snapshot" | "draft" | "unknown";
-} {
-  if (!isRecord(raw)) {
-    return {
-      draftSnapshot: null,
-      canonicalSnapshot: null,
-      pickedFrom: "unknown",
-    };
-  }
+type SnapshotShape = "canonical" | "legacy" | "unknown";
 
-  const canonicalSnapshot =
-    (raw as any).canonicalSnapshot ?? (raw as any).canonical_snapshot ?? null;
-
-  // Most likely drift: { draftSnapshot: {...}, canonicalSnapshot: {...} }
-  if (isRecord((raw as any).draftSnapshot)) {
-    return {
-      draftSnapshot: (raw as any).draftSnapshot as Record<string, unknown>,
-      canonicalSnapshot,
-      pickedFrom: "draftSnapshot",
-    };
-  }
-
-  // Other possible wrappers
-  if (isRecord((raw as any).snapshot)) {
-    return {
-      draftSnapshot: (raw as any).snapshot as Record<string, unknown>,
-      canonicalSnapshot,
-      pickedFrom: "snapshot",
-    };
-  }
-
-  if (isRecord((raw as any).draft)) {
-    return {
-      draftSnapshot: (raw as any).draft as Record<string, unknown>,
-      canonicalSnapshot,
-      pickedFrom: "draft",
-    };
-  }
-
-  // Otherwise assume the root itself is the DraftSnapshot (legacy / direct write)
-  return { draftSnapshot: raw, canonicalSnapshot, pickedFrom: "root" };
+function detectSnapshotShape(payload: unknown): SnapshotShape {
+  if (!isRecord(payload)) return "unknown";
+  if (isRecord((payload as any).deal_terms)) return "canonical";
+  if (isRecord((payload as any).inputs)) return "legacy";
+  return "unknown";
 }
 
-function normalizeCanonicalSnapshotForApp(
-  raw: unknown,
-  userId: string,
-): unknown {
-  // If already valid FullDealSnapshotV1, accept as-is (no recompute).
-  const already = validateFullDealSnapshotV1(raw);
-  if (already.ok) return already.snapshot;
+function unwrapSnapshotPayload(raw: unknown): Record<string, unknown> | null {
+  if (!isRecord(raw)) return null;
 
-  // Otherwise treat as marketing-shaped snapshot:
-  // { contract_version/compute_version, schema_version, now_iso, deal_terms, assumptions, results }
-  if (!isRecord(raw)) return raw;
+  for (const key of [
+    "canonicalSnapshot",
+    "canonical_snapshot",
+    "draftSnapshot",
+    "snapshot",
+    "draft",
+  ] as const) {
+    if (isRecord((raw as any)[key])) {
+      return (raw as any)[key] as Record<string, unknown>;
+    }
+  }
 
-  const computeVersion =
-    (typeof (raw as any).compute_version === "string" &&
-      (raw as any).compute_version) ||
-    (typeof (raw as any).contract_version === "string" &&
-      (raw as any).contract_version) ||
-    undefined;
+  return raw;
+}
 
-  const schemaVersion =
-    (typeof (raw as any).schema_version === "string" &&
-      (raw as any).schema_version) ||
-    "1";
+function extractCanonicalInputs(
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  const dealTerms = isRecord(payload.deal_terms)
+    ? (payload.deal_terms as Record<string, unknown>)
+    : {};
 
-  const dealTerms = isRecord((raw as any).deal_terms)
-    ? ((raw as any).deal_terms as Record<string, unknown>)
-    : null;
-
-  const scenarioRaw = isRecord((raw as any).assumptions)
-    ? ((raw as any).assumptions as Record<string, unknown>)
-    : isRecord((raw as any).scenario)
-      ? ((raw as any).scenario as Record<string, unknown>)
+  const scenario = isRecord(payload.assumptions)
+    ? (payload.assumptions as Record<string, unknown>)
+    : isRecord(payload.scenario)
+      ? (payload.scenario as Record<string, unknown>)
       : {};
 
-  const results = isRecord((raw as any).results)
-    ? ((raw as any).results as Record<string, unknown>)
-    : null;
-
-  if (!computeVersion || !dealTerms || !results) return raw;
-
-  const canonicalInputs = ensureScenario({
-    deal_terms: dealTerms,
-    scenario: scenarioRaw,
-  });
-
-  const computedAt =
-    (typeof (raw as any).computed_at === "string" &&
-      (raw as any).computed_at) ||
-    (typeof (raw as any).now_iso === "string" && (raw as any).now_iso) ||
-    new Date().toISOString();
-
-  return {
-    schema_version: schemaVersion,
-    compute_version: computeVersion,
-    inputs: canonicalInputs,
-    outputs: { results },
-    computed_at: computedAt,
-    computed_by: userId,
-  };
+  return { deal_terms: dealTerms, scenario };
 }
 
 export async function POST(request: NextRequest) {
@@ -174,7 +105,6 @@ export async function POST(request: NextRequest) {
     return jsonError("Token has expired", 410);
   }
 
-  // If already redeemed, return the previously-created deal if we can find it.
   if (draft.redeemed_at || draft.redeemed_by_user_id) {
     const { data: existingDeal } = await (service.from("deals") as any)
       .select("id")
@@ -196,30 +126,31 @@ export async function POST(request: NextRequest) {
   }
 
   const rawSnapshotJson = draft.snapshot_json;
+  const unwrapped = unwrapSnapshotPayload(rawSnapshotJson);
 
-  const picked = pickDraftSnapshotPayload(rawSnapshotJson);
-  if (!picked.draftSnapshot) {
+  if (!unwrapped) {
     return jsonError("Draft snapshot payload is invalid", 422);
   }
 
-  // PATH A: ingest canonicalSnapshot verbatim (no recompute), after normalization + validation
-  // PATH B: fall back to draftSnapshot -> map -> ensureScenario -> compute
-  let fullSnapshot: any;
+  const shape = detectSnapshotShape(unwrapped);
 
-  if (picked.canonicalSnapshot) {
-    const normalized = normalizeCanonicalSnapshotForApp(
-      picked.canonicalSnapshot,
-      user.id,
-    );
+  let canonicalInputs: Record<string, unknown>;
 
-    const v = validateFullDealSnapshotV1(normalized);
-    if (!v.ok) {
-      return jsonError(`Draft canonicalSnapshot invalid: ${v.error}`, 400);
+  if (shape === "canonical") {
+    if (
+      typeof unwrapped.schema_version !== "string" ||
+      (unwrapped.schema_version as string).trim().length === 0
+    ) {
+      return jsonError(
+        "Canonical snapshot missing required schema_version",
+        422,
+      );
     }
 
-    fullSnapshot = v.snapshot;
-  } else {
-    const draftValidation = validateDraftSnapshotV1(picked.draftSnapshot);
+    const extracted = extractCanonicalInputs(unwrapped);
+    canonicalInputs = ensureScenario(extracted);
+  } else if (shape === "legacy") {
+    const draftValidation = validateDraftSnapshotV1(unwrapped);
     if (!draftValidation.ok) {
       return jsonError(
         `Draft payload invalid for compute: ${draftValidation.error}`,
@@ -229,7 +160,7 @@ export async function POST(request: NextRequest) {
 
     const mapped = mapDraftToDealSnapshot(draftValidation.snapshot as any);
 
-    const canonicalInputs = ensureScenario(
+    canonicalInputs = ensureScenario(
       isRecord(mapped) && isRecord((mapped as any).inputs)
         ? ((mapped as any).inputs as Record<string, unknown>)
         : {
@@ -237,25 +168,30 @@ export async function POST(request: NextRequest) {
             scenario: getDefaultScenario(),
           },
     );
-
-    const computeResult = await computeDeal(canonicalInputs);
-
-    if (!computeResult.ok) {
-      return jsonError(`Compute failed: ${computeResult.error}`, 422);
-    }
-
-    const { compute_version, results } = computeResult.result;
-    const computedAt = new Date().toISOString();
-
-    fullSnapshot = {
-      schema_version: "1",
-      inputs: canonicalInputs,
-      outputs: { results },
-      compute_version,
-      computed_at: computedAt,
-      computed_by: user.id,
-    };
+  } else {
+    return jsonError(
+      "Unrecognized snapshot format: expected deal_terms (canonical) or inputs (legacy)",
+      422,
+    );
   }
+
+  const computeResult = await computeDeal(canonicalInputs);
+
+  if (!computeResult.ok) {
+    return jsonError(`Compute failed: ${computeResult.error}`, 422);
+  }
+
+  const { compute_version, results } = computeResult.result;
+  const computedAt = new Date().toISOString();
+
+  const fullSnapshot = {
+    schema_version: "1",
+    inputs: canonicalInputs,
+    outputs: { results },
+    compute_version,
+    computed_at: computedAt,
+    computed_by: user.id,
+  };
 
   const { data: newDeal, error: dealInsertError } = await (
     service.from("deals") as any
@@ -313,10 +249,11 @@ export async function POST(request: NextRequest) {
         event_type: "DEAL_SNAPSHOT_COMPUTED",
         payload: {
           snapshot_id: snapInsert.id,
-          compute_version: (fullSnapshot as any)?.compute_version,
-          computed_at: (fullSnapshot as any)?.computed_at,
+          compute_version,
+          computed_at: computedAt,
           source: "resume",
           draft_token_id: draft.id,
+          snapshot_shape: shape,
         },
         created_by: user.id,
       });

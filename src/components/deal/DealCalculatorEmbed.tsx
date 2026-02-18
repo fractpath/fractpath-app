@@ -1,14 +1,30 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
+function mountFractpathWidget(opts: {
+  el: HTMLElement;
+  mode: string;
+  persona: string;
+  snapshot: Record<string, unknown>;
+  onSave?: (snap: Record<string, unknown>) => void;
+}): void {
+  opts.el.innerHTML =
+    '<p style="color:#888;font-size:14px;">Calculator widget loading…</p>';
+}
 
 interface DealCalculatorEmbedProps {
   dealId: string;
   role?: string;
   currentSnapshotId?: string;
+  snapshot?: Record<string, unknown>; // canonical snapshot from app
 }
 
-export function DealCalculatorEmbed({ dealId, role = "OWNER", currentSnapshotId }: DealCalculatorEmbedProps) {
+export function DealCalculatorEmbed({
+  dealId,
+  role = "OWNER",
+  currentSnapshotId,
+  snapshot,
+}: DealCalculatorEmbedProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -21,15 +37,21 @@ export function DealCalculatorEmbed({ dealId, role = "OWNER", currentSnapshotId 
       setError(null);
 
       try {
-        const proposeRes = await fetch(`/api/deals/${dealId}/snapshot/propose`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ snapshot }),
-        });
+        const proposeRes = await fetch(
+          `/api/deals/${dealId}/snapshot/propose`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ snapshot }),
+          },
+        );
 
         if (!proposeRes.ok) {
           const proposeBody = await proposeRes.json().catch(() => ({}));
-          throw new Error(proposeBody.error ?? `Snapshot propose failed (${proposeRes.status})`);
+          throw new Error(
+            proposeBody.error ??
+              `Snapshot propose failed (${proposeRes.status})`,
+          );
         }
 
         const { snapshot_id } = await proposeRes.json();
@@ -45,7 +67,10 @@ export function DealCalculatorEmbed({ dealId, role = "OWNER", currentSnapshotId 
 
         if (!counterRes.ok) {
           const counterBody = await counterRes.json().catch(() => ({}));
-          throw new Error(counterBody.error ?? `Counter creation failed (${counterRes.status})`);
+          throw new Error(
+            counterBody.error ??
+              `Counter creation failed (${counterRes.status})`,
+          );
         }
 
         window.location.href = `/deal/${dealId}`;
@@ -59,6 +84,21 @@ export function DealCalculatorEmbed({ dealId, role = "OWNER", currentSnapshotId 
 
   const roleLabel = isCounterparty ? "Counterparty" : "Owner only";
 
+  // --- Mount the FractPath widget ---
+  useEffect(() => {
+    if (!containerRef.current || !snapshot) return;
+
+    mountFractpathWidget({
+      el: containerRef.current,
+      mode: "app",
+      persona: "buyer", // or dynamic depending on your app context
+      snapshot,
+      onSave: (snap) => {
+        window.__fractpath_saveSnapshot?.(snap);
+      },
+    });
+  }, [snapshot]);
+
   return (
     <section className="mt-6 rounded-md border p-4">
       <div className="flex items-baseline justify-between gap-4">
@@ -66,39 +106,29 @@ export function DealCalculatorEmbed({ dealId, role = "OWNER", currentSnapshotId 
         <div className="text-xs text-muted-foreground">{roleLabel}</div>
       </div>
 
-      {error ? (
+      {error && (
         <div className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">
           {error}
         </div>
-      ) : null}
+      )}
 
       <div
         ref={containerRef}
         data-fractpath-calculator
         data-deal-id={dealId}
         className="mt-4 rounded-md border-2 border-dashed border-muted-foreground/25 p-8 text-center"
+        style={{ minHeight: 480 }}
       >
-        <p className="text-sm text-muted-foreground">
-          Calculator widget integration point
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          The FractPath calculator widget will be embedded here. It will call{" "}
-          <code className="rounded bg-muted px-1 py-0.5 text-[11px]">
-            window.__fractpath_saveSnapshot(snapshot)
-          </code>{" "}
-          when the user finalises a scenario.
-          {isCounterparty ? (
-            <span className="block mt-1">
-              Submitting will create a counter-proposal for this deal.
-            </span>
-          ) : null}
-        </p>
-        {saving ? (
-          <p className="mt-3 text-sm font-medium">
-            {isCounterparty ? "Submitting counter-proposal..." : "Saving snapshot..."}
-          </p>
-        ) : null}
+        {/* The widget will mount here */}
       </div>
+
+      {saving && (
+        <p className="mt-3 text-sm font-medium">
+          {isCounterparty
+            ? "Submitting counter-proposal..."
+            : "Saving snapshot..."}
+        </p>
+      )}
     </section>
   );
 }

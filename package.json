@@ -17,7 +17,6 @@
     "@supabase/auth-helpers-nextjs": "^0.15.0",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.93.3",
-    "fractpath-calculator-widget": "file:packages/fractpath-calculator-widget",
     "next": "16.1.6",
     "node-fetch": "^3.3.2",
     "react": "19.2.3",
