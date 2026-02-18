@@ -10,13 +10,25 @@ type RedeemState =
   | { status: "redirecting-login" }
   | { status: "redeeming" }
   | { status: "success"; dealId: string; redirectUrl: string }
-  | { status: "error"; message: string };
+  | {
+      status: "error";
+      message: string;
+      httpStatus?: number;
+      requestId?: string;
+      isAuth?: boolean;
+    };
+
+function extractToken(params: URLSearchParams): string | null {
+  return params.get("token") ?? params.get("resume_token") ?? params.get("t");
+}
 
 export default function ResumePage() {
   return (
     <Suspense
       fallback={
-        <main style={{ maxWidth: 480, margin: "80px auto", padding: "0 16px" }}>
+        <main
+          style={{ maxWidth: 480, margin: "80px auto", padding: "0 16px" }}
+        >
           <p>Loading...</p>
         </main>
       }
@@ -29,7 +41,7 @@ export default function ResumePage() {
 function ResumeContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const token = searchParams.get("token");
+  const token = extractToken(searchParams);
   const [state, setState] = useState<RedeemState>({ status: "loading" });
 
   useEffect(() => {
@@ -61,22 +73,30 @@ function ResumeContent() {
         const res = await fetch("/api/deals/resume", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          cache: "no-store",
           body: JSON.stringify({ token }),
         });
 
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
+        const requestId =
+          res.headers.get("x-request-id") ??
+          res.headers.get("x-amzn-requestid") ??
+          undefined;
 
         if (cancelled) return;
 
         if (!res.ok || !data.ok) {
+          const isAuth = res.status === 401;
           setState({
             status: "error",
             message: data.error || "Failed to resume scenario",
+            httpStatus: res.status,
+            requestId,
+            isAuth,
           });
           return;
         }
 
-        // clear token cookie once redeemed
         document.cookie =
           "fractpath_draft_token=;path=/;max-age=0;SameSite=Lax";
 
@@ -88,7 +108,6 @@ function ResumeContent() {
           redirectUrl,
         });
 
-        // Immediately navigate to the deal page
         router.replace(redirectUrl);
       } catch {
         if (!cancelled) {
@@ -108,7 +127,7 @@ function ResumeContent() {
 
   return (
     <main style={{ maxWidth: 480, margin: "80px auto", padding: "0 16px" }}>
-      {state.status === "loading" && <p>Loading...</p>}
+      {state.status === "loading" && <p>Resuming your deal…</p>}
 
       {state.status === "no-token" && (
         <div>
@@ -135,7 +154,7 @@ function ResumeContent() {
       {state.status === "redeeming" && (
         <div>
           <h1 style={{ fontSize: "1.5rem", fontWeight: 700 }}>
-            Setting Up Your Deal
+            Resuming your deal…
           </h1>
           <p style={{ color: "#666", marginTop: 8 }}>
             Loading your scenario and creating your deal workspace...
@@ -154,10 +173,53 @@ function ResumeContent() {
 
       {state.status === "error" && (
         <div>
-          <h1 style={{ fontSize: "1.5rem", fontWeight: 700, color: "#b91c1c" }}>
+          <h1
+            style={{ fontSize: "1.5rem", fontWeight: 700, color: "#b91c1c" }}
+          >
             Unable to Resume Scenario
           </h1>
           <p style={{ color: "#666", marginTop: 8 }}>{state.message}</p>
+
+          {state.isAuth && (
+            <div
+              style={{
+                marginTop: 16,
+                padding: "12px 16px",
+                background: "#fef3c7",
+                borderRadius: 6,
+                border: "1px solid #f59e0b",
+              }}
+            >
+              <p style={{ margin: 0, fontSize: "0.875rem", color: "#92400e" }}>
+                Your session has expired or you are not signed in.{" "}
+                <a
+                  href="/login?returnTo=/resume"
+                  style={{ color: "#92400e", fontWeight: 600 }}
+                >
+                  Sign in to continue.
+                </a>
+              </p>
+            </div>
+          )}
+
+          {(state.httpStatus || state.requestId) && (
+            <div
+              style={{
+                marginTop: 12,
+                padding: "8px 12px",
+                background: "#f3f4f6",
+                borderRadius: 4,
+                fontFamily: "monospace",
+                fontSize: "0.75rem",
+                color: "#6b7280",
+              }}
+            >
+              {state.httpStatus && <div>HTTP {state.httpStatus}</div>}
+              {state.message && <div>{state.message}</div>}
+              {state.requestId && <div>Request ID: {state.requestId}</div>}
+            </div>
+          )}
+
           <p style={{ color: "#999", marginTop: 16, fontSize: "0.875rem" }}>
             If you believe this is an error, please contact support with your
             token reference.
