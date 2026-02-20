@@ -60,12 +60,12 @@ FractPath is a Next.js application that utilizes API routes for backend logic an
 - No circular imports detected. No server-only imports in client components.
 
 **Calculator Widget Package (`packages/fractpath-calculator-widget`):**
-- Pure, deterministic compute engine — all economic logic lives here (single source of truth).
-- Exports `computeDeal(inputs)` → `{ terms_version, outputs: { summary, schedule[], settlements } }`.
-- Node-safe: no window/document dependencies. Runs server-side in API routes.
-- Types: `CalcInput`, `CalcOutput`, `Summary`, `ScheduleRow`, `SettlementCase`.
-- `terms_version`: `"fractpath-terms-v1.0"` — included in every snapshot.
-- Golden fixture tests lock 3 scenarios with exact outputs (13 tests total).
+- v1.0.0 built from official GitHub repo (SHA 3ed0ee2b). Contains both compute engine and production React UI components.
+- Exports React components: `DealSnapshotView` (read-only KPI strips, equity charts, tabbed detail views), `DealEditModal` (edit form with field validation and preview panels), `DealKpiStrip`, `EquityTransferChart`.
+- Exports utilities: `computeScenario`, `normalizeInputs`, `buildChartSeries`, `buildDraftSnapshot`, `buildFullDealSnapshotV1`, `deterministicHash`.
+- Types: `DraftCanonicalInputs`, `FullDealSnapshotV1`, `DraftSnapshot`, `CalculatorPersona`, `CalculatorMode`.
+- App-side `useDealDraftState` hook (`src/hooks/useDealDraftState.ts`) provides draft/errors/preview state management for DealEditModal (widget's internal hook is not exported).
+- `DealDetailWidgetPanel` imports `DealSnapshotView` and `DealEditModal` directly from this package.
 - Installed as local dependency: `"fractpath-calculator-widget": "file:packages/fractpath-calculator-widget"`.
 
 **Canonical Compute Package (`packages/compute` / `@fractpath/compute`):**
@@ -81,4 +81,4 @@ FractPath is a Next.js application that utilizes API routes for backend logic an
 - **Supabase:** Provides PostgreSQL database, authentication services, and Row Level Security (RLS).
 - **HubSpot:** Integrates for sales follow-up and scenario summary distribution.
 - **@fractpath/compute:** Local package providing canonical v10 compute engine (see above).
-- **fractpath-calculator-widget:** Legacy local package (underlying engine, wrapped by @fractpath/compute).
+- **fractpath-calculator-widget:** Local package providing production React UI components + compute engine (see above).
