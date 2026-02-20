@@ -64,7 +64,7 @@ function isRateLimited(ip: string): boolean {
 
 function hasCanonicalShape(obj: unknown): boolean {
   if (!isRecord(obj)) return false;
-  return isRecord((obj as any).deal_terms) && typeof (obj as any).schema_version === "string";
+  return isRecord((obj as any).deal_terms);
 }
 
 function extractCanonicalSnapshot(body: Record<string, unknown>): Record<string, unknown> | null {
@@ -116,6 +116,21 @@ export async function POST(request: NextRequest) {
   let schemaVersion: string;
 
   if (canonical) {
+    const sv = typeof canonical.schema_version === "string" ? (canonical.schema_version as string).trim() : "";
+    if (sv.length === 0) {
+      return jsonError(`Missing schema_version. Expected "${SCHEMA_VERSION}"`, 422);
+    }
+    if (sv !== SCHEMA_VERSION) {
+      return jsonError(`Unsupported schema_version "${sv}". Expected "${SCHEMA_VERSION}"`, 422);
+    }
+
+    const cv =
+      typeof canonical.contract_version === "string" ? (canonical.contract_version as string).trim() :
+      typeof canonical.compute_version === "string" ? (canonical.compute_version as string).trim() : "";
+    if (cv.length > 0 && cv !== CONTRACT_VERSION) {
+      return jsonError(`Unsupported contract_version "${cv}". Expected "${CONTRACT_VERSION}"`, 422);
+    }
+
     snapshotJson = { ...canonical };
 
     if (!snapshotJson.email && email) {
@@ -125,16 +140,8 @@ export async function POST(request: NextRequest) {
       snapshotJson.persona = body.persona;
     }
 
-    contractVersion =
-      (typeof snapshotJson.contract_version === "string" && snapshotJson.contract_version) ||
-      (typeof snapshotJson.compute_version === "string" && snapshotJson.compute_version) ||
-      (typeof snapshotJson.engine_version === "string" && snapshotJson.engine_version) ||
-      CONTRACT_VERSION;
-
-    schemaVersion =
-      typeof snapshotJson.schema_version === "string" && snapshotJson.schema_version.trim().length > 0
-        ? snapshotJson.schema_version
-        : SCHEMA_VERSION;
+    contractVersion = cv.length > 0 ? cv : CONTRACT_VERSION;
+    schemaVersion = sv;
   } else {
     const inputs: Record<string, unknown> = {
       email,
