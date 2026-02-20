@@ -46,6 +46,9 @@ FractPath is a Next.js application that utilizes API routes for backend logic an
 - **Compute Adapter:** `src/lib/computeAdapter.ts` — Imports `computeDeal` from `@fractpath/compute` (local package at `packages/compute`). Accepts `{ deal_terms, scenario }`, returns `{ ok, result: { compute_version, results } }`. Returns `COMPUTE_FAILED` on invalid inputs.
 - **Default Scenario:** `src/lib/defaultScenario.ts` — `getDefaultScenario()` provides baseline `deal_terms` and `scenario` for new deals. `ensureScenario()` defensively injects missing fields to prevent compute failures.
 - **Recompute Button:** `src/components/deal/RecomputeSnapshotButton.tsx` — Client component visible to OWNER on latest snapshot. Calls compute endpoint to regenerate snapshot with current inputs.
+- **Deal Snapshot View (APP-001):** `src/components/deal/DealSnapshotView.tsx` — Read-only display of canonical snapshot inputs (deal_terms, scenario) and computed results. Server-compatible component.
+- **Deal Edit Modal (APP-001):** `src/components/deal/DealEditModal.tsx` — Client component. Modal overlay with form fields for editing deal_terms + scenario. Local state only — does not live-update the read-only view while typing.
+- **Deal Detail Widget Panel (APP-001):** `src/components/deal/DealDetailWidgetPanel.tsx` — Client component. Wires DealSnapshotView + "Edit terms" button + DealEditModal. On save: POSTs to `/api/deals/[dealId]/snapshot/compute`, then calls `router.refresh()`. Edit gated to OWNER + non-realtor + latest snapshot only.
 - **Version Timeline Cards:** VERSION entries in the timeline render as styled cards with type-specific color badges (Offer=blue, Counter=purple, Accepted=green, Rejected=red), version number, note, timestamp, and compare link when both snapshots exist. SNAPSHOT and EVENT entries retain original rendering.
 
 **Performance & Stability (APP-085 verified):**
