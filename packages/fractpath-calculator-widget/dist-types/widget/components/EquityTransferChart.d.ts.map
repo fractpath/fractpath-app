@@ -1,0 +1,1 @@
+{"version":3,"file":"EquityTransferChart.d.ts","sourceRoot":"","sources":["../../../src/widget/components/EquityTransferChart.tsx"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,WAAW,EAAE,MAAM,oBAAoB,CAAC;AAEtD,MAAM,MAAM,wBAAwB,GAAG;IACrC,OAAO,EAAE,WAAW,CAAC;CACtB,CAAC;AAEF,wBAAgB,mBAAmB,CAAC,EAAE,OAAO,EAAE,EAAE,wBAAwB,2CAkCxE"}

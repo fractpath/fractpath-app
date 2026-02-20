@@ -1,0 +1,22 @@
+export { FractPathCalculatorWidget } from "../widget/FractPathCalculatorWidget.js";
+export { DealSnapshotView } from "../widget/components/DealSnapshotView.js";
+export { DealEditModal } from "../widget/components/DealEditModal.js";
+export { DealKpiStrip } from "../widget/components/DealKpiStrip.js";
+export { EquityTransferChart } from "../widget/components/EquityTransferChart.js";
+export type { DraftCanonicalInputs } from "../widget/editing/types.js";
+export { computeScenario, normalizeInputs } from "../calc/calc.js";
+export { buildChartSeries } from "../calc/chart.js";
+export { EquityChart } from "../components/EquityChart.js";
+export { buildDraftSnapshot, buildShareSummary, buildSavePayload, buildFullDealSnapshotV1, } from "../widget/snapshot.js";
+export { deterministicHash } from "../widget/hash.js";
+export { resolvePersonaPresentation } from "../widget/personaPresentation.js";
+export type { HeroSpec, ChipSpec, BarSpec, ChartSpec, PersonaPresentationResult, ValueFormat, } from "../widget/personaPresentation.js";
+export { MARKETING_PERSONAS } from "../widget/wired.js";
+export { getLabel, getSummaryOrder, getPersonaConfig } from "../widget/persona.js";
+export { FEE_DEFAULTS } from "../widget/editing/feeDefaults.js";
+export { useKioskInput } from "../widget/hooks/useKioskInput.js";
+export type { CalculatorPersona, CalculatorMode, DevAuthRole, FullDealSnapshotV1, DraftSnapshot, DraftSnapshotInputs, DraftSnapshotBasicResults, ShareSummary, ShareSummaryBasicResults, SavePayload, WidgetEvent, FractPathCalculatorWidgetProps, } from "../widget/types.js";
+export { CONTRACT_VERSION, SCHEMA_VERSION } from "../widget/types.js";
+export type { ScenarioInputs, ScenarioOutputs, SettlementResult, SettlementTiming, TimePoint, } from "../calc/types.js";
+export type { ChartPoint, SettlementMarker, ChartSeries, } from "../calc/chart.js";
+//# sourceMappingURL=index.d.ts.map

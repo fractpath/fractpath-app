@@ -1,0 +1,1 @@
+{"version":3,"file":"validateDraft.d.ts","sourceRoot":"","sources":["../../../src/widget/editing/validateDraft.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,oBAAoB,EAAE,WAAW,EAAE,MAAM,YAAY,CAAC;AAEpE,wBAAgB,aAAa,CAAC,KAAK,EAAE,oBAAoB,GAAG,WAAW,CAyCtE;AAED,wBAAgB,SAAS,CAAC,MAAM,EAAE,WAAW,GAAG,OAAO,CAEtD"}

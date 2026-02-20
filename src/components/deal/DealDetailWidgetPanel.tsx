@@ -2,8 +2,12 @@
 
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { DealSnapshotView } from "./DealSnapshotView";
-import { DealEditModal } from "./DealEditModal";
+import {
+  DealSnapshotView,
+  DealEditModal,
+} from "fractpath-calculator-widget";
+import type { DealTerms, ScenarioAssumptions, DealResults } from "@fractpath/compute";
+import { useDealDraftState } from "@/hooks/useDealDraftState";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -13,6 +17,7 @@ type DealDetailWidgetPanelProps = {
   results: AnyRecord | null;
   computeVersion?: string | null;
   canEdit: boolean;
+  persona?: string;
 };
 
 export function DealDetailWidgetPanel({
@@ -21,14 +26,22 @@ export function DealDetailWidgetPanel({
   results,
   computeVersion,
   canEdit,
+  persona = "homeowner",
 }: DealDetailWidgetPanelProps) {
   const router = useRouter();
   const [isEditOpen, setEditOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const typedInputs = inputs as { deal_terms: DealTerms; scenario: ScenarioAssumptions } | null;
+  const typedResults = results as DealResults | null;
+
+  const draftState = useDealDraftState(
+    typedInputs ? { deal_terms: typedInputs.deal_terms, scenario: typedInputs.scenario } : undefined,
+  );
+
   const handleSave = useCallback(
-    async (nextInputs: { deal_terms: AnyRecord; scenario: AnyRecord }) => {
+    async (draft: { deal_terms: DealTerms; scenario: ScenarioAssumptions }) => {
       setSaving(true);
       setError(null);
 
@@ -36,7 +49,7 @@ export function DealDetailWidgetPanel({
         const res = await fetch(`/api/deals/${dealId}/snapshot/compute`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ inputs: nextInputs }),
+          body: JSON.stringify({ inputs: draft }),
         });
 
         const body = await res.json().catch(() => ({ ok: false, error: "Invalid response" }));
@@ -58,8 +71,7 @@ export function DealDetailWidgetPanel({
     [dealId, router],
   );
 
-  const dealTerms = (inputs?.deal_terms ?? {}) as AnyRecord;
-  const scenario = (inputs?.scenario ?? {}) as AnyRecord;
+  const hasSnapshot = !!(typedInputs && typedResults);
 
   return (
     <section className="mt-6">
@@ -82,15 +94,29 @@ export function DealDetailWidgetPanel({
         </div>
       ) : null}
 
-      <DealSnapshotView inputs={inputs} results={results} computeVersion={computeVersion} />
+      {hasSnapshot ? (
+        <DealSnapshotView
+          persona={persona as any}
+          inputs={typedInputs}
+          results={typedResults}
+        />
+      ) : (
+        <div className="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-950">
+          <p className="text-sm text-gray-500 dark:text-gray-400">No snapshot data available.</p>
+        </div>
+      )}
 
-      {canEdit ? (
+      {canEdit && isEditOpen ? (
         <DealEditModal
-          isOpen={isEditOpen}
+          draft={draftState.draft}
+          errors={draftState.errors}
+          preview={draftState.preview}
+          persona={persona as any}
+          permissions={{ canEdit: true }}
+          setField={draftState.setField}
+          onBlurCompute={draftState.onBlurCompute}
+          onSave={(draft) => handleSave(draft)}
           onClose={() => { if (!saving) setEditOpen(false); }}
-          initialInputs={{ deal_terms: dealTerms, scenario }}
-          onSave={handleSave}
-          saving={saving}
         />
       ) : null}
     </section>

@@ -294,6 +294,7 @@ export default async function DealPage({ params, searchParams }: PageProps) {
         results={snapshotResults}
         computeVersion={snapshotComputeVersion}
         canEdit={canEdit && isLatest}
+        persona={userPersona}
       />
 
       <DealSnapshotBridge

@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>FractPath Widget Host Test</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body {
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+        padding: 24px;
+      }
+      #fractpath-calculator {
+        border: 1px solid #ddd;
+        padding: 16px;
+        border-radius: 12px;
+      }
+      button { margin-right: 8px; }
+    </style>
+  </head>
+  <body>
+    <h1>Widget Host Test</h1>
+
+    <div id="fractpath-calculator">Loading widget…</div>
+
+    <script src="./fractpath-calculator.js"></script>
+
+<p style="margin-top:16px;">
+  <button onclick='document.getElementById("fp-debug").textContent="Debug: clicked Buyer"; window.FractPathCalculator?.setPersona("Buyer")'>Buyer</button>
+  <button onclick='document.getElementById("fp-debug").textContent="Debug: clicked Homeowner"; window.FractPathCalculator?.setPersona("Homeowner")'>Homeowner</button>
+  <button onclick='document.getElementById("fp-debug").textContent="Debug: clicked Realtor"; window.FractPathCalculator?.setPersona("Realtor")'>Realtor</button>
+</p>
+
+    <p id="fp-debug" style="margin-top:12px; font-size:12px; color:#555;">
+  Debug: not initialized
+</p>
+
+<script>
+  (function () {
+    const el = document.getElementById("fp-debug");
+    function update() {
+      const api = window.FractPathCalculator;
+      el.textContent =
+        "Debug: FractPathCalculator=" +
+        (api ? "present" : "missing");
+    }
+    update();
+    setInterval(update, 1000);
+  })();
+</script>
+
+  </body>
+</html>

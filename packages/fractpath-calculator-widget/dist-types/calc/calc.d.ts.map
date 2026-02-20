@@ -1,0 +1,1 @@
+{"version":3,"file":"calc.d.ts","sourceRoot":"","sources":["../../src/calc/calc.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EACV,cAAc,EACd,eAAe,EAIhB,MAAM,YAAY,CAAC;AAOpB;;;;GAIG;AACH,wBAAgB,eAAe,CAAC,OAAO,EAAE,OAAO,CAAC,cAAc,CAAC,GAAG,cAAc,CAkBhF;AAyID;;;GAGG;AACH,wBAAgB,eAAe,CAAC,aAAa,GAAE,OAAO,CAAC,cAAc,CAAM,GAAG,eAAe,CAqB5F"}
