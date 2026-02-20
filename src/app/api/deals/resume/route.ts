@@ -28,7 +28,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 
 import { insertDealSnapshot } from "@/lib/dealSnapshotDb";
 import { computeDeal } from "@/lib/computeAdapter";
-import { SCHEMA_VERSION } from "@/lib/contractVersion";
+import { CONTRACT_VERSION, SCHEMA_VERSION } from "@/lib/contractVersion";
 
 import {
   ensureScenario,
@@ -233,13 +233,24 @@ export async function POST(request: NextRequest) {
 
     if (shape === "canonical") {
       // --- CANONICAL PATH (FullDealSnapshotV1) ---
-      // Validate schema_version exists
-      if (
-        typeof unwrapped.schema_version !== "string" ||
-        (unwrapped.schema_version as string).trim().length === 0
-      ) {
+
+      const sv = typeof unwrapped.schema_version === "string" ? unwrapped.schema_version.trim() : "";
+      if (sv.length === 0) {
+        return jsonError("Canonical snapshot missing required schema_version", 422);
+      }
+      if (sv !== SCHEMA_VERSION) {
         return jsonError(
-          "Canonical snapshot missing required schema_version",
+          `Unsupported schema_version "${sv}". Expected "${SCHEMA_VERSION}"`,
+          422,
+        );
+      }
+
+      const cv =
+        typeof unwrapped.contract_version === "string" ? unwrapped.contract_version.trim() :
+        typeof unwrapped.compute_version === "string" ? (unwrapped.compute_version as string).trim() : "";
+      if (cv.length > 0 && cv !== CONTRACT_VERSION) {
+        return jsonError(
+          `Unsupported contract_version "${cv}". Expected "${CONTRACT_VERSION}"`,
           422,
         );
       }
@@ -281,6 +292,7 @@ export async function POST(request: NextRequest) {
     // -----------------------------------------------------------------------
 
     const fullSnapshot = {
+      contract_version: CONTRACT_VERSION,
       schema_version: SCHEMA_VERSION,
       inputs: canonicalInputs,
       outputs: { results },
