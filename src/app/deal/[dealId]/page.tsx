@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ShareDealCard } from "@/components/ShareDealCard";
 import { DealSummary } from "@/components/deal/DealSummary";
 import { buildDealSummaryViewModel } from "@/lib/dealSummaryViewModel";
+import { DealDetailWidgetPanel } from "@/components/deal/DealDetailWidgetPanel";
 import { DealCalculatorEmbed } from "@/components/deal/DealCalculatorEmbed";
 import { RecomputeSnapshotButton } from "@/components/deal/RecomputeSnapshotButton";
 import { VersionTimelineCard } from "@/components/deal/VersionTimelineCard";
@@ -147,6 +148,11 @@ export default async function DealPage({ params, searchParams }: PageProps) {
 
   const readOnly = role === "VIEWER" || isSharedMode;
 
+  const userPersona =
+    (user.user_metadata?.role as string | undefined) ?? "homeowner";
+  const canEdit =
+    role === "OWNER" && !readOnly && userPersona !== "realtor";
+
   const snapshotsResult = await getDealSnapshots(supabase, dealId, 20);
   const snapshots = snapshotsResult.ok ? snapshotsResult.snapshots : [];
 
@@ -178,6 +184,10 @@ export default async function DealPage({ params, searchParams }: PageProps) {
 
   const display = extractSnapshotDisplay(effectiveSnapshotRow as any);
   const summaryVm = buildDealSummaryViewModel(display ?? {});
+
+  const snapshotInputs = display?.inputs ?? null;
+  const snapshotResults = display?.outputs ?? null;
+  const snapshotComputeVersion = display?.computeVersion ?? null;
 
   const [versionsResult, eventsResult] = await Promise.all([
     getDealVersions(supabase, dealId, 50),
@@ -277,6 +287,14 @@ export default async function DealPage({ params, searchParams }: PageProps) {
           <DealSummary vm={summaryVm} />
         </div>
       </section>
+
+      <DealDetailWidgetPanel
+        dealId={dealId}
+        inputs={snapshotInputs}
+        results={snapshotResults}
+        computeVersion={snapshotComputeVersion}
+        canEdit={canEdit && isLatest}
+      />
 
       <DealSnapshotBridge
         dealId={dealId}
@@ -427,6 +445,9 @@ export default async function DealPage({ params, searchParams }: PageProps) {
       ) : null}
 
       <div className="mt-6 flex gap-4">
+        <Link className="text-sm underline" href="/dashboard">
+          Back to Dashboard
+        </Link>
         <Link className="text-sm underline" href="/me">
           Back to my account
         </Link>
