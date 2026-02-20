@@ -48,7 +48,7 @@ describe("computeDeal", () => {
 
     it("includes compute_version", () => {
       expect(result.compute_version).toBe(COMPUTE_VERSION);
-      expect(result.compute_version).toBe("10.0.0");
+      expect(result.compute_version).toBe("10.2.0");
     });
 
     it("computes IBA correctly", () => {
@@ -151,7 +151,7 @@ describe("computeDeal", () => {
     });
 
     it("compute_version is 10.0.0", () => {
-      expect(result.compute_version).toBe("10.0.0");
+      expect(result.compute_version).toBe("10.2.0");
     });
   });
 

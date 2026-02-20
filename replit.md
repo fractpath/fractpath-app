@@ -66,8 +66,10 @@ FractPath is a Next.js application that utilizes API routes for backend logic an
 - Installed as local dependency: `"fractpath-calculator-widget": "file:packages/fractpath-calculator-widget"`.
 
 **Canonical Compute Package (`packages/compute` / `@fractpath/compute`):**
-- v10.0.0 canonical compute engine wrapping the widget package.
-- Exports `computeDeal(terms: DealTerms, scenario: ScenarioAssumptions)` → `DealResults` with `compute_version: "10.0.0"`.
+- v10.2.0 canonical compute engine wrapping the widget package.
+- Exports `computeDeal(terms: DealTerms, scenario: ScenarioAssumptions)` → `DealResults` with `compute_version: "10.2.0"`.
+- Single source of truth for version constants: `packages/compute/src/version.ts` exports `CONTRACT_VERSION` ("10.2.0"), `SCHEMA_VERSION` ("1"), `COMPUTE_VERSION` ("10.2.0"), `ENGINE_VERSION` ("10.2.0").
+- App re-exports these via `src/lib/contractVersion.ts` — all route files import from there.
 - All new compute flows use this package exclusively; legacy widget patterns purged from production code.
 - Sanity guards in view model: IRR clamped to |x| ≤ 1, multiples to 0-10x, all money fields must be finite.
 

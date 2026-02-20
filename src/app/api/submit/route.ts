@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { computeDeal } from "@/lib/computeAdapter";
 import { insertDealSnapshot } from "@/lib/dealSnapshotDb";
 import { ensureScenario } from "@/lib/defaultScenario";
+import { SCHEMA_VERSION } from "@/lib/contractVersion";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -70,7 +71,7 @@ export async function POST(req: NextRequest) {
 
   const fullSnapshot = {
     contract_version: compute_version,
-    schema_version: "1",
+    schema_version: SCHEMA_VERSION,
     inputs: canonicalInputs,
     outputs: { results },
     compute_version,

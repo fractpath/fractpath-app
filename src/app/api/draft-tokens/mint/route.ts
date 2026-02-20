@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { randomBytes } from "node:crypto";
+import { SCHEMA_VERSION } from "@/lib/contractVersion";
 
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
@@ -105,7 +106,7 @@ export async function POST(request: NextRequest) {
   const schemaVersion =
     typeof snapshotJson.schema_version === "string" && snapshotJson.schema_version.trim().length > 0
       ? snapshotJson.schema_version
-      : "1";
+      : SCHEMA_VERSION;
 
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);

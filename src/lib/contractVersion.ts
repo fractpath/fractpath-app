@@ -1,0 +1,1 @@
+export { CONTRACT_VERSION, SCHEMA_VERSION, COMPUTE_VERSION, ENGINE_VERSION } from "@fractpath/compute";

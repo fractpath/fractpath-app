@@ -28,6 +28,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 
 import { insertDealSnapshot } from "@/lib/dealSnapshotDb";
 import { computeDeal } from "@/lib/computeAdapter";
+import { SCHEMA_VERSION } from "@/lib/contractVersion";
 
 import {
   ensureScenario,
@@ -280,7 +281,7 @@ export async function POST(request: NextRequest) {
     // -----------------------------------------------------------------------
 
     const fullSnapshot = {
-      schema_version: "1",
+      schema_version: SCHEMA_VERSION,
       inputs: canonicalInputs,
       outputs: { results },
       compute_version,

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { createHash, randomBytes } from "node:crypto";
+import { CONTRACT_VERSION, SCHEMA_VERSION } from "@/lib/contractVersion";
 
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
@@ -128,12 +129,12 @@ export async function POST(request: NextRequest) {
       (typeof snapshotJson.contract_version === "string" && snapshotJson.contract_version) ||
       (typeof snapshotJson.compute_version === "string" && snapshotJson.compute_version) ||
       (typeof snapshotJson.engine_version === "string" && snapshotJson.engine_version) ||
-      "10.1.0";
+      CONTRACT_VERSION;
 
     schemaVersion =
       typeof snapshotJson.schema_version === "string" && snapshotJson.schema_version.trim().length > 0
         ? snapshotJson.schema_version
-        : "1";
+        : SCHEMA_VERSION;
   } else {
     const inputs: Record<string, unknown> = {
       email,
@@ -153,7 +154,7 @@ export async function POST(request: NextRequest) {
     const result_hash = canonicalHash(result);
 
     snapshotJson = {
-      schema_version: "1",
+      schema_version: SCHEMA_VERSION,
       engine_version: "marketing-lead-v1",
       calculator_schema_version: "marketing-lead-v1",
       inputs,
@@ -163,7 +164,7 @@ export async function POST(request: NextRequest) {
     };
 
     contractVersion = "marketing-lead-v1";
-    schemaVersion = "1";
+    schemaVersion = SCHEMA_VERSION;
   }
 
   const service = createServiceClient();
