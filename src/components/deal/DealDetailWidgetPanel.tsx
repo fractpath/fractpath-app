@@ -2,11 +2,12 @@
 
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import {
-  DealSnapshotView,
-  DealEditModal,
-} from "fractpath-calculator-widget";
-import type { DealTerms, ScenarioAssumptions, DealResults } from "@fractpath/compute";
+import { DealSnapshotView, DealEditModal } from "fractpath-calculator-widget";
+import type {
+  DealTerms,
+  ScenarioAssumptions,
+  DealResults,
+} from "@fractpath/compute";
 import { useDealDraftState } from "@/hooks/useDealDraftState";
 
 type AnyRecord = Record<string, unknown>;
@@ -33,11 +34,16 @@ export function DealDetailWidgetPanel({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const typedInputs = inputs as { deal_terms: DealTerms; scenario: ScenarioAssumptions } | null;
+  const typedInputs = inputs as {
+    deal_terms: DealTerms;
+    scenario: ScenarioAssumptions;
+  } | null;
   const typedResults = results as DealResults | null;
 
   const draftState = useDealDraftState(
-    typedInputs ? { deal_terms: typedInputs.deal_terms, scenario: typedInputs.scenario } : undefined,
+    typedInputs
+      ? { deal_terms: typedInputs.deal_terms, scenario: typedInputs.scenario }
+      : undefined,
   );
 
   const handleSave = useCallback(
@@ -52,7 +58,9 @@ export function DealDetailWidgetPanel({
           body: JSON.stringify({ inputs: draft }),
         });
 
-        const body = await res.json().catch(() => ({ ok: false, error: "Invalid response" }));
+        const body = await res
+          .json()
+          .catch(() => ({ ok: false, error: "Invalid response" }));
 
         if (!res.ok || body.ok === false) {
           setError(body.error ?? `Save failed (${res.status})`);
@@ -102,7 +110,9 @@ export function DealDetailWidgetPanel({
         />
       ) : (
         <div className="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-950">
-          <p className="text-sm text-gray-500 dark:text-gray-400">No snapshot data available.</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            No snapshot data available.
+          </p>
         </div>
       )}
 
@@ -114,9 +124,11 @@ export function DealDetailWidgetPanel({
           persona={persona as any}
           permissions={{ canEdit: true }}
           setField={draftState.setField}
-          onBlurCompute={draftState.onBlurCompute}
+          onBlurCompute={() => draftState.onBlurCompute(dealId)}
           onSave={(draft) => handleSave(draft)}
-          onClose={() => { if (!saving) setEditOpen(false); }}
+          onClose={() => {
+            if (!saving) setEditOpen(false);
+          }}
         />
       ) : null}
     </section>

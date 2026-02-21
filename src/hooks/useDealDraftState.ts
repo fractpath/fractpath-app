@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useMemo } from "react";
 import type { DealTerms, ScenarioAssumptions, DealResults } from "@fractpath/compute";
-import { computeDeal } from "@fractpath/compute";
+
 
 export interface DraftCanonicalInputs {
   deal_terms: DealTerms;
@@ -138,9 +138,9 @@ export function useDealDraftState(initial?: DraftCanonicalInputs) {
     });
   }, []);
 
-  const onBlurCompute = useCallback(() => {
-    setDraft((current) => {
-      const fieldErrors = validateDraft(current);
+  const onBlurCompute = useCallback(
+    async (dealId: string) => {
+      const fieldErrors = validateDraft(draft);
       setErrors(fieldErrors);
 
       if (hasErrors(fieldErrors)) {
@@ -149,18 +149,29 @@ export function useDealDraftState(initial?: DraftCanonicalInputs) {
           status: "error",
           error: "Validation failed",
         }));
-        return current;
+        return;
       }
 
       setPreview((p) => ({ ...p, status: "computing" }));
 
       try {
-        const results = computeDeal(current.deal_terms, current.scenario);
+        const res = await fetch(`/api/deals/${dealId}/snapshot/compute`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ inputs: draft }),
+        });
+
+        const json = await res.json();
+
+        if (!res.ok || !json?.ok) {
+          throw new Error(json?.error || `Compute failed (${res.status})`);
+        }
+
         setPreview({
-          tier1: deriveTier1Preview(current),
+          tier1: deriveTier1Preview(draft),
           status: "ok",
           lastComputedAtIso: new Date().toISOString(),
-          results,
+          results: json.results,
         });
       } catch (err) {
         setPreview((p) => ({
@@ -169,10 +180,9 @@ export function useDealDraftState(initial?: DraftCanonicalInputs) {
           error: err instanceof Error ? err.message : "Compute failed",
         }));
       }
-
-      return current;
-    });
-  }, []);
+    },
+    [draft],
+  );
 
   const tier1 = useMemo(() => deriveTier1Preview(draft), [draft]);
 
