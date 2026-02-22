@@ -189,6 +189,18 @@ export default async function DealPage({ params, searchParams }: PageProps) {
   const snapshotResults = display?.outputs ?? null;
   const snapshotComputeVersion = display?.computeVersion ?? null;
 
+    if (process.env.NODE_ENV !== "production") {
+      const r: any = snapshotResults ?? {};
+      console.log("[deal] snapshotResults keys:", Object.keys(r).slice(0, 40));
+      console.log("[deal] invested_capital_total:", r.invested_capital_total);
+      console.log("[deal] isa_settlement:", r.isa_settlement);
+      console.log("[deal] projected_fmv:", r.projected_fmv);
+      console.log("[deal] homeowner_equity_value:", r.homeowner_equity_value);
+      console.log("[deal] investor_equity_value:", r.investor_equity_value);
+      console.log("[deal] upfront_payment:", (snapshotInputs as any)?.deal_terms?.upfront_payment);
+      console.log("[deal] property_value:", (snapshotInputs as any)?.deal_terms?.property_value);
+    }
+
   const [versionsResult, eventsResult] = await Promise.all([
     getDealVersions(supabase, dealId, 50),
     getDealEvents(supabase, dealId, 50),

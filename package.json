@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@fractpath/compute": "file:packages/compute",
-    "fractpath-calculator-widget": "file:packages/fractpath-calculator-widget",
+    "fractpath-calculator-widget": "file:/home/runner/fractpath-calculator-widget-1.0.0.tgz",
     "@supabase/auth-helpers-nextjs": "^0.15.0",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.93.3",

@@ -50,7 +50,6 @@ function pickString(obj: AnyRecord, ...keys: string[]): string | null {
 }
 
 export function getDefaultScenario(): ScenarioAssumptions {
-  // Keep these “realistic but tame” so a brand-new deal always computes cleanly.
   return {
     annual_appreciation: 0.03,
     closing_cost_pct: 0.06,
@@ -58,10 +57,7 @@ export function getDefaultScenario(): ScenarioAssumptions {
   };
 }
 
-
 export function getDefaultDealTerms(): DealTerms {
-  // Important constraint: property_value must be > 0 for canonical compute (division in vesting).
-  // Keep monthly_payment / number_of_payments at 0 by default to avoid accidental “payment-plan” dynamics.
   return {
     property_value: 500000,
     upfront_payment: 50000,
@@ -103,6 +99,7 @@ export function getDefaultDealTerms(): DealTerms {
  * Non-goals:
  * - No math here.
  * - No silent schema drift: we only map a small, explicit alias set.
+ * - Realtor/widget-only fields are accepted but are NOT part of canonical DealTerms yet.
  */
 export function ensureScenario(inputs: unknown): CanonicalInputs {
   const defaults: CanonicalInputs = {
@@ -119,6 +116,7 @@ export function ensureScenario(inputs: unknown): CanonicalInputs {
     : isRecord(inObj.inputs) && isRecord((inObj.inputs as AnyRecord).deal_terms)
       ? ((inObj.inputs as AnyRecord).deal_terms as AnyRecord)
       : null;
+
   const rawScenario = isRecord(inObj.scenario)
     ? (inObj.scenario as AnyRecord)
     : isRecord(inObj.inputs) && isRecord((inObj.inputs as AnyRecord).scenario)
@@ -130,14 +128,10 @@ export function ensureScenario(inputs: unknown): CanonicalInputs {
   const dtSrc: AnyRecord =
     rawDealTerms ??
     (isRecord(inObj.deal_terms) ? (inObj.deal_terms as AnyRecord) : {});
+
   const scSrc: AnyRecord = rawScenario ?? {};
 
   // ---- DealTerms (v10) ----
-  // Legacy aliases we’ve seen:
-  // - home_value -> property_value
-  // - investment_amount -> upfront_payment
-  // - term_years -> contract_maturity_years
-  // You can extend this list, but keep it explicit.
   const property_value =
     pickNumber(dtSrc, "property_value", "home_value", "fmv", "homePrice") ??
     defaults.deal_terms.property_value;
@@ -184,6 +178,7 @@ export function ensureScenario(inputs: unknown): CanonicalInputs {
 
   const downside_modeRaw =
     pickString(dtSrc, "downside_mode") ?? defaults.deal_terms.downside_mode;
+
   const downside_mode: DealTerms["downside_mode"] =
     downside_modeRaw === "NO_FLOOR" ? "NO_FLOOR" : "HARD_FLOOR";
 
@@ -213,9 +208,21 @@ export function ensureScenario(inputs: unknown): CanonicalInputs {
   const exit_fee_pct =
     pickNumber(dtSrc, "exit_fee_pct") ?? defaults.deal_terms.exit_fee_pct;
 
-  const duration_yield_floor_enabled = (toBool(
-    dtSrc.duration_yield_floor_enabled,
-  ) ?? defaults.deal_terms.duration_yield_floor_enabled) as boolean;
+  // NOTE: realtor_* fields are intentionally NOT included in DealTerms until compute schema adds them.
+  // We still "read" them (to avoid surprises if they exist) but we drop them on output.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _realtor_representation_mode =
+    pickString(dtSrc, "realtor_representation_mode") ?? null;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _realtor_commission_pct =
+    pickNumber(dtSrc, "realtor_commission_pct") ?? null;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _realtor_commission_payment_mode =
+    pickString(dtSrc, "realtor_commission_payment_mode") ?? null;
+
+  const duration_yield_floor_enabled =
+    toBool(dtSrc.duration_yield_floor_enabled) ??
+    defaults.deal_terms.duration_yield_floor_enabled;
 
   const duration_yield_floor_start_year =
     dtSrc.duration_yield_floor_start_year === null
@@ -249,7 +256,7 @@ export function ensureScenario(inputs: unknown): CanonicalInputs {
     platform_fee,
     servicing_fee_monthly,
     exit_fee_pct,
-    duration_yield_floor_enabled,
+    duration_yield_floor_enabled: !!duration_yield_floor_enabled,
     duration_yield_floor_start_year,
     duration_yield_floor_min_multiple,
   };
@@ -286,7 +293,7 @@ export function ensureScenario(inputs: unknown): CanonicalInputs {
     annual_appreciation,
     closing_cost_pct,
     exit_year,
-    fmv_override: (fmv_override ?? undefined),
+    fmv_override: fmv_override ?? undefined,
   };
 
   return { deal_terms, scenario };

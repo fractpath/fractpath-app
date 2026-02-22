@@ -1,6 +1,6 @@
 {
   "name": "fractpath-calculator-widget",
-  "private": true,
+  "private": false,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
@@ -9,14 +9,13 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "build:compute": "npm -w @fractpath/compute run build",
+    "build:compute": "npm --prefix packages/compute run build",
     "prebuild": "npm run build:compute"
   },
   "dependencies": {
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "vitest": "^4.0.18",
-    "@fractpath/compute": "workspace:*"
+    "vitest": "^4.0.18"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
@@ -40,8 +39,5 @@
       "types": "./dist-types/lib/index.d.ts",
       "import": "./dist/index.js"
     }
-  },
-  "workspaces": [
-    "packages/*"
-  ]
+  }
 }
