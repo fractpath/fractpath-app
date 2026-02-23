@@ -171,7 +171,7 @@ export function DealDetailWidgetPanel({
           permissions={{ canEdit: true }}
           setField={draftState.setField}
           onBlurCompute={() => draftState.onBlurCompute()}
-          onSave={(draft) => handleSave(draft)}
+          onSave={(draft: unknown) => handleSave(draft as { deal_terms: DealTerms; scenario: ScenarioAssumptions })}
           onClose={() => {
             if (!saving) setEditOpen(false);
           }}
