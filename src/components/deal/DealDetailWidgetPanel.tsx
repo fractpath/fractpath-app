@@ -1,15 +1,27 @@
+// src/components/deal/DealDetailWidgetPanel.tsx
 "use client";
 
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { DealSnapshotView, DealEditModal } from "fractpath-calculator-widget";
-import type { DealTerms, ScenarioAssumptions, DealResults } from "@fractpath/compute";
+import type {
+  DealTerms,
+  ScenarioAssumptions,
+  DealResults,
+} from "@fractpath/compute";
 import { useDealDraftState } from "@/hooks/useDealDraftState";
 
 type AnyRecord = Record<string, unknown>;
 
 type DealDetailWidgetPanelProps = {
   dealId: string;
+
+  /**
+   * Full canonical snapshot payload (snapshot_json) for seeding an interactive widget.
+   * Presently unused in this panel, but accepted so the deal page can pass it without TS errors.
+   */
+  initialSnapshot?: AnyRecord | null;
+
   inputs: AnyRecord | null;
   results: AnyRecord | null;
   computeVersion?: string | null;
@@ -27,7 +39,8 @@ function normalizeDealTermsForWidget(raw: DealTerms): DealTerms {
     exit_fee_pct: r.exit_fee_pct ?? 0,
     realtor_representation_mode: r.realtor_representation_mode ?? "NONE",
     realtor_commission_pct: r.realtor_commission_pct ?? 0,
-    realtor_commission_payment_mode: r.realtor_commission_payment_mode ?? "UPFRONT",
+    realtor_commission_payment_mode:
+      r.realtor_commission_payment_mode ?? "UPFRONT",
   } as any;
 }
 
@@ -43,17 +56,21 @@ function normalizeResultsForWidget(raw: AnyRecord): DealResults {
     timing_factor_applied: r.timing_factor_applied ?? 1,
     realtor_fee_total_projected: r.realtor_fee_total_projected ?? 0,
     realtor_fee_upfront_projected: r.realtor_fee_upfront_projected ?? 0,
-    realtor_fee_installments_projected: r.realtor_fee_installments_projected ?? 0,
+    realtor_fee_installments_projected:
+      r.realtor_fee_installments_projected ?? 0,
     buyer_realtor_fee_total_projected: r.buyer_realtor_fee_total_projected ?? 0,
-    seller_realtor_fee_total_projected: r.seller_realtor_fee_total_projected ?? 0,
+    seller_realtor_fee_total_projected:
+      r.seller_realtor_fee_total_projected ?? 0,
   } as DealResults;
 }
 
 export function DealDetailWidgetPanel({
   dealId,
+  // accepted for TS + future Option A wiring; currently unused
+  initialSnapshot: _initialSnapshot,
   inputs,
   results,
-  computeVersion,
+  computeVersion: _computeVersion,
   canEdit,
   persona = "homeowner",
 }: DealDetailWidgetPanelProps) {
@@ -62,12 +79,10 @@ export function DealDetailWidgetPanel({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const typedInputsRaw = inputs as
-    | {
-        deal_terms: DealTerms;
-        scenario: ScenarioAssumptions;
-      }
-    | null;
+  const typedInputsRaw = inputs as {
+    deal_terms: DealTerms;
+    scenario: ScenarioAssumptions;
+  } | null;
 
   const typedInputs = typedInputsRaw
     ? ({
@@ -171,7 +186,11 @@ export function DealDetailWidgetPanel({
           permissions={{ canEdit: true }}
           setField={draftState.setField}
           onBlurCompute={() => draftState.onBlurCompute()}
-          onSave={(draft: unknown) => handleSave(draft as { deal_terms: DealTerms; scenario: ScenarioAssumptions })}
+          onSave={(draft: unknown) =>
+            handleSave(
+              draft as { deal_terms: DealTerms; scenario: ScenarioAssumptions },
+            )
+          }
           onClose={() => {
             if (!saving) setEditOpen(false);
           }}
