@@ -59,14 +59,14 @@ FractPath is a Next.js application that utilizes API routes for backend logic an
 - Client/server boundaries verified: DealCalculatorEmbed, ShareDealCard, DealAssumptionsSummary are "use client"; DealSummary, DealKpiCard, DealExitTable, VersionTimelineCard are server components.
 - No circular imports detected. No server-only imports in client components.
 
-**Calculator Widget Package (`packages/fractpath-calculator-widget`):**
+**Calculator Widget Package (`fractpath-calculator-widget` via Git tag):**
 - v1.0.0 built from official GitHub repo (SHA 3ed0ee2b). Contains both compute engine and production React UI components.
 - Exports React components: `DealSnapshotView` (read-only KPI strips, equity charts, tabbed detail views), `DealEditModal` (edit form with field validation and preview panels), `DealKpiStrip`, `EquityTransferChart`.
 - Exports utilities: `computeScenario`, `normalizeInputs`, `buildChartSeries`, `buildDraftSnapshot`, `buildFullDealSnapshotV1`, `deterministicHash`.
 - Types: `DraftCanonicalInputs`, `FullDealSnapshotV1`, `DraftSnapshot`, `CalculatorPersona`, `CalculatorMode`.
 - App-side `useDealDraftState` hook (`src/hooks/useDealDraftState.ts`) provides draft/errors/preview state management for DealEditModal (widget's internal hook is not exported).
 - `DealDetailWidgetPanel` imports `DealSnapshotView` and `DealEditModal` directly from this package.
-- Installed as local dependency: `"fractpath-calculator-widget": "file:packages/fractpath-calculator-widget"`.
+- Installed via Git tag: `"fractpath-calculator-widget": "git+https://github.com/fractpath/fractpath-calculator-widget.git#v1.0.3"`.
 
 **Canonical Compute Package (`packages/compute` / `@fractpath/compute`):**
 - v10.2.0 canonical compute engine wrapping the widget package.
