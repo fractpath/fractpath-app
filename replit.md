@@ -31,7 +31,7 @@ FractPath is a Next.js application that utilizes API routes for backend logic an
 
 **Feature Specifications:**
 - **Homeowner Intake:** Primary data collection form.
-- **User Dashboard:** Role-specific content and access to scenarios.
+- **User Dashboard (APP-002):** Role-specific content with DealCard components showing label, status badge, KPI row (Property Value, Upfront, Monthly), and optional unread badge. Next Steps widget at top. Deals grouped into "My deals" (OWNER) and "Shared with me" (VIEWER). KPIs extracted from latest deal_snapshots (batch query, display-only). VIEWER cards link to `?mode=shared`. Component: `src/components/dashboard/DealCard.tsx`.
 - **Deal Resume:** `POST /api/deals/resume` — Converts marketing drafts into authenticated deals. Always recomputes via `computeDeal` adapter (no canonical passthrough). Creates deal record, OWNER access grant, canonical `FullDealSnapshotV1` snapshot, DEAL_CREATED + DEAL_SNAPSHOT_COMPUTED audit events. Marks draft token as redeemed with conditional `.is("redeemed_at", null)`. Idempotent on already-redeemed tokens (returns existing deal). Returns `{ ok, deal_id, snapshot_id, redirect_url }` with 201.
 - **Marketing Lead:** `POST /api/lead` — Marketing-facing adapter that accepts `{ email, home_address, equity_owned, funding_method, sale_timeline }`, constructs a DraftSnapshotV1-compatible payload with stable hashes, mints a draft token, returns `{ ok, token, resumeUrl }`. Includes IP rate limiting.
 - **Share Deal:** Enables generation of read-only share links.
