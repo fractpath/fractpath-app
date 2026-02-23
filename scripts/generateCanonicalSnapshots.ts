@@ -178,7 +178,7 @@ async function main() {
     };
 
     const canonicalSnapshot = {
-      compute_version: compute.result.compute_version,
+      compute_version: compute.compute_version,
       computed_at: computedAt,
       inputs: {
         deal_terms: baseDealTerms,
@@ -190,7 +190,7 @@ async function main() {
 
     // 4) Persist in deal_snapshots (append-only)
     const fullSnapshot = {
-      contract_version: compute.result.compute_version,
+      contract_version: compute.compute_version,
       schema_version: "1",
       inputs: {
         deal_terms: baseDealTerms,
@@ -226,7 +226,7 @@ async function main() {
       event_type: "DEAL_SNAPSHOT_COMPUTED",
       payload: {
         snapshot_id: snap.id,
-        compute_version: compute.result.compute_version,
+        compute_version: compute.compute_version,
         computed_at: computedAt,
         source: "script_generate_canonical_snapshots",
       },
@@ -241,7 +241,7 @@ async function main() {
 
     ok++;
     console.log(
-      `[OK] deal=${dealId} snapshot=${snap.id} compute_version=${compute.result.compute_version}`,
+      `[OK] deal=${dealId} snapshot=${snap.id} compute_version=${compute.compute_version}`,
     );
   }
 
