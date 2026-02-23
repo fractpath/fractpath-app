@@ -1,99 +1,112 @@
-// src/app/deal/new/page.tsx
-import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
-import { computeDealAdapter as computeDeal } from "@/lib/computeAdapter";
-import { insertDealSnapshot } from "@/lib/dealSnapshotDb";
-import { ensureScenario } from "@/lib/defaultScenario";
+"use client";
 
-export const runtime = "nodejs";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { AppHeader } from "@/components/layout/AppHeader";
+import { DealWidgetShell } from "@/components/deal/DealWidgetShell";
 
-export default async function NewDealPage() {
-  const supabase = await createClient();
+type AnyRecord = Record<string, unknown>;
 
-  const {
-    data: { user },
-    error: userErr,
-  } = await supabase.auth.getUser();
+export default function NewDealPage() {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [authed, setAuthed] = useState<boolean | null>(null);
 
-  if (userErr || !user) {
-    redirect("/login?returnTo=/deal/new");
-  }
+  useEffect(() => {
+    fetch("/api/me")
+      .then((r) => {
+        if (r.status === 401) {
+          router.replace(`/login?returnTo=${encodeURIComponent("/deal/new")}`);
+        } else {
+          setAuthed(true);
+        }
+      })
+      .catch(() => setAuthed(true));
+  }, [router]);
 
-  const { data: dealId, error: rpcErr } = await supabase.rpc(
-    "create_deal_with_owner_grant",
-    { p_user_id: user.id },
+  const defaultSeed = useMemo<AnyRecord>(
+    () => ({
+      inputs: { deal_terms: {}, scenario: {} },
+      outputs: { results: null },
+      compute_version: null,
+      schema_version: "1",
+    }),
+    [],
   );
 
-  if (rpcErr || !dealId) {
-    console.error("NEW_DEAL_CREATE_FAILED", {
-      message: rpcErr?.message,
-      code: (rpcErr as any)?.code,
-      details: (rpcErr as any)?.details,
-      hint: (rpcErr as any)?.hint,
-    });
+  const handleSave = useCallback(
+    async (parsed: { deal_terms: AnyRecord; scenario: AnyRecord }) => {
+      setCreating(true);
+      setError(null);
 
-    const errorCode = encodeURIComponent(
-      ((rpcErr as any)?.code as string) || "unknown",
+      try {
+        const res = await fetch("/api/deals/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ inputs: parsed }),
+        });
+
+        const body = await res
+          .json()
+          .catch(() => ({ ok: false, error: "Invalid response" }));
+
+        if (!res.ok || body.ok === false) {
+          throw new Error(body.error ?? `Create failed (${res.status})`);
+        }
+
+        router.push(body.redirect_url ?? "/dashboard");
+      } catch (err: any) {
+        setError(err?.message ?? "Failed to create deal");
+        setCreating(false);
+      }
+    },
+    [router],
+  );
+
+  if (authed === null) {
+    return (
+      <div>
+        <AppHeader />
+        <main className="mx-auto max-w-3xl p-6">
+          <p className="text-sm text-muted-foreground">Loading...</p>
+        </main>
+      </div>
     );
-
-    redirect(`/dashboard?create=failed&code=${errorCode}`);
   }
 
-  // Canonical v10 inputs (normalized + legacy alias mapping + full defaults)
-  const canonicalInputs = ensureScenario({
-    // allow future callers to pass partials; ensureScenario returns full v10 shape
-    deal_terms: {},
-    scenario: {},
-  });
+  return (
+    <div>
+      <AppHeader />
+      <main className="mx-auto max-w-3xl p-6">
+        <h1 className="text-2xl font-semibold">Create a new deal</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Configure your deal terms and scenario, then save to create.
+        </p>
 
-  const computeResult = await computeDeal(canonicalInputs as any);
+        {error ? (
+          <div className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">
+            {error}
+          </div>
+        ) : null}
 
-  if (!computeResult.ok) {
-    console.error("COMPUTE_FAILED_ON_CREATE", computeResult);
-    redirect(`/deal/${encodeURIComponent(dealId as string)}`);
-  }
-
-  const { compute_version, results } = computeResult;
-const computedAt = new Date().toISOString();
-
-  // Canonical-only snapshot payload (append-only)
-  const fullSnapshot = {
-    contract_version: compute_version,
-    schema_version: "1",
-    inputs: canonicalInputs,
-    outputs: { results },
-    compute_version,
-    computed_at: computedAt,
-    computed_by: user.id,
-  };
-
-  const snapshotResult = await insertDealSnapshot(
-    supabase as any,
-    dealId as string,
-    user.id,
-    fullSnapshot,
+        {creating ? (
+          <div className="mt-6 rounded-lg border p-6 text-center">
+            <p className="text-sm text-muted-foreground">
+              Creating your deal...
+            </p>
+          </div>
+        ) : (
+          <div className="mt-6">
+            <DealWidgetShell
+              initialSnapshot={defaultSeed}
+              canEdit={true}
+              persona="homeowner"
+              onSave={handleSave}
+            />
+          </div>
+        )}
+      </main>
+    </div>
   );
-
-  if (!snapshotResult.ok) {
-    console.error("SNAPSHOT_INSERT_FAILED_ON_CREATE", snapshotResult);
-    redirect(`/deal/${encodeURIComponent(dealId as string)}`);
-  }
-
-  // Best-effort audit event
-  try {
-    await (supabase.from("deal_events") as any).insert({
-      deal_id: dealId,
-      event_type: "DEAL_SNAPSHOT_COMPUTED",
-      payload: {
-        snapshot_id: snapshotResult.id,
-        compute_version,
-        computed_at: computedAt,
-      },
-      created_by: user.id,
-    });
-  } catch (eventErr: any) {
-    console.error("deal_events insert error:", eventErr?.message);
-  }
-
-  redirect(`/deal/${encodeURIComponent(dealId as string)}`);
 }

@@ -2,100 +2,82 @@ import Link from "next/link";
 
 export type DealCardProps = {
   href: string;
-  label: string;
-  secondary?: string;
+  title: string;
+  secondaryFmvLabel?: string | null;
+  kpiLine?: string | null;
+  metaLine?: string | null;
   statusLabel: string;
-  kpis: {
-    propertyValue?: number | null;
-    upfront?: number | null;
-    monthly?: number | null;
-  };
-  unreadCount?: number | null;
+  statusTone?: string | null;
+  roleChipLabel?: string | null;
 };
 
-function fmtCurrency(v: number | null | undefined): string {
-  if (v == null || !Number.isFinite(v)) return "\u2014";
-  return v.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  });
-}
-
-const STATUS_COLORS: Record<string, string> = {
-  IMPORTED: "bg-blue-100 text-blue-800",
-  ACTIVE: "bg-green-100 text-green-800",
-  CLOSED: "bg-gray-100 text-gray-600",
-  DRAFT: "bg-yellow-100 text-yellow-800",
+const STATUS_TONE_CLASSES: Record<string, string> = {
+  yellow: "bg-yellow-100 text-yellow-800",
+  amber: "bg-amber-100 text-amber-800",
+  green: "bg-green-100 text-green-800",
+  emerald: "bg-emerald-100 text-emerald-800",
+  red: "bg-red-100 text-red-800",
+  gray: "bg-gray-100 text-gray-600",
+  blue: "bg-blue-100 text-blue-800",
 };
 
-function statusColor(status: string): string {
-  return STATUS_COLORS[status.toUpperCase()] ?? "bg-gray-100 text-gray-700";
+const STATUS_DEFAULT_TONES: Record<string, string> = {
+  DRAFT: "yellow",
+  NEEDS_REVIEW: "amber",
+  UNDER_REVIEW: "amber",
+  ACTIVE: "green",
+  ACCEPTED: "emerald",
+  REJECTED: "red",
+  ARCHIVED: "gray",
+  CLOSED: "gray",
+  IMPORTED: "blue",
+};
+
+function resolveToneClass(statusLabel: string, statusTone?: string | null): string {
+  const tone = statusTone ?? STATUS_DEFAULT_TONES[statusLabel.toUpperCase()] ?? "gray";
+  return STATUS_TONE_CLASSES[tone] ?? STATUS_TONE_CLASSES["gray"];
 }
 
 export function DealCard({
   href,
-  label,
-  secondary,
+  title,
+  secondaryFmvLabel,
+  kpiLine,
+  metaLine,
   statusLabel,
-  kpis,
-  unreadCount,
+  statusTone,
+  roleChipLabel,
 }: DealCardProps) {
   return (
     <Link
       href={href}
-      className="block rounded-lg border p-4 transition-colors hover:bg-muted/50"
+      className="block rounded-lg border p-4 transition-all hover:bg-muted/50 hover:-translate-y-0.5 hover:shadow-md"
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium truncate">{label}</span>
-            <span
-              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium leading-tight ${statusColor(statusLabel)}`}
-            >
-              {statusLabel}
-            </span>
-            {unreadCount != null && unreadCount > 0 ? (
-              <span className="inline-flex items-center justify-center rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
-                {unreadCount}
-              </span>
-            ) : null}
-          </div>
-          {secondary ? (
-            <div className="mt-0.5 text-xs text-muted-foreground truncate">
-              {secondary}
-            </div>
-          ) : null}
-        </div>
-        <span className="shrink-0 text-xs text-muted-foreground">&rarr;</span>
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-base font-semibold truncate">{title}</span>
+        <span
+          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium leading-tight ${resolveToneClass(statusLabel, statusTone)}`}
+        >
+          {statusLabel}
+        </span>
+        {roleChipLabel ? (
+          <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium leading-tight text-muted-foreground">
+            {roleChipLabel}
+          </span>
+        ) : null}
       </div>
 
-      <div className="mt-3 grid grid-cols-3 gap-3">
-        <div>
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-            Property Value
-          </div>
-          <div className="text-sm font-medium">
-            {fmtCurrency(kpis.propertyValue)}
-          </div>
-        </div>
-        <div>
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-            Upfront
-          </div>
-          <div className="text-sm font-medium">
-            {fmtCurrency(kpis.upfront)}
-          </div>
-        </div>
-        <div>
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-            Monthly
-          </div>
-          <div className="text-sm font-medium">
-            {fmtCurrency(kpis.monthly)}
-          </div>
-        </div>
-      </div>
+      {secondaryFmvLabel ? (
+        <div className="mt-1 text-sm text-muted-foreground">{secondaryFmvLabel}</div>
+      ) : null}
+
+      {kpiLine ? (
+        <div className="mt-2 text-sm font-medium">{kpiLine}</div>
+      ) : null}
+
+      {metaLine ? (
+        <div className="mt-1 text-xs text-muted-foreground">{metaLine}</div>
+      ) : null}
     </Link>
   );
 }

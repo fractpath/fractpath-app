@@ -7,6 +7,7 @@ export const revalidate = 0;
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { AppHeader } from "@/components/layout/AppHeader";
 import { ShareDealCard } from "@/components/ShareDealCard";
 import { DealSummary } from "@/components/deal/DealSummary";
 import { buildDealSummaryViewModel } from "@/lib/dealSummaryViewModel";
@@ -240,6 +241,8 @@ export default async function DealPage({ params, searchParams }: PageProps) {
   });
 
   return (
+    <div>
+    <AppHeader />
     <main className="mx-auto max-w-3xl p-6">
       {readOnly ? (
         <div className="mb-4 rounded-md border p-3">
@@ -443,5 +446,6 @@ export default async function DealPage({ params, searchParams }: PageProps) {
         </Link>
       </div>
     </main>
+    </div>
   );
 }
