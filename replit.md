@@ -59,6 +59,12 @@ FractPath is a Next.js application that utilizes API routes for backend logic an
 - Client/server boundaries verified: DealCalculatorEmbed, ShareDealCard, DealAssumptionsSummary are "use client"; DealSummary, DealKpiCard, DealExitTable, VersionTimelineCard are server components.
 - No circular imports detected. No server-only imports in client components.
 
+**Role Gating (APP-003):**
+- Centralized authorization helper: `src/lib/authz.ts` exports `isRealtorPersona`, `assertNotRealtor`, `assertOwnerGrant`.
+- Realtor persona is view-only: blocked at API layer (403) on all deal mutation endpoints (snapshot/compute, snapshot POST, fork, share).
+- UI hides action elements (ShareDealCard, RecomputeSnapshotButton, edit controls) for realtor persona.
+- Contract tests: `src/lib/__tests__/roleGating.test.ts` (11 assertions verifying gating in all routes + UI).
+
 **Calculator Widget Package (`fractpath-calculator-widget` via Git tag):**
 - v1.0.0 built from official GitHub repo (SHA 3ed0ee2b). Contains both compute engine and production React UI components.
 - Exports React components: `DealSnapshotView` (read-only KPI strips, equity charts, tabbed detail views), `DealEditModal` (edit form with field validation and preview panels), `DealKpiStrip`, `EquityTransferChart`.

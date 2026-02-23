@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getAppBaseUrlServer } from "@/lib/appBaseUrl";
+import { assertNotRealtor } from "@/lib/authz";
 
 function isOwnerOnlyError(err: any): boolean {
   const code = err?.code;
@@ -26,6 +27,14 @@ export async function POST(
     return NextResponse.json(
       { ok: false, error: "unauthorized" },
       { status: 401 },
+    );
+  }
+
+  const realtorCheck = assertNotRealtor(user);
+  if (!realtorCheck.ok) {
+    return NextResponse.json(
+      { ok: false, error: realtorCheck.error },
+      { status: realtorCheck.status },
     );
   }
 

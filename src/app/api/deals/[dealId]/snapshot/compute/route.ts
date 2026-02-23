@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { insertDealSnapshot } from "@/lib/dealSnapshotDb";
 import { computeDealAdapter as computeDeal } from "@/lib/computeAdapter";
 import { ensureScenario } from "@/lib/defaultScenario";
+import { assertNotRealtor, assertOwnerGrant } from "@/lib/authz";
 
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
@@ -32,6 +33,9 @@ export async function POST(
   if (!user) {
     return jsonError("Unauthorized", 401);
   }
+
+  const realtorCheck = assertNotRealtor(user);
+  if (!realtorCheck.ok) return jsonError(realtorCheck.error, realtorCheck.status);
 
   let body: any;
   try {
@@ -74,9 +78,8 @@ export async function POST(
   if (grantError) {
     return jsonError("Failed to verify access", 500);
   }
-  if (grant?.role !== "OWNER") {
-    return jsonError("Forbidden (OWNER only)", 403);
-  }
+  const ownerCheck = assertOwnerGrant(grant?.role);
+  if (!ownerCheck.ok) return jsonError(ownerCheck.error, ownerCheck.status);
 
   const computeResult = await computeDeal(body.inputs);
 

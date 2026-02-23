@@ -2,6 +2,7 @@ export const runtime = "nodejs";
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { assertNotRealtor } from "@/lib/authz";
 
 function jsonError(
   status: number,
@@ -83,6 +84,9 @@ export async function POST(
 
   if (userErr) return jsonError(500, "auth_failed", userErr.message);
   if (!user) return jsonError(401, "not_authenticated");
+
+  const realtorCheck = assertNotRealtor(user);
+  if (!realtorCheck.ok) return jsonError(realtorCheck.status, realtorCheck.error);
 
   let body: any;
   try {

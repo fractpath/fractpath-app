@@ -11,6 +11,7 @@ import {
   getDefaultDealTerms,
   getDefaultScenario,
 } from "@/lib/defaultScenario";
+import { assertNotRealtor } from "@/lib/authz";
 
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
@@ -41,6 +42,9 @@ export async function POST(
   } = await supabase.auth.getUser();
 
   if (!user) return jsonError("Unauthorized", 401);
+
+  const realtorCheck = assertNotRealtor(user);
+  if (!realtorCheck.ok) return jsonError(realtorCheck.error, realtorCheck.status);
 
   // All DB operations for fork use service client (RLS-safe for create)
   const service = createServiceClient();

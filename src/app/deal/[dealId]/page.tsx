@@ -313,7 +313,7 @@ export default async function DealPage({ params, searchParams }: PageProps) {
         persona={userPersona}
 />
 
-      {role === "OWNER" && isLatest && !readOnly ? (
+      {role === "OWNER" && isLatest && !readOnly && userPersona !== "realtor" ? (
         <RecomputeSnapshotButton
           dealId={dealId}
           initialInputs={(initialSnapshot as any)?.inputs ?? null}
@@ -428,7 +428,7 @@ export default async function DealPage({ params, searchParams }: PageProps) {
         )}
       </section>
 
-      {role === "OWNER" && !readOnly ? (
+      {role === "OWNER" && !readOnly && userPersona !== "realtor" ? (
         <div className="mt-6">
           <ShareDealCard dealId={dealId} />
         </div>
