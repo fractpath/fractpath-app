@@ -148,8 +148,8 @@ export async function POST(
     const computeResult = await computeDeal(canonicalInputs);
 
     if (computeResult.ok) {
-      const { compute_version, results } = computeResult.result;
-      const computedAt = new Date().toISOString();
+      const { compute_version, results } = computeResult;
+const computedAt = new Date().toISOString();
 
       const fullSnapshot = {
         schema_version: "1",
