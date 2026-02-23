@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PORT="${PORT:-3000}"
+PORT="${PORT:-5000}"
 
 echo "== smoke: /login should be 200 =="
 curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:${PORT}/login" | grep -q "^200$"

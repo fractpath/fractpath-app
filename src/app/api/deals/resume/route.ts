@@ -27,6 +27,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { insertDealSnapshot } from "@/lib/dealSnapshotDb";
 import { computeDealAdapter as computeDeal } from "@/lib/computeAdapter";
 import { CONTRACT_VERSION, SCHEMA_VERSION } from "@/lib/contractVersion";
+import { isRealtorPersona } from "@/lib/authz";
 
 import {
   ensureScenario,
@@ -81,7 +82,9 @@ function unwrapSnapshotPayload(raw: unknown): Record<string, unknown> | null {
 // Canonical Input Extraction
 // ---------------------------------------------------------------------------
 
-function extractCanonicalInputs(payload: Record<string, unknown>): Record<string, unknown> {
+function extractCanonicalInputs(
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
   const dealTerms = isRecord(payload.deal_terms)
     ? (payload.deal_terms as Record<string, unknown>)
     : {};
@@ -99,7 +102,9 @@ function extractCanonicalInputs(payload: Record<string, unknown>): Record<string
 // Legacy Auto-Upconversion
 // ---------------------------------------------------------------------------
 
-function upconvertLegacyToCanonical(payload: Record<string, unknown>): Record<string, unknown> {
+function upconvertLegacyToCanonical(
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
   const rawInputs = isRecord(payload.inputs)
     ? (payload.inputs as Record<string, unknown>)
     : {};
@@ -140,6 +145,9 @@ export async function POST(request: NextRequest) {
       return jsonError("Unauthorized", 401);
     }
 
+    // Realtors may redeem tokens, but are always VIEWER in the app (no mutation rights).
+    const isRealtor = isRealtorPersona(user);
+
     let body: any;
     try {
       body = await request.json();
@@ -154,8 +162,12 @@ export async function POST(request: NextRequest) {
 
     const service = createServiceClient();
 
-    const { data: draft, error: draftError } = await (service.from("draft_tokens") as any)
-      .select("id, snapshot_json, expires_at, redeemed_at, redeemed_by_user_id, source")
+    const { data: draft, error: draftError } = await (
+      service.from("draft_tokens") as any
+    )
+      .select(
+        "id, snapshot_json, expires_at, redeemed_at, redeemed_by_user_id, source",
+      )
       .eq("token", token.trim())
       .maybeSingle();
 
@@ -175,8 +187,12 @@ export async function POST(request: NextRequest) {
         .maybeSingle();
 
       if (existingDeal) {
+        const redirectUrl = isRealtor
+          ? `/deal/${existingDeal.id}?mode=shared`
+          : `/deal/${existingDeal.id}`;
+
         return NextResponse.json(
-          { ok: true, deal_id: existingDeal.id, redirect_url: `/deal/${existingDeal.id}` },
+          { ok: true, deal_id: existingDeal.id, redirect_url: redirectUrl },
           { status: 200 },
         );
       }
@@ -207,10 +223,16 @@ export async function POST(request: NextRequest) {
           : "";
 
       if (sv.length === 0) {
-        return jsonError("Canonical snapshot missing required schema_version", 422);
+        return jsonError(
+          "Canonical snapshot missing required schema_version",
+          422,
+        );
       }
       if (sv !== SCHEMA_VERSION) {
-        return jsonError(`Unsupported schema_version "${sv}". Expected "${SCHEMA_VERSION}"`, 422);
+        return jsonError(
+          `Unsupported schema_version "${sv}". Expected "${SCHEMA_VERSION}"`,
+          422,
+        );
       }
 
       const cv =
@@ -221,11 +243,18 @@ export async function POST(request: NextRequest) {
             : "";
 
       if (cv.length > 0 && cv !== CONTRACT_VERSION) {
-        return jsonError(`Unsupported contract_version "${cv}". Expected "${CONTRACT_VERSION}"`, 422);
+        return jsonError(
+          `Unsupported contract_version "${cv}". Expected "${CONTRACT_VERSION}"`,
+          422,
+        );
       }
 
       canonicalInputs = ensureScenario(extractCanonicalInputs(unwrapped));
     } else if (shape === "legacy") {
+      // Keep defaults helpers imported so legacy upconversion can be expanded safely later.
+      void getDefaultDealTerms;
+      void getDefaultScenario;
+
       canonicalInputs = ensureScenario(upconvertLegacyToCanonical(unwrapped));
     } else {
       return jsonError(
@@ -244,7 +273,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { compute_version, results } = computeResult;
-const computedAt = new Date().toISOString();
+    const computedAt = new Date().toISOString();
 
     // -----------------------------------------------------------------------
     // BUILD CANONICAL SNAPSHOT
@@ -263,8 +292,13 @@ const computedAt = new Date().toISOString();
     // -----------------------------------------------------------------------
     // CREATE DEAL + ACCESS GRANT
     // -----------------------------------------------------------------------
+    //
+    // NOTE: deals.owner_user_id is NOT NULL in schema, so we must set it to user.id.
+    // Realtor persona is still VIEWER via deal_access_grants + shared redirect.
 
-    const { data: newDeal, error: dealInsertError } = await (service.from("deals") as any)
+    const { data: newDeal, error: dealInsertError } = await (
+      service.from("deals") as any
+    )
       .insert({
         owner_user_id: user.id,
         status: "IMPORTED",
@@ -280,11 +314,13 @@ const computedAt = new Date().toISOString();
       return jsonError("Failed to create deal", 500);
     }
 
-    const { error: grantError } = await (service.from("deal_access_grants") as any).upsert(
+    const { error: grantError } = await (
+      service.from("deal_access_grants") as any
+    ).upsert(
       {
         deal_id: newDeal.id,
         user_id: user.id,
-        role: "OWNER",
+        role: isRealtor ? "VIEWER" : "OWNER",
         created_by: user.id,
       },
       { onConflict: "deal_id,user_id", ignoreDuplicates: true },
@@ -292,14 +328,19 @@ const computedAt = new Date().toISOString();
 
     if (grantError) {
       console.error("grant upsert error:", grantError);
-      return jsonError("Failed to assign ownership", 500);
+      return jsonError("Failed to assign access grant", 500);
     }
 
     // -----------------------------------------------------------------------
     // INSERT SNAPSHOT + EVENTS
     // -----------------------------------------------------------------------
 
-    const snapInsert = await insertDealSnapshot(service as any, newDeal.id, user.id, fullSnapshot);
+    const snapInsert = await insertDealSnapshot(
+      service as any,
+      newDeal.id,
+      user.id,
+      fullSnapshot,
+    );
 
     let snapshotId: string | null = null;
 
@@ -324,10 +365,16 @@ const computedAt = new Date().toISOString();
         console.error("snapshot event insert error:", eventErr?.message);
       }
     } else {
-      console.error("resume snapshot insert failed:", snapInsert.error, snapInsert.detail);
+      console.error(
+        "resume snapshot insert failed:",
+        snapInsert.error,
+        snapInsert.detail,
+      );
     }
 
-    const { error: eventError } = await (service.from("deal_events") as any).insert({
+    const { error: eventError } = await (
+      service.from("deal_events") as any
+    ).insert({
       deal_id: newDeal.id,
       event_type: "DEAL_CREATED",
       payload: {
@@ -343,7 +390,7 @@ const computedAt = new Date().toISOString();
     }
 
     // -----------------------------------------------------------------------
-    // REDEEM TOKEN
+    // REDEEM TOKEN (best-effort)
     // -----------------------------------------------------------------------
 
     const { error: redeemError } = await (service.from("draft_tokens") as any)
@@ -358,12 +405,16 @@ const computedAt = new Date().toISOString();
       console.error("draft_tokens redeem error:", redeemError.message);
     }
 
+    const redirectUrl = isRealtor
+      ? `/deal/${newDeal.id}?mode=shared`
+      : `/deal/${newDeal.id}`;
+
     return NextResponse.json(
       {
         ok: true,
         deal_id: newDeal.id,
         snapshot_id: snapshotId,
-        redirect_url: `/deal/${newDeal.id}`,
+        redirect_url: redirectUrl,
       },
       { status: 201 },
     );
