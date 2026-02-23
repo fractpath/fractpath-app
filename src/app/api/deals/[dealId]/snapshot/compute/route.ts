@@ -81,12 +81,16 @@ export async function POST(
   const computeResult = await computeDeal(body.inputs);
 
   if (!computeResult.ok) {
-    const status = computeResult.code === "NOT_INTEGRATED" ? 501 : 500;
-    return jsonError(computeResult.error, status);
+    const msg = String((computeResult as any)?.error ?? "");
+  const status =
+    msg.includes("NOT_INTEGRATED") || msg.toLowerCase().includes("not integrated")
+      ? 501
+      : 500;
+return jsonError(computeResult.error, status);
   }
 
-  const { compute_version, results } = computeResult.result;
-  const computedAt = new Date().toISOString();
+  const { compute_version, results } = computeResult;
+const computedAt = new Date().toISOString();
 
   // Snapshot remains validated by validateFullDealSnapshotV1
   const fullSnapshot = {
