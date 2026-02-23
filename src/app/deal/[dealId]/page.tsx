@@ -11,11 +11,8 @@ import { ShareDealCard } from "@/components/ShareDealCard";
 import { DealSummary } from "@/components/deal/DealSummary";
 import { buildDealSummaryViewModel } from "@/lib/dealSummaryViewModel";
 import { DealDetailWidgetPanel } from "@/components/deal/DealDetailWidgetPanel";
-import { DealCalculatorEmbed } from "@/components/deal/DealCalculatorEmbed";
 import { RecomputeSnapshotButton } from "@/components/deal/RecomputeSnapshotButton";
 import { VersionTimelineCard } from "@/components/deal/VersionTimelineCard";
-import { shouldRenderDealCalculator } from "@/lib/dealCalculatorGating";
-import { selectBaseSnapshotId } from "@/lib/counterBaseSnapshot";
 import { getDealSnapshots } from "@/lib/dealSnapshotDb";
 import { getDealVersions } from "@/lib/dealVersionDb";
 import { getDealEvents, buildDealTimeline } from "@/lib/dealTimeline";
@@ -150,8 +147,7 @@ export default async function DealPage({ params, searchParams }: PageProps) {
 
   const userPersona =
     (user.user_metadata?.role as string | undefined) ?? "homeowner";
-  const canEdit =
-    role === "OWNER" && !readOnly && userPersona !== "realtor";
+  const canEdit = role === "OWNER" && !readOnly && userPersona !== "realtor";
 
   const snapshotsResult = await getDealSnapshots(supabase, dealId, 20);
   const snapshots = snapshotsResult.ok ? snapshotsResult.snapshots : [];
@@ -171,35 +167,45 @@ export default async function DealPage({ params, searchParams }: PageProps) {
   const effectiveSnapshotRow =
     selectedSnapshotId != null
       ? (snapshots.find((s) => s.id === selectedSnapshotId) ?? null)
-      : (latestComputedSnapshot ??
-        (snapshots.length > 0 ? snapshots[0] : null));
+      : (latestComputedSnapshot ?? (snapshots.length > 0 ? snapshots[0] : null));
 
   // "Latest" in UI/gating should mean latest computed snapshot (not merely latest row).
   const latestSnapshotId =
     (latestComputedSnapshot ?? (snapshots.length > 0 ? snapshots[0] : null))
       ?.id ?? null;
+
   const isLatest = effectiveSnapshotRow
     ? effectiveSnapshotRow.id === latestSnapshotId
     : true;
 
   const display = extractSnapshotDisplay(effectiveSnapshotRow as any);
+
+  // Full canonical snapshot payload as stored in DB (seed for the interactive widget)
+  const initialSnapshot = (effectiveSnapshotRow as any)?.snapshot_json ?? null;
+
   const summaryVm = buildDealSummaryViewModel(display ?? {});
 
   const snapshotInputs = display?.inputs ?? null;
   const snapshotResults = display?.outputs ?? null;
   const snapshotComputeVersion = display?.computeVersion ?? null;
 
-    if (process.env.NODE_ENV !== "production") {
-      const r: any = snapshotResults ?? {};
-      console.log("[deal] snapshotResults keys:", Object.keys(r).slice(0, 40));
-      console.log("[deal] invested_capital_total:", r.invested_capital_total);
-      console.log("[deal] isa_settlement:", r.isa_settlement);
-      console.log("[deal] projected_fmv:", r.projected_fmv);
-      console.log("[deal] homeowner_equity_value:", r.homeowner_equity_value);
-      console.log("[deal] investor_equity_value:", r.investor_equity_value);
-      console.log("[deal] upfront_payment:", (snapshotInputs as any)?.deal_terms?.upfront_payment);
-      console.log("[deal] property_value:", (snapshotInputs as any)?.deal_terms?.property_value);
-    }
+  if (process.env.NODE_ENV !== "production") {
+    const r: any = snapshotResults ?? {};
+    console.log("[deal] snapshotResults keys:", Object.keys(r).slice(0, 40));
+    console.log("[deal] invested_capital_total:", r.invested_capital_total);
+    console.log("[deal] isa_settlement:", r.isa_settlement);
+    console.log("[deal] projected_fmv:", r.projected_fmv);
+    console.log("[deal] homeowner_equity_value:", r.homeowner_equity_value);
+    console.log("[deal] investor_equity_value:", r.investor_equity_value);
+    console.log(
+      "[deal] upfront_payment:",
+      (snapshotInputs as any)?.deal_terms?.upfront_payment,
+    );
+    console.log(
+      "[deal] property_value:",
+      (snapshotInputs as any)?.deal_terms?.property_value,
+    );
+  }
 
   const [versionsResult, eventsResult] = await Promise.all([
     getDealVersions(supabase, dealId, 50),
@@ -282,9 +288,7 @@ export default async function DealPage({ params, searchParams }: PageProps) {
           <div className="mt-2 flex items-center justify-between rounded-md bg-muted/50 px-3 py-2">
             <span className="text-xs text-muted-foreground">
               You are viewing a previous snapshot from{" "}
-              {new Date(
-                (effectiveSnapshotRow as any).created_at,
-              ).toLocaleString()}
+              {new Date((effectiveSnapshotRow as any).created_at).toLocaleString()}
             </span>
             <Link
               className="text-xs font-medium underline"
@@ -302,10 +306,11 @@ export default async function DealPage({ params, searchParams }: PageProps) {
 
       <DealDetailWidgetPanel
         dealId={dealId}
+        initialSnapshot={initialSnapshot}
         inputs={snapshotInputs}
         results={snapshotResults}
         computeVersion={snapshotComputeVersion}
-        canEdit={canEdit && isLatest}
+        canEdit={canEdit}
         persona={userPersona}
       />
 
@@ -317,24 +322,7 @@ export default async function DealPage({ params, searchParams }: PageProps) {
       {role === "OWNER" && isLatest && !readOnly ? (
         <RecomputeSnapshotButton
           dealId={dealId}
-          initialInputs={
-            display?.inputs
-              ? ((effectiveSnapshotRow as any)?.snapshot_json?.inputs ?? null)
-              : null
-          }
-        />
-      ) : null}
-
-      {shouldRenderDealCalculator({ role, isLatest }) ? (
-        <DealCalculatorEmbed
-          dealId={dealId}
-          role={role}
-          currentSnapshotId={
-            selectBaseSnapshotId({
-              selectedSnapshotId: selectedSnapshotId,
-              latestSnapshotId: latestSnapshotId,
-            }) ?? undefined
-          }
+          initialInputs={(initialSnapshot as any)?.inputs ?? null}
         />
       ) : null}
 
@@ -361,9 +349,7 @@ export default async function DealPage({ params, searchParams }: PageProps) {
                   key={s.id}
                   href={href}
                   className={`flex items-center justify-between gap-3 rounded-md px-3 py-2 text-xs transition-colors ${
-                    isCurrent
-                      ? "bg-primary/10 font-medium"
-                      : "hover:bg-muted/50"
+                    isCurrent ? "bg-primary/10 font-medium" : "hover:bg-muted/50"
                   }`}
                 >
                   <span className="flex items-center gap-2">
@@ -423,10 +409,7 @@ export default async function DealPage({ params, searchParams }: PageProps) {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline justify-between gap-2">
                       {entry.href ? (
-                        <Link
-                          href={entry.href}
-                          className="font-medium underline"
-                        >
+                        <Link href={entry.href} className="font-medium underline">
                           {entry.title}
                         </Link>
                       ) : (

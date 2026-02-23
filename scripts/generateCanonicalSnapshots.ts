@@ -165,7 +165,7 @@ async function main() {
     if (!compute.ok) {
       failed++;
       console.error(
-        `[FAIL compute] deal=${dealId} code=${compute.code} err=${compute.error}`,
+        `[FAIL compute] deal=${dealId} err=${compute.error}`,
       );
       continue;
     }
