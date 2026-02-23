@@ -66,8 +66,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, dealId }, { status: 201 });
   }
 
-  const { compute_version, results } = computeResult.result;
-  const computedAt = new Date().toISOString();
+  const { compute_version, results } = computeResult;
+const computedAt = new Date().toISOString();
 
   const fullSnapshot = {
     contract_version: compute_version,

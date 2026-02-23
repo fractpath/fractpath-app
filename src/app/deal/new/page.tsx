@@ -53,8 +53,8 @@ export default async function NewDealPage() {
     redirect(`/deal/${encodeURIComponent(dealId as string)}`);
   }
 
-  const { compute_version, results } = computeResult.result;
-  const computedAt = new Date().toISOString();
+  const { compute_version, results } = computeResult;
+const computedAt = new Date().toISOString();
 
   // Canonical-only snapshot payload (append-only)
   const fullSnapshot = {

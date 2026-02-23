@@ -38,6 +38,10 @@
   ],
   "exclude": [
     "node_modules",
-    "src/lib/__tests__/**"
+    "src/lib/__tests__/**",
+    "fractpath-calculator-widget-src",
+    "fractpath-calculator-widget-src__backup_20260220_124344",
+    "**/fractpath-calculator-widget-src__backup_*",
+    "attached_assets"
   ]
 }
