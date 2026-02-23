@@ -17,7 +17,6 @@ import { getDealSnapshots } from "@/lib/dealSnapshotDb";
 import { getDealVersions } from "@/lib/dealVersionDb";
 import { getDealEvents, buildDealTimeline } from "@/lib/dealTimeline";
 import { extractSnapshotDisplay } from "@/lib/dealSnapshotDisplay";
-import { DealSnapshotBridge } from "@/components/deal/DealSnapshotBridge";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -312,12 +311,7 @@ export default async function DealPage({ params, searchParams }: PageProps) {
         computeVersion={snapshotComputeVersion}
         canEdit={canEdit}
         persona={userPersona}
-      />
-
-      <DealSnapshotBridge
-        dealId={dealId}
-        enabled={role === "OWNER" && !readOnly && !isSharedMode}
-      />
+/>
 
       {role === "OWNER" && isLatest && !readOnly ? (
         <RecomputeSnapshotButton

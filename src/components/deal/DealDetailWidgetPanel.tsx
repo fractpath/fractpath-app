@@ -4,6 +4,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FractPathCalculatorWidget } from "fractpath-calculator-widget";
+import { normalizeDealTermsForWidget } from "@/lib/normalizeDealTermsForWidget";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -27,21 +28,6 @@ type DealDetailWidgetPanelProps = {
   canEdit: boolean;
   persona?: string;
 };
-
-// ---- Widget-compat normalization (stopgap until compute/widget contracts converge) ----
-function normalizeDealTermsForWidget(raw: AnyRecord): AnyRecord {
-  const r = raw as any;
-  return {
-    ...(raw as any),
-    platform_fee: r.platform_fee ?? 0,
-    servicing_fee_monthly: r.servicing_fee_monthly ?? 0,
-    exit_fee_pct: r.exit_fee_pct ?? 0,
-    realtor_representation_mode: r.realtor_representation_mode ?? "NONE",
-    realtor_commission_pct: r.realtor_commission_pct ?? 0,
-    realtor_commission_payment_mode:
-      r.realtor_commission_payment_mode ?? "UPFRONT",
-  } as AnyRecord;
-}
 
 function safeRecord(v: unknown): AnyRecord | null {
   return v !== null && typeof v === "object" && !Array.isArray(v)
