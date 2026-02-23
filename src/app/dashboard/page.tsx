@@ -50,13 +50,15 @@ const NEXT_STEPS: Record<Persona, string[]> = {
   ],
 };
 
-const IN_PROGRESS_STATUSES = new Set([
+const ACTIVE_STATUSES = new Set([
   "DRAFT",
   "NEEDS_REVIEW",
   "UNDER_REVIEW",
   "ACTIVE",
   "IMPORTED",
 ]);
+
+const NEEDS_ATTENTION_STATUSES = new Set(["NEEDS_REVIEW", "UNDER_REVIEW"]);
 
 const ACTIVE_VALUE_STATUSES = new Set([
   "UNDER_REVIEW",
@@ -85,10 +87,16 @@ function relativeAge(dateStr: string | null): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const days = Math.floor(diff / 86_400_000);
   if (days < 1) return "Updated today";
-  if (days === 1) return "Updated 1d ago";
-  if (days < 30) return `Updated ${days}d ago`;
+  if (days === 1) return "Updated 1 day ago";
+  if (days < 30) return `Updated ${days} days ago`;
   const months = Math.floor(days / 30);
-  return `Updated ${months}mo ago`;
+  if (months === 1) return "Updated 1 month ago";
+  return `Updated ${months} months ago`;
+}
+
+function shortId(id: string): string {
+  if (id.length <= 12) return id;
+  return `Deal ${id.slice(0, 4)}…${id.slice(-5)}`;
 }
 
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -101,13 +109,16 @@ type CardVm = {
   dealId: string;
   href: string;
   title: string;
-  secondaryFmvLabel: string | null;
-  kpiLine: string | null;
-  metaLine: string | null;
+  secondaryId: string | null;
   statusLabel: string;
-  roleChipLabel: string;
+  rawStatus: string;
+  roleChipLabel: string | null;
+  fmvLabel: string | null;
+  upfrontMonthlyLabel: string | null;
+  vestedLabel: string | null;
+  exitYearLabel: string | null;
+  updatedLabel: string | null;
   fmvRaw: number | null;
-  dealStatus: string;
 };
 
 export default async function DashboardPage({ searchParams }: PageProps) {
@@ -155,13 +166,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     return (
       <div>
         <AppHeader />
-        <main className="mx-auto max-w-3xl p-6">
-          <div className="flex items-baseline justify-between gap-4">
-            <h1 className="text-xl font-semibold">Dashboard</h1>
-            <div className="text-sm text-muted-foreground">{user.email}</div>
-          </div>
-
-          <div className="mt-6 rounded-md border p-4">
+        <main className="mx-auto max-w-3xl p-6 space-y-8">
+          <h1 className="text-2xl font-semibold">Dashboard</h1>
+          <div className="rounded-lg border p-4">
             <div className="text-sm font-medium">Couldn't load your deals</div>
             <div className="mt-2 text-sm text-muted-foreground break-words">
               {grantsRes.error.message}
@@ -221,45 +228,45 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     const snap = latestSnapByDeal.get(dealId);
     const meta = extractDealCardMeta(snap);
 
-    const dealStatus = (deal?.status as string) || "IMPORTED";
-    const statusLabel = formatStatusLabel(dealStatus);
+    const rawStatus = ((deal?.status as string) || "IMPORTED").toUpperCase();
+    const statusLabel = formatStatusLabel(rawStatus);
 
     const href =
       grantRole === "OWNER" ? `/deal/${dealId}` : `/deal/${dealId}?mode=shared`;
 
-    const title =
-      meta.addressTitle ||
-      deal?.title ||
-      deal?.name ||
-      deal?.address ||
-      deal?.property_address ||
-      deal?.home_address ||
-      dealId;
+    const addressTitle = meta.addressTitle;
+    const title = addressTitle || shortId(dealId);
+    const secondaryId = addressTitle ? shortId(dealId) : null;
 
-    const secondaryFmvLabel = meta.fmv != null
-      ? `FMV ${fmtMoneyAbbrev(meta.fmv)}`
-      : null;
+    const fmvLabel = meta.fmv != null ? fmtMoneyAbbrev(meta.fmv) : null;
 
-    const kpiLine = fmtUpfrontPlusMonthly(meta.upfront, meta.monthly);
+    const upfrontMonthly = fmtUpfrontPlusMonthly(meta.upfront, meta.monthly);
+    const upfrontMonthlyLabel = upfrontMonthly === "\u2014" ? null : upfrontMonthly;
 
-    const parts: string[] = [];
-    if (meta.exitYear != null) parts.push(`Exit Year ${meta.exitYear}`);
-    parts.push(fmtVestedProgress(meta.vested.currentPct, meta.vested.totalPct));
-    const age = relativeAge(snapDateByDeal.get(dealId) ?? null);
-    if (age) parts.push(age);
-    const metaLine = parts.filter(Boolean).join(" \u2022 ");
+    const vestedLabel =
+      meta.vested.totalPct != null
+        ? fmtVestedProgress(meta.vested.currentPct, meta.vested.totalPct)
+        : null;
+
+    const exitYearLabel =
+      meta.exitYear != null ? `Exit ${new Date().getFullYear() + meta.exitYear}` : null;
+
+    const updatedLabel = relativeAge(snapDateByDeal.get(dealId) ?? null);
 
     return {
       dealId,
       href,
       title,
-      secondaryFmvLabel,
-      kpiLine: kpiLine === "\u2014" ? null : kpiLine,
-      metaLine: metaLine || null,
+      secondaryId,
       statusLabel,
-      roleChipLabel: grantRole === "OWNER" ? "Owner" : "Shared",
+      rawStatus,
+      roleChipLabel: grantRole === "VIEWER" ? "Shared" : null,
+      fmvLabel,
+      upfrontMonthlyLabel,
+      vestedLabel,
+      exitYearLabel,
+      updatedLabel: updatedLabel || null,
       fmvRaw: meta.fmv,
-      dealStatus: dealStatus.toUpperCase(),
     };
   }
 
@@ -272,25 +279,24 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     .map((g) => buildCardVm(g.deal_id, g.role));
 
   const allCards = [...ownerCards, ...viewerCards];
-  const totalDeals = allCards.length;
-  const inProgress = allCards.filter((c) =>
-    IN_PROGRESS_STATUSES.has(c.dealStatus),
-  ).length;
-  const sharedCount = viewerCards.length;
 
-  const totalPotentialValue = ownerCards.reduce(
+  const totalModeledValue = ownerCards.reduce(
     (sum, c) => sum + (c.fmvRaw ?? 0),
     0,
   );
-  const totalActiveValue = ownerCards
-    .filter((c) => ACTIVE_VALUE_STATUSES.has(c.dealStatus))
-    .reduce((sum, c) => sum + (c.fmvRaw ?? 0), 0);
+  const activeDeals = allCards.filter((c) =>
+    ACTIVE_STATUSES.has(c.rawStatus),
+  ).length;
+  const needsAttention = allCards.filter((c) =>
+    NEEDS_ATTENTION_STATUSES.has(c.rawStatus),
+  ).length;
+  const sharedCount = viewerCards.length;
 
   return (
     <div>
       <AppHeader />
-      <main className="mx-auto max-w-3xl p-6">
-        <header className="mb-6">
+      <main className="mx-auto max-w-3xl p-6 space-y-8">
+        <header>
           <h1 className="text-2xl font-semibold">{welcome.tagline}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {welcome.description}
@@ -298,7 +304,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         </header>
 
         {createFailed ? (
-          <div className="mb-6 rounded-md border p-4">
+          <div className="rounded-lg border p-4">
             <div className="text-sm font-medium">Deal creation failed</div>
             <div className="mt-1 text-sm text-muted-foreground">
               Please try again.{" "}
@@ -309,156 +315,148 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           </div>
         ) : null}
 
-        <div className="grid gap-6">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div className="rounded-lg border p-3">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                Total Deals
-              </div>
-              <div className="mt-1 text-lg font-semibold">{totalDeals}</div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="rounded-lg border bg-background p-4">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Total Modeled Value
             </div>
-            <div className="rounded-lg border p-3">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                In Progress
-              </div>
-              <div className="mt-1 text-lg font-semibold">{inProgress}</div>
-            </div>
-            <div className="rounded-lg border p-3">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                Shared with Me
-              </div>
-              <div className="mt-1 text-lg font-semibold">{sharedCount}</div>
-            </div>
-            <div className="rounded-lg border p-3">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                Follow-ups Due
-              </div>
-              <div className="mt-1 text-lg font-semibold text-muted-foreground">
-                0
-              </div>
+            <div className="mt-1 text-lg font-semibold">
+              {totalModeledValue > 0 ? fmtMoneyAbbrev(totalModeledValue) : "\u2014"}
             </div>
           </div>
-
-          {(totalPotentialValue > 0 || totalActiveValue > 0) ? (
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-lg border p-3">
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                  Total Potential Value
-                </div>
-                <div className="mt-1 text-lg font-semibold">
-                  {fmtMoneyAbbrev(totalPotentialValue)}
-                </div>
-              </div>
-              <div className="rounded-lg border p-3">
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                  Total Active Value
-                </div>
-                <div className="mt-1 text-lg font-semibold">
-                  {fmtMoneyAbbrev(totalActiveValue)}
-                </div>
-              </div>
+          <div className="rounded-lg border bg-background p-4">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Active Deals
             </div>
-          ) : null}
+            <div className="mt-1 text-lg font-semibold">{activeDeals}</div>
+          </div>
+          <div className="rounded-lg border bg-background p-4">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Needs Attention
+            </div>
+            <div className="mt-1 text-lg font-semibold">{needsAttention}</div>
+          </div>
+          <div className="rounded-lg border bg-background p-4">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Shared With Me
+            </div>
+            <div className="mt-1 text-lg font-semibold">{sharedCount}</div>
+          </div>
+        </div>
 
-          <section className="rounded-lg border p-5">
-            <h2 className="text-sm font-semibold">Next steps</h2>
-            <ol className="mt-3 list-decimal pl-5 text-sm text-muted-foreground space-y-1.5">
+        <section className="space-y-6">
+          <div>
+            <h2 className="text-lg font-semibold">Next steps</h2>
+            <p className="text-sm text-muted-foreground">
+              Your personalized action items
+            </p>
+          </div>
+          <div className="rounded-lg border p-5">
+            <ol className="list-decimal pl-5 text-sm text-muted-foreground space-y-1.5">
               {steps.map((step, i) => (
                 <li key={i}>{step}</li>
               ))}
             </ol>
-          </section>
+          </div>
+        </section>
 
-          <section>
-            <div className="flex items-baseline justify-between gap-4 mb-3">
-              <h2 className="text-sm font-semibold">My deals</h2>
+        <section className="space-y-6">
+          <div>
+            <h2 className="text-lg font-semibold">My deals</h2>
+            <p className="text-sm text-muted-foreground">
+              Deals you own and manage
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Link
+              href="/deal/new"
+              className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed p-6 transition-colors hover:bg-muted/40 cursor-pointer"
+            >
+              <span className="text-2xl text-muted-foreground">+</span>
+              <span className="text-sm font-medium">Create Deal</span>
               <span className="text-xs text-muted-foreground">
-                {ownerCards.length}
+                Start a new scenario
               </span>
-            </div>
+            </Link>
 
-            <div className="mb-3">
-              <Link
-                href="/deal/new"
-                className="inline-flex items-center rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background"
-              >
-                + Create deal
-              </Link>
-            </div>
+            {ownerCards.map((vm) => (
+              <DealCard
+                key={vm.dealId}
+                href={vm.href}
+                title={vm.title}
+                secondaryId={vm.secondaryId}
+                statusLabel={vm.statusLabel}
+                roleChipLabel={vm.roleChipLabel}
+                fmvLabel={vm.fmvLabel}
+                upfrontMonthlyLabel={vm.upfrontMonthlyLabel}
+                vestedLabel={vm.vestedLabel}
+                exitYearLabel={vm.exitYearLabel}
+                updatedLabel={vm.updatedLabel}
+              />
+            ))}
 
             {ownerCards.length === 0 ? (
               <div className="rounded-lg border p-4">
                 <p className="text-sm text-muted-foreground">
-                  You don't have any deals yet.
+                  You don't have any deals yet. Create one above to get started.
                 </p>
               </div>
-            ) : (
-              <div className="space-y-2">
-                {ownerCards.map((vm) => (
-                  <DealCard
-                    key={vm.dealId}
-                    href={vm.href}
-                    title={vm.title}
-                    secondaryFmvLabel={vm.secondaryFmvLabel}
-                    kpiLine={vm.kpiLine}
-                    metaLine={vm.metaLine}
-                    statusLabel={vm.statusLabel}
-                    roleChipLabel={vm.roleChipLabel}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
+            ) : null}
+          </div>
+        </section>
 
-          <section>
-            <div className="flex items-baseline justify-between gap-4 mb-3">
-              <h2 className="text-sm font-semibold">Shared with me</h2>
-              <span className="text-xs text-muted-foreground">
-                {viewerCards.length}
-              </span>
-            </div>
-
-            {viewerCards.length === 0 ? (
-              <div className="rounded-lg border p-4">
-                <p className="text-sm text-muted-foreground">
-                  Nothing has been shared with you yet.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {viewerCards.map((vm) => (
-                  <DealCard
-                    key={vm.dealId}
-                    href={vm.href}
-                    title={vm.title}
-                    secondaryFmvLabel={vm.secondaryFmvLabel}
-                    kpiLine={vm.kpiLine}
-                    metaLine={vm.metaLine}
-                    statusLabel={vm.statusLabel}
-                    roleChipLabel={vm.roleChipLabel}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
-
-          <section className="rounded-lg border p-5">
-            <h2 className="text-sm font-semibold">Need help?</h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Our team is here to guide you through every step.
+        <section className="space-y-6">
+          <div>
+            <h2 className="text-lg font-semibold">Shared with me</h2>
+            <p className="text-sm text-muted-foreground">
+              Deals others have shared with you
             </p>
-            <a
-              href="mailto:support@fractpath.com"
-              className="mt-3 inline-block rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background"
-            >
-              Contact FractPath
-            </a>
-          </section>
+          </div>
 
-          <footer className="pt-4 border-t text-xs text-muted-foreground text-center">
-            Signed in as {user.email}
-          </footer>
-        </div>
+          {viewerCards.length === 0 ? (
+            <div className="rounded-lg border p-4">
+              <p className="text-sm text-muted-foreground">
+                Nothing has been shared with you yet.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {viewerCards.map((vm) => (
+                <DealCard
+                  key={vm.dealId}
+                  href={vm.href}
+                  title={vm.title}
+                  secondaryId={vm.secondaryId}
+                  statusLabel={vm.statusLabel}
+                  roleChipLabel={vm.roleChipLabel}
+                  fmvLabel={vm.fmvLabel}
+                  upfrontMonthlyLabel={vm.upfrontMonthlyLabel}
+                  vestedLabel={vm.vestedLabel}
+                  exitYearLabel={vm.exitYearLabel}
+                  updatedLabel={vm.updatedLabel}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-lg border p-5">
+          <h2 className="text-lg font-semibold">Need help?</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Our team is here to guide you through every step.
+          </p>
+          <a
+            href="mailto:support@fractpath.com"
+            className="mt-3 inline-block rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background"
+          >
+            Contact FractPath
+          </a>
+        </section>
+
+        <footer className="pt-4 border-t text-xs text-muted-foreground text-center">
+          Signed in as {user.email}
+        </footer>
       </main>
     </div>
   );
