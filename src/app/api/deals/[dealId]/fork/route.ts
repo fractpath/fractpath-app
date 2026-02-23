@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
-import { computeDeal } from "@/lib/computeAdapter";
+import { computeDealAdapter as computeDeal } from "@/lib/computeAdapter";
 import {
   insertDealSnapshot,
   getLatestDealSnapshot,

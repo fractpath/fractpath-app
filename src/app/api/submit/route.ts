@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { computeDeal } from "@/lib/computeAdapter";
+import { computeDealAdapter as computeDeal } from "@/lib/computeAdapter";
 import { insertDealSnapshot } from "@/lib/dealSnapshotDb";
 import { ensureScenario } from "@/lib/defaultScenario";
 import { SCHEMA_VERSION } from "@/lib/contractVersion";

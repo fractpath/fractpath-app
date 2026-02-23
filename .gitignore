@@ -40,3 +40,18 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 attached_assets/
+
+# --- Safety: never commit embedded widget repos / backups / build artifacts ---
+fractpath-calculator-widget-src/
+fractpath-calculator-widget-src__backup_*/
+**/fractpath-calculator-widget-src__backup_*/
+**/dist/
+**/dist-types/
+**/.next/
+**/.turbo/
+attached_assets/
+
+# Junk files accidentally committed during copy/paste
+/node
+/168
+/fractpath-app@0.1.0

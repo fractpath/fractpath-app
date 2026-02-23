@@ -1,7 +1,7 @@
 // src/app/deal/new/page.tsx
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { computeDeal } from "@/lib/computeAdapter";
+import { computeDealAdapter as computeDeal } from "@/lib/computeAdapter";
 import { insertDealSnapshot } from "@/lib/dealSnapshotDb";
 import { ensureScenario } from "@/lib/defaultScenario";
 
