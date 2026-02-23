@@ -1,15 +1,10 @@
 // src/components/deal/DealDetailWidgetPanel.tsx
 "use client";
 
-import { useState, useCallback } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { DealSnapshotView, DealEditModal } from "fractpath-calculator-widget";
-import type {
-  DealTerms,
-  ScenarioAssumptions,
-  DealResults,
-} from "@fractpath/compute";
-import { useDealDraftState } from "@/hooks/useDealDraftState";
+import { FractPathCalculatorWidget } from "fractpath-calculator-widget";
+import type { DealTerms, ScenarioAssumptions } from "@fractpath/compute";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -17,13 +12,18 @@ type DealDetailWidgetPanelProps = {
   dealId: string;
 
   /**
-   * Full canonical snapshot payload (snapshot_json) for seeding an interactive widget.
-   * Presently unused in this panel, but accepted so the deal page can pass it without TS errors.
+   * Canonical snapshot_json row payload. Preferred seed.
+   * Expected shape: { inputs, outputs: { results }, compute_version, schema_version, ... }
    */
   initialSnapshot?: AnyRecord | null;
 
+  /**
+   * Canonical inputs + outputs extracted via extractSnapshotDisplay().
+   * Used as fallback if initialSnapshot isn't available.
+   */
   inputs: AnyRecord | null;
   results: AnyRecord | null;
+
   computeVersion?: string | null;
   canEdit: boolean;
   persona?: string;
@@ -44,116 +44,122 @@ function normalizeDealTermsForWidget(raw: DealTerms): DealTerms {
   } as any;
 }
 
-function normalizeResultsForWidget(raw: AnyRecord): DealResults {
-  const r = raw as any;
-  return {
-    ...(raw as any),
-    isa_settlement: r.isa_settlement ?? 0,
-    investor_profit: r.investor_profit ?? 0,
-    investor_multiple: r.investor_multiple ?? 0,
-    investor_irr_annual: r.investor_irr_annual ?? 0,
-    projected_fmv: r.projected_fmv ?? 0,
-    timing_factor_applied: r.timing_factor_applied ?? 1,
-    realtor_fee_total_projected: r.realtor_fee_total_projected ?? 0,
-    realtor_fee_upfront_projected: r.realtor_fee_upfront_projected ?? 0,
-    realtor_fee_installments_projected:
-      r.realtor_fee_installments_projected ?? 0,
-    buyer_realtor_fee_total_projected: r.buyer_realtor_fee_total_projected ?? 0,
-    seller_realtor_fee_total_projected:
-      r.seller_realtor_fee_total_projected ?? 0,
-  } as DealResults;
+function safeRecord(v: unknown): AnyRecord | null {
+  return v !== null && typeof v === "object" && !Array.isArray(v)
+    ? (v as AnyRecord)
+    : null;
 }
 
 export function DealDetailWidgetPanel({
   dealId,
-  // accepted for TS + future Option A wiring; currently unused
-  initialSnapshot: _initialSnapshot,
+  initialSnapshot,
   inputs,
   results,
-  computeVersion: _computeVersion,
+  computeVersion,
   canEdit,
   persona = "homeowner",
 }: DealDetailWidgetPanelProps) {
   const router = useRouter();
-  const [isEditOpen, setEditOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const typedInputsRaw = inputs as {
-    deal_terms: DealTerms;
-    scenario: ScenarioAssumptions;
-  } | null;
+  // Preferred: use the stored snapshot_json directly (preserves any widget-required metadata).
+  // Fallback: construct a minimal FullDealSnapshot-like object from extracted display inputs/results.
+  const seedSnapshot = useMemo(() => {
+    const snap = safeRecord(initialSnapshot);
+    if (snap) return snap;
 
-  const typedInputs = typedInputsRaw
-    ? ({
-        ...typedInputsRaw,
-        deal_terms: normalizeDealTermsForWidget(typedInputsRaw.deal_terms),
-      } as any)
-    : null;
+    const inRec = safeRecord(inputs);
+    const outRec = safeRecord(results);
+    if (!inRec && !outRec) return null;
 
-  const typedResults = results ? normalizeResultsForWidget(results) : null;
+    // If inputs has the shape {deal_terms, scenario}, normalize deal_terms for widget.
+    let normalizedInputs: AnyRecord | null = inRec;
+    if (
+      inRec &&
+      safeRecord((inRec as any).deal_terms) &&
+      safeRecord((inRec as any).scenario)
+    ) {
+      const dealTerms = (inRec as any).deal_terms as DealTerms;
+      const scenario = (inRec as any).scenario as ScenarioAssumptions;
+      normalizedInputs = {
+        ...(inRec as any),
+        deal_terms: normalizeDealTermsForWidget(dealTerms) as any,
+        scenario,
+      };
+    }
 
-  const draftState = useDealDraftState(
-    typedInputs
-      ? { deal_terms: typedInputs.deal_terms, scenario: typedInputs.scenario }
-      : undefined,
-  );
+    return {
+      inputs: normalizedInputs ?? null,
+      outputs: { results: outRec ?? null },
+      compute_version: computeVersion ?? null,
+      schema_version: (initialSnapshot as any)?.schema_version ?? null,
+    } as AnyRecord;
+  }, [initialSnapshot, inputs, results, computeVersion]);
 
   const handleSave = useCallback(
-    async (draft: { deal_terms: DealTerms; scenario: ScenarioAssumptions }) => {
-      setSaving(true);
+    async (payload: unknown) => {
+      // Widget may send either SavePayload or FullDealSnapshotV1 depending on implementation.
+      // For app-mode, we just need inputs to recompute + persist via server.
+      const p = safeRecord(payload) ?? {};
+      const maybeSnapshot = safeRecord((p as any).snapshot) ?? safeRecord(p);
+      const maybeInputs =
+        safeRecord((maybeSnapshot as any)?.inputs) ??
+        safeRecord((p as any)?.inputs);
+
+      if (!maybeInputs) {
+        setError("Save failed: widget did not provide inputs.");
+        return;
+      }
+
+      // Your compute endpoint expects: { inputs: { deal_terms, scenario } }
+      const dealTerms = (maybeInputs as any).deal_terms as
+        | DealTerms
+        | undefined;
+      const scenario = (maybeInputs as any).scenario as
+        | ScenarioAssumptions
+        | undefined;
+
+      if (!dealTerms || !scenario) {
+        setError("Save failed: missing deal_terms or scenario.");
+        return;
+      }
+
       setError(null);
 
       try {
         const res = await fetch(`/api/deals/${dealId}/snapshot/compute`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ inputs: draft }),
+          body: JSON.stringify({
+            inputs: {
+              deal_terms: normalizeDealTermsForWidget(dealTerms),
+              scenario,
+            },
+          }),
         });
 
         const body = await res
           .json()
           .catch(() => ({ ok: false, error: "Invalid response" }));
-
         if (!res.ok || body.ok === false) {
           setError(body.error ?? `Save failed (${res.status})`);
-          setSaving(false);
           return;
         }
 
-        setEditOpen(false);
-        setSaving(false);
         router.refresh();
       } catch (err: any) {
-        setError(err.message ?? "Network error");
-        setSaving(false);
+        setError(err?.message ?? "Network error");
       }
     },
     [dealId, router],
-  );
-
-  const hasSnapshot = !!(
-    typedInputs &&
-    typedResults &&
-    Number.isFinite((typedResults as any).invested_capital_total) &&
-    Number.isFinite((typedResults as any).isa_settlement) &&
-    Number.isFinite((typedResults as any).projected_fmv) &&
-    Number.isFinite((typedResults as any).investor_multiple) &&
-    Number.isFinite((typedResults as any).investor_irr_annual)
   );
 
   return (
     <section className="mt-6">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-base font-semibold">Scenario Details</h2>
-        {canEdit ? (
-          <button
-            type="button"
-            onClick={() => setEditOpen(true)}
-            className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-          >
-            Edit terms
-          </button>
+        {!canEdit ? (
+          <span className="text-xs text-muted-foreground">Owner only</span>
         ) : null}
       </div>
 
@@ -163,12 +169,16 @@ export function DealDetailWidgetPanel({
         </div>
       ) : null}
 
-      {hasSnapshot ? (
-        <DealSnapshotView
-          persona={persona as any}
-          inputs={typedInputs}
-          results={typedResults}
-        />
+      {seedSnapshot ? (
+        <div className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950">
+          <FractPathCalculatorWidget
+            persona={persona as any}
+            mode="app"
+            canEdit={canEdit}
+            initialSnapshot={seedSnapshot as any}
+            onSave={canEdit ? handleSave : undefined}
+          />
+        </div>
       ) : (
         <div className="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-950">
           <p className="text-sm text-gray-500 dark:text-gray-400">
@@ -176,26 +186,6 @@ export function DealDetailWidgetPanel({
           </p>
         </div>
       )}
-
-      {canEdit && isEditOpen ? (
-        <DealEditModal
-          draft={draftState.draft}
-          errors={draftState.errors}
-          preview={draftState.preview}
-          persona={persona as any}
-          permissions={{ canEdit: true }}
-          setField={draftState.setField}
-          onBlurCompute={() => draftState.onBlurCompute()}
-          onSave={(draft: unknown) =>
-            handleSave(
-              draft as { deal_terms: DealTerms; scenario: ScenarioAssumptions },
-            )
-          }
-          onClose={() => {
-            if (!saving) setEditOpen(false);
-          }}
-        />
-      ) : null}
     </section>
   );
 }
