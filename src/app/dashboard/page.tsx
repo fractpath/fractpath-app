@@ -153,19 +153,17 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const snapRes =
     grants.length > 0
       ? await supabase
-          .from("deal_snapshots")
-          .select("deal_id, created_at, snapshot_json")
+          .from("deal_latest_snapshots")
+          .select("deal_id, snapshot_json, created_at")
           .in(
             "deal_id",
             grants.map((g) => g.deal_id),
           )
-          .order("created_at", { ascending: false })
-          .limit(100)
       : { data: [], error: null as any };
 
   const latestSnapByDeal = new Map<string, Record<string, any>>();
   for (const s of snapRes.data ?? []) {
-    if (!latestSnapByDeal.has(s.deal_id)) {
+    if (s?.deal_id && s.snapshot_json) {
       latestSnapByDeal.set(s.deal_id, s.snapshot_json);
     }
   }
