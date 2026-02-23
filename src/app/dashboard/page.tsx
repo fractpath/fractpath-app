@@ -1,8 +1,8 @@
-// src/app/dashboard/page.tsx
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
+import { DealCard } from "@/components/dashboard/DealCard";
 
 type Persona = "homeowner" | "buyer" | "realtor";
 
@@ -49,8 +49,27 @@ type PageProps = {
   searchParams?: SearchParams | Promise<SearchParams>;
 };
 
+type DealCardViewModel = {
+  dealId: string;
+  href: string;
+  label: string;
+  secondary?: string;
+  statusLabel: string;
+  kpis: {
+    propertyValue?: number | null;
+    upfront?: number | null;
+    monthly?: number | null;
+  };
+  unreadCount?: number | null;
+};
+
+function safeNum(v: unknown): number | null {
+  if (v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 export default async function DashboardPage({ searchParams }: PageProps) {
-  // Next.js 16 App Router: searchParams may be a Promise depending on runtime path
   const resolvedSearchParams = (await Promise.resolve(searchParams as any)) as
     | SearchParams
     | undefined;
@@ -100,7 +119,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         </div>
 
         <div className="mt-6 rounded-md border p-4">
-          <div className="text-sm font-medium">Couldn’t load your deals</div>
+          <div className="text-sm font-medium">Couldn't load your deals</div>
           <div className="mt-2 text-sm text-muted-foreground break-words">
             {grantsRes.error.message}
           </div>
@@ -115,18 +134,12 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   }
 
   const grants = grantsRes.data ?? [];
-  const ownerDealIds = grants
-    .filter((g) => g.role === "OWNER")
-    .map((g) => g.deal_id);
-  const viewerDealIds = grants
-    .filter((g) => g.role === "VIEWER")
-    .map((g) => g.deal_id);
 
   const dealsRes =
     grants.length > 0
       ? await supabase
           .from("deals")
-          .select("*")
+          .select("id, status, owner_user_id, mode")
           .in(
             "id",
             grants.map((g) => g.deal_id),
@@ -137,17 +150,74 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const byId = new Map<string, Record<string, any>>();
   for (const d of deals) byId.set(d.id, d);
 
-  function labelForDeal(dealId: string): { label: string; isFallback: boolean } {
-      const d = byId.get(dealId);
-      const label =
-        d?.title ||
-        d?.name ||
-        d?.address ||
-        d?.property_address ||
-        d?.home_address ||
-        dealId;
-      return { label, isFallback: label === dealId };
+  const snapRes =
+    grants.length > 0
+      ? await supabase
+          .from("deal_snapshots")
+          .select("deal_id, created_at, snapshot_json")
+          .in(
+            "deal_id",
+            grants.map((g) => g.deal_id),
+          )
+          .order("created_at", { ascending: false })
+          .limit(100)
+      : { data: [], error: null as any };
+
+  const latestSnapByDeal = new Map<string, Record<string, any>>();
+  for (const s of snapRes.data ?? []) {
+    if (!latestSnapByDeal.has(s.deal_id)) {
+      latestSnapByDeal.set(s.deal_id, s.snapshot_json);
     }
+  }
+
+  function buildCardVm(
+    dealId: string,
+    grantRole: string,
+  ): DealCardViewModel {
+    const deal = byId.get(dealId);
+
+    const label =
+      deal?.title ||
+      deal?.name ||
+      deal?.address ||
+      deal?.property_address ||
+      deal?.home_address ||
+      dealId;
+    const isFallback = label === dealId;
+
+    const statusLabel = deal?.status || "IMPORTED";
+
+    const href =
+      grantRole === "OWNER" ? `/deal/${dealId}` : `/deal/${dealId}?mode=shared`;
+
+    const snap = latestSnapByDeal.get(dealId);
+    const dt =
+      snap?.inputs?.deal_terms ?? snap?.deal_terms ?? {};
+
+    const kpis = {
+      propertyValue: safeNum(dt.property_value),
+      upfront: safeNum(dt.upfront_payment),
+      monthly: safeNum(dt.monthly_payment),
+    };
+
+    return {
+      dealId,
+      href,
+      label,
+      secondary: isFallback ? undefined : dealId,
+      statusLabel,
+      kpis,
+      unreadCount: null,
+    };
+  }
+
+  const ownerCards = grants
+    .filter((g) => g.role === "OWNER")
+    .map((g) => buildCardVm(g.deal_id, g.role));
+
+  const viewerCards = grants
+    .filter((g) => g.role === "VIEWER")
+    .map((g) => buildCardVm(g.deal_id, g.role));
 
   return (
     <main className="mx-auto max-w-3xl p-6">
@@ -188,92 +258,79 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       ) : null}
 
       <div className="mt-6 grid gap-6">
-        <section className="rounded-md border p-4">
-          <div className="flex items-baseline justify-between gap-4">
-            <h2 className="text-sm font-medium">My deals</h2>
-            <span className="text-xs text-muted-foreground">
-              {ownerDealIds.length}
-            </span>
-          </div>
-
-          {ownerDealIds.length === 0 ? (
-            <p className="mt-2 text-sm text-muted-foreground">
-              You don’t have any deals yet.
-            </p>
-          ) : (
-            <ul className="mt-3 space-y-2">
-              {ownerDealIds.map((id) => (
-                <li
-                  key={id}
-                  className="flex items-center justify-between gap-3"
-                >
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium truncate">
-                      {labelForDeal(id).label}
-                    </div>
-                    {labelForDeal(id).isFallback ? null : (
-                      <div className="text-xs text-muted-foreground truncate">{id}</div>
-                    )}
-                  </div>
-                  <Link className="text-sm underline" href={`/deal/${id}`}>
-                    Open
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        <section className="rounded-md border p-4">
-          <div className="flex items-baseline justify-between gap-4">
-            <h2 className="text-sm font-medium">Shared with me</h2>
-            <span className="text-xs text-muted-foreground">
-              {viewerDealIds.length}
-            </span>
-          </div>
-
-          {viewerDealIds.length === 0 ? (
-            <p className="mt-2 text-sm text-muted-foreground">
-              Nothing has been shared with you yet.
-            </p>
-          ) : (
-            <ul className="mt-3 space-y-2">
-              {viewerDealIds.map((id) => (
-                <li
-                  key={id}
-                  className="flex items-center justify-between gap-3"
-                >
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium truncate">
-                      {labelForDeal(id).label}
-                    </div>
-                    {labelForDeal(id).isFallback ? null : (
-                      <div className="text-xs text-muted-foreground truncate">{id}</div>
-                    )}
-                  </div>
-                  <Link
-                    className="text-sm underline"
-                    href={`/deal/${id}?mode=shared`}
-                  >
-                    View
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        <section className="rounded-md border p-4">
-          <h2 className="text-sm font-medium">What happens next</h2>
-          <ol className="mt-3 list-decimal pl-5 text-sm text-muted-foreground space-y-1">
+        <section className="rounded-lg border p-5">
+          <h2 className="text-sm font-semibold">Next steps</h2>
+          <ol className="mt-3 list-decimal pl-5 text-sm text-muted-foreground space-y-1.5">
             {steps.map((step, i) => (
               <li key={i}>{step}</li>
             ))}
           </ol>
         </section>
 
-        <section className="rounded-md border p-4">
-          <h2 className="text-sm font-medium">Need help?</h2>
+        <section>
+          <div className="flex items-baseline justify-between gap-4 mb-3">
+            <h2 className="text-sm font-semibold">My deals</h2>
+            <span className="text-xs text-muted-foreground">
+              {ownerCards.length}
+            </span>
+          </div>
+
+          {ownerCards.length === 0 ? (
+            <div className="rounded-lg border p-4">
+              <p className="text-sm text-muted-foreground">
+                You don't have any deals yet.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {ownerCards.map((vm) => (
+                <DealCard
+                  key={vm.dealId}
+                  href={vm.href}
+                  label={vm.label}
+                  secondary={vm.secondary}
+                  statusLabel={vm.statusLabel}
+                  kpis={vm.kpis}
+                  unreadCount={vm.unreadCount}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section>
+          <div className="flex items-baseline justify-between gap-4 mb-3">
+            <h2 className="text-sm font-semibold">Shared with me</h2>
+            <span className="text-xs text-muted-foreground">
+              {viewerCards.length}
+            </span>
+          </div>
+
+          {viewerCards.length === 0 ? (
+            <div className="rounded-lg border p-4">
+              <p className="text-sm text-muted-foreground">
+                Nothing has been shared with you yet.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {viewerCards.map((vm) => (
+                <DealCard
+                  key={vm.dealId}
+                  href={vm.href}
+                  label={vm.label}
+                  secondary={vm.secondary}
+                  statusLabel={vm.statusLabel}
+                  kpis={vm.kpis}
+                  unreadCount={vm.unreadCount}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-lg border p-5">
+          <h2 className="text-sm font-semibold">Need help?</h2>
           <p className="mt-2 text-sm text-muted-foreground">
             Our team is here to guide you through every step.
           </p>
