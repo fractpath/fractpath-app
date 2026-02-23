@@ -78,13 +78,16 @@ const STATUS_DISPLAY: Record<string, string> = {
   CLOSED: "Closed",
 };
 
+const NOW_MS = Date.now();
+const NOW_YEAR = new Date(NOW_MS).getFullYear();
+
 function formatStatusLabel(raw: string): string {
   return STATUS_DISPLAY[raw.toUpperCase()] ?? raw;
 }
 
-function relativeAge(dateStr: string | null): string {
+function relativeAge(dateStr: string | null, nowMs: number): string {
   if (!dateStr) return "";
-  const diff = Date.now() - new Date(dateStr).getTime();
+  const diff = nowMs - new Date(dateStr).getTime();
   const days = Math.floor(diff / 86_400_000);
   if (days < 1) return "Updated today";
   if (days === 1) return "Updated 1 day ago";
@@ -249,9 +252,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         : null;
 
     const exitYearLabel =
-      meta.exitYear != null ? `Exit ${new Date().getFullYear() + meta.exitYear}` : null;
+      meta.exitYear != null ? `Exit ${NOW_YEAR + meta.exitYear}` : null;
 
-    const updatedLabel = relativeAge(snapDateByDeal.get(dealId) ?? null);
+    const updatedLabel = relativeAge(snapDateByDeal.get(dealId) ?? null, NOW_MS);
 
     return {
       dealId,

@@ -66,7 +66,8 @@ export async function POST(
     );
   }
 
-  // RLS-enforced OWNER check via deal_access_grants
+  // OWNER only
+// RLS-enforced OWNER check via deal_access_grants
   const { data: grant, error: grantError } = await (
     supabase.from("deal_access_grants") as any
   )
@@ -79,7 +80,8 @@ export async function POST(
     return jsonError("Failed to verify access", 500);
   }
   const ownerCheck = assertOwnerGrant(grant?.role);
-  if (!ownerCheck.ok) return jsonError(ownerCheck.error, ownerCheck.status);
+  // Contract requires 403 specifically for non-owners
+  if (!ownerCheck.ok) return jsonError(ownerCheck.error, 403);
 
   const computeResult = await computeDeal(body.inputs);
 

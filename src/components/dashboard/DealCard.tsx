@@ -50,11 +50,9 @@ export function DealCard({
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <span className="text-sm font-semibold truncate">{title}</span>
-            {roleChipLabel ? (
-              <span className="shrink-0 text-[10px] px-2 py-1 rounded-full bg-muted text-muted-foreground font-medium">
-                {roleChipLabel}
+            <span className="shrink-0 text-[10px] px-2 py-1 rounded-full bg-muted text-muted-foreground font-medium">
+                {roleChipLabel ?? ""}
               </span>
-            ) : null}
           </div>
           <span
             className={`shrink-0 text-[10px] px-2 py-1 rounded-full font-medium ${statusColorClass(statusLabel)}`}
@@ -63,11 +61,9 @@ export function DealCard({
           </span>
         </div>
 
-        {secondaryId ? (
-          <div className="text-xs text-muted-foreground truncate">
-            {secondaryId}
+        <div className="text-xs text-muted-foreground truncate">
+            {secondaryId ?? ""}
           </div>
-        ) : null}
 
         <div className="grid grid-cols-3 gap-2">
           <div>

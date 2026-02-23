@@ -123,7 +123,7 @@ export async function POST(request: NextRequest) {
         token,
         snapshot_json: snapshotJson,
         contract_version: contractVersion,
-        schema_version: schemaVersion,
+        schema_version: (typeof (schemaVersion) === "string" && (schemaVersion).trim() !== "" ? (schemaVersion) : "1"),
         expires_at: expiresAt.toISOString(),
         source,
       })
