@@ -174,7 +174,7 @@ async function main() {
 
     // Canonical-only structure: outputs always wrap the canonical compute results.
     const canonicalOutputs: Record<string, unknown> = {
-      results: compute.result.results,
+      results: compute.results,
     };
 
     const canonicalSnapshot = {
