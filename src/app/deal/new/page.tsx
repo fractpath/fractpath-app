@@ -1,110 +1,39 @@
-"use client";
-
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
 import { AppHeader } from "@/components/layout/AppHeader";
-import { DealWidgetShell } from "@/components/deal/DealWidgetShell";
+import { NewDealClient } from "./NewDealClient";
 
-type AnyRecord = Record<string, unknown>;
+export const dynamic = "force-dynamic";
 
-export default function NewDealPage() {
-  const router = useRouter();
-  const [error, setError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [authed, setAuthed] = useState<boolean | null>(null);
+type Persona = "homeowner" | "buyer" | "realtor";
 
-  useEffect(() => {
-    fetch("/api/me")
-      .then((r) => {
-        if (r.status === 401) {
-          router.replace(`/login?returnTo=${encodeURIComponent("/deal/new")}`);
-        } else {
-          setAuthed(true);
-        }
-      })
-      .catch(() => setAuthed(true));
-  }, [router]);
+export default async function NewDealPage() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  const defaultSeed = useMemo<AnyRecord>(
-    () => ({
-      inputs: { deal_terms: {}, scenario: {} },
-      outputs: { results: null },
-      compute_version: null,
-      schema_version: "1",
-    }),
-    [],
-  );
-
-  const handleSave = useCallback(
-    async (parsed: { deal_terms: AnyRecord; scenario: AnyRecord }) => {
-      setCreating(true);
-      setError(null);
-
-      try {
-        const res = await fetch("/api/deals/create", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ inputs: parsed }),
-        });
-
-        const body = await res
-          .json()
-          .catch(() => ({ ok: false, error: "Invalid response" }));
-
-        if (!res.ok || body.ok === false) {
-          throw new Error(body.error ?? `Create failed (${res.status})`);
-        }
-
-        router.push(body.redirect_url ?? "/dashboard");
-      } catch (err: any) {
-        setError(err?.message ?? "Failed to create deal");
-        setCreating(false);
-      }
-    },
-    [router],
-  );
-
-  if (authed === null) {
-    return (
-      <div>
-        <AppHeader />
-        <main className="mx-auto max-w-3xl p-6">
-          <p className="text-sm text-muted-foreground">Loading...</p>
-        </main>
-      </div>
-    );
+  if (!user) {
+    redirect(`/login?returnTo=${encodeURIComponent("/deal/new")}`);
   }
+
+  const persona: Persona =
+    (user.user_metadata?.role as Persona | undefined) || "homeowner";
 
   return (
     <div>
       <AppHeader />
       <main className="mx-auto max-w-3xl p-6">
-        <h1 className="text-2xl font-semibold">Create a new deal</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Configure your deal terms and scenario, then save to create.
-        </p>
-
-        {error ? (
-          <div className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">
-            {error}
-          </div>
-        ) : null}
-
-        {creating ? (
-          <div className="mt-6 rounded-lg border p-6 text-center">
-            <p className="text-sm text-muted-foreground">
-              Creating your deal...
+        {persona === "realtor" ? (
+          <div className="rounded-lg border p-6">
+            <h1 className="text-lg font-semibold">Cannot create deals</h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Realtors are view-only and cannot create deals. You can view
+              deals that have been shared with you from your dashboard.
             </p>
           </div>
         ) : (
-          <div className="mt-6">
-            <DealWidgetShell
-              initialSnapshot={defaultSeed}
-              canEdit={true}
-              persona="homeowner"
-              onSave={handleSave}
-            />
-          </div>
+          <NewDealClient persona={persona} />
         )}
       </main>
     </div>
