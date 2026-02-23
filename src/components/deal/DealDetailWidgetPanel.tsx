@@ -4,7 +4,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FractPathCalculatorWidget } from "fractpath-calculator-widget";
-import type { DealTerms, ScenarioAssumptions } from "@fractpath/compute";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -30,7 +29,7 @@ type DealDetailWidgetPanelProps = {
 };
 
 // ---- Widget-compat normalization (stopgap until compute/widget contracts converge) ----
-function normalizeDealTermsForWidget(raw: DealTerms): DealTerms {
+function normalizeDealTermsForWidget(raw: AnyRecord): AnyRecord {
   const r = raw as any;
   return {
     ...(raw as any),
@@ -41,7 +40,7 @@ function normalizeDealTermsForWidget(raw: DealTerms): DealTerms {
     realtor_commission_pct: r.realtor_commission_pct ?? 0,
     realtor_commission_payment_mode:
       r.realtor_commission_payment_mode ?? "UPFRONT",
-  } as any;
+  } as AnyRecord;
 }
 
 function safeRecord(v: unknown): AnyRecord | null {
@@ -79,11 +78,11 @@ export function DealDetailWidgetPanel({
       safeRecord((inRec as any).deal_terms) &&
       safeRecord((inRec as any).scenario)
     ) {
-      const dealTerms = (inRec as any).deal_terms as DealTerms;
-      const scenario = (inRec as any).scenario as ScenarioAssumptions;
+      const dealTerms = (inRec as any).deal_terms as AnyRecord;
+      const scenario = (inRec as any).scenario as AnyRecord;
       normalizedInputs = {
         ...(inRec as any),
-        deal_terms: normalizeDealTermsForWidget(dealTerms) as any,
+        deal_terms: normalizeDealTermsForWidget(dealTerms),
         scenario,
       };
     }
@@ -111,13 +110,9 @@ export function DealDetailWidgetPanel({
         return;
       }
 
-      // Your compute endpoint expects: { inputs: { deal_terms, scenario } }
-      const dealTerms = (maybeInputs as any).deal_terms as
-        | DealTerms
-        | undefined;
-      const scenario = (maybeInputs as any).scenario as
-        | ScenarioAssumptions
-        | undefined;
+      // Compute endpoint expects: { inputs: { deal_terms, scenario } }
+      const dealTerms = safeRecord((maybeInputs as any).deal_terms);
+      const scenario = safeRecord((maybeInputs as any).scenario);
 
       if (!dealTerms || !scenario) {
         setError("Save failed: missing deal_terms or scenario.");

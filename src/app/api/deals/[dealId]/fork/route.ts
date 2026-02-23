@@ -123,7 +123,7 @@ export async function POST(
   // Canonical fork baseline:
   // - Prefer source snapshot inputs if present
   // - Otherwise fall back to defaults
-  // - Always recompute via @fractpath/compute and insert a canonical snapshot
+  // - Always recompute via computeAdapter (widget boundary) and insert a canonical snapshot
   let baselineSnapshotId: string | null = null;
 
   try {

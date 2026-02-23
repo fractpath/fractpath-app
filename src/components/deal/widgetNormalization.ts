@@ -1,6 +1,8 @@
-import type { DealTerms, DealResults } from "@fractpath/compute";
-
 export type AnyRecord = Record<string, unknown>;
+
+// Local structural types (app repo must not import @fractpath/compute)
+export type DealTerms = AnyRecord;
+export type DealResults = AnyRecord;
 
 // ---- Widget-compat normalization (stopgap until compute/widget contracts converge) ----
 
@@ -13,7 +15,8 @@ export function normalizeDealTermsForWidget(raw: DealTerms): DealTerms {
     exit_fee_pct: r.exit_fee_pct ?? 0,
     realtor_representation_mode: r.realtor_representation_mode ?? "NONE",
     realtor_commission_pct: r.realtor_commission_pct ?? 0,
-    realtor_commission_payment_mode: r.realtor_commission_payment_mode ?? "UPFRONT",
+    realtor_commission_payment_mode:
+      r.realtor_commission_payment_mode ?? "UPFRONT",
   } as any;
 }
 
@@ -29,8 +32,10 @@ export function normalizeResultsForWidget(raw: AnyRecord): DealResults {
     timing_factor_applied: r.timing_factor_applied ?? 1,
     realtor_fee_total_projected: r.realtor_fee_total_projected ?? 0,
     realtor_fee_upfront_projected: r.realtor_fee_upfront_projected ?? 0,
-    realtor_fee_installments_projected: r.realtor_fee_installments_projected ?? 0,
+    realtor_fee_installments_projected:
+      r.realtor_fee_installments_projected ?? 0,
     buyer_realtor_fee_total_projected: r.buyer_realtor_fee_total_projected ?? 0,
-    seller_realtor_fee_total_projected: r.seller_realtor_fee_total_projected ?? 0,
+    seller_realtor_fee_total_projected:
+      r.seller_realtor_fee_total_projected ?? 0,
   } as DealResults;
 }

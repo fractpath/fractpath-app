@@ -1,5 +1,5 @@
 import { CONTRACT_VERSION, SCHEMA_VERSION } from "@/lib/contractVersion";
-import { computeScenario, normalizeInputs } from "fractpath-calculator-widget";
+import * as Widget from "fractpath-calculator-widget";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -21,16 +21,29 @@ export type ComputeResult = ComputeOk | ComputeErr;
 /**
  * Canonical compute adapter.
  *
- * IMPORTANT:
- * - The app repo must NOT depend on @fractpath/compute directly.
+ * Boundary rules:
+ * - This repo must not import or depend on the compute package directly.
  * - The widget package is the compute distributor; we call into it here.
  */
-export async function computeDealAdapter(inputs: unknown): Promise<ComputeResult> {
+export async function computeDealAdapter(
+  inputs: unknown,
+): Promise<ComputeResult> {
   try {
-    // Normalize if available (widget exports normalizeInputs)
-    const normalized = normalizeInputs(inputs as any);
+    const W: any = Widget as any;
 
-    const out: any = computeScenario(normalized as any);
+    const normalize = W.normalizeInputs ?? W.normalizeInput ?? ((x: any) => x);
+
+    const compute = W.computeScenario ?? W.computeDeal ?? W.compute ?? null;
+
+    if (typeof compute !== "function") {
+      return {
+        ok: false,
+        error: "Compute failed: widget compute function not found",
+      };
+    }
+
+    const normalized = normalize(inputs as any);
+    const out: any = compute(normalized as any);
 
     // Different historical shapes have existed; accept the canonical results wherever it lands.
     const results: AnyRecord =
@@ -53,3 +66,9 @@ export async function computeDealAdapter(inputs: unknown): Promise<ComputeResult
     };
   }
 }
+
+/**
+ * Back-compat alias: existing app scripts/components may import `computeDeal`.
+ * Keep this as a thin alias to the canonical adapter.
+ */
+export const computeDeal = computeDealAdapter;
