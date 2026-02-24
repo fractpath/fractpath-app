@@ -10,25 +10,42 @@ export function useSession() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    try {
-      const supabase = createClient();
+    let mounted = true;
+    let unsubscribe: (() => void) | null = null;
 
-      supabase.auth.getUser().then(({ data: { user } }) => {
-        setUser(user);
+    async function run() {
+      try {
+        const supabase = createClient();
+        const { data } = await supabase.auth.getUser();
+
+        if (!mounted) return;
+
+        setUser(data.user ?? null);
         setIsLoading(false);
-      });
 
-      const {
-        data: { subscription },
-      } = supabase.auth.onAuthStateChange((_event, session) => {
-        setUser(session?.user ?? null);
-      });
+        const { data: sub } = supabase.auth.onAuthStateChange(
+          (_event, session) => {
+            if (!mounted) return;
+            setUser(session?.user ?? null);
+          },
+        );
 
-      return () => subscription.unsubscribe();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Auth not configured");
-      setIsLoading(false);
+        unsubscribe = () => sub.subscription.unsubscribe();
+      } catch (e) {
+        if (!mounted) return;
+        setError(e instanceof Error ? e.message : "Auth not configured");
+        setIsLoading(false);
+      }
     }
+
+    void run();
+
+    return () => {
+      mounted = false;
+      try {
+        unsubscribe?.();
+      } catch {}
+    };
   }, []);
 
   return { user, isLoading, isSignedIn: !!user, error };
