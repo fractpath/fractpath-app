@@ -3,22 +3,21 @@
 // Resume Route — Accepts FullDealSnapshotV1-ish payloads from marketing and
 // converts them into authenticated deals with immutable canonical snapshots.
 //
-// SHAPE DETECTION:
-//   - Canonical: has `deal_terms` object (priority)
-//   - Legacy:    has `inputs` without `deal_terms`
-//   - Legacy payloads are auto-upconverted to canonical with defaults
-//
-// NORMALIZATION:
-//   - Canonical: extract `deal_terms` + `assumptions`/`scenario`
-//   - Legacy: auto-upconvert to canonical { deal_terms, scenario } with defaults
-//
-// COMPUTE:
-//   - Always recompute via computeDeal(canonicalInputs) for deterministic output
-//   - No canonical passthrough
+// IMPORTANT:
+// - Do not change canonical compute contract shape.
+// - Do not change compute model math.
+// - This route normalizes envelopes only and always recomputes deterministically.
 //
 // DRIFT CONTROL:
-//   - Validate schema_version + contract_version on canonical payloads
-//   - No @/lib/compute direct imports — only computeAdapter
+// - If version fields are present on the canonical snapshot object, enforce them.
+// - Otherwise, do not false-fail legacy / nested token payloads that don't carry versions at the same level.
+//
+// COMPUTE:
+// - Always recompute via computeDeal(canonicalInputs) for deterministic output
+// - No canonical passthrough
+//
+// NOTE:
+// - No @/lib/compute direct imports — only computeAdapter
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
@@ -29,11 +28,8 @@ import { computeDealAdapter as computeDeal } from "@/lib/computeAdapter";
 import { CONTRACT_VERSION, SCHEMA_VERSION } from "@/lib/contractVersion";
 import { isRealtorPersona } from "@/lib/authz";
 
-import {
-  ensureScenario,
-  getDefaultDealTerms,
-  getDefaultScenario,
-} from "@/lib/defaultScenario";
+import { ensureScenario } from "@/lib/defaultScenario";
+import { normalizeCanonicalInputsFromUnknown } from "@/lib/normalizeCanonicalInputs";
 
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
@@ -44,20 +40,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 // ---------------------------------------------------------------------------
-// Shape Detection
-// ---------------------------------------------------------------------------
-
-type SnapshotShape = "canonical" | "legacy" | "unknown";
-
-function detectSnapshotShape(payload: unknown): SnapshotShape {
-  if (!isRecord(payload)) return "unknown";
-  if (isRecord((payload as any).deal_terms)) return "canonical";
-  if (isRecord((payload as any).inputs)) return "legacy";
-  return "unknown";
-}
-
-// ---------------------------------------------------------------------------
-// Payload Unwrapping
+// Payload Unwrapping (token snapshots may wrap the relevant payload)
 // ---------------------------------------------------------------------------
 
 function unwrapSnapshotPayload(raw: unknown): Record<string, unknown> | null {
@@ -79,55 +62,51 @@ function unwrapSnapshotPayload(raw: unknown): Record<string, unknown> | null {
 }
 
 // ---------------------------------------------------------------------------
-// Canonical Input Extraction
+// Version Drift Control (only enforce if fields are present at that level)
 // ---------------------------------------------------------------------------
 
-function extractCanonicalInputs(
-  payload: Record<string, unknown>,
-): Record<string, unknown> {
-  const dealTerms = isRecord(payload.deal_terms)
-    ? (payload.deal_terms as Record<string, unknown>)
-    : {};
+function enforceVersionsIfPresent(payload: Record<string, unknown>) {
+  const rawSv =
+    typeof (payload as any).schema_version === "string"
+      ? String((payload as any).schema_version).trim()
+      : "";
 
-  const scenario = isRecord(payload.assumptions)
-    ? (payload.assumptions as Record<string, unknown>)
-    : isRecord(payload.scenario)
-      ? (payload.scenario as Record<string, unknown>)
-      : {};
+  // Accept common aliases: "v1" and "1" should be treated the same.
+  // This is drift-control normalization only; compute contract + math unchanged.
+  const normalizedSv =
+    rawSv.length > 0 && /^v?\d+$/i.test(rawSv)
+      ? rawSv.replace(/^v/i, "")
+      : rawSv;
 
-  return { deal_terms: dealTerms, scenario };
-}
-
-// ---------------------------------------------------------------------------
-// Legacy Auto-Upconversion
-// ---------------------------------------------------------------------------
-
-function upconvertLegacyToCanonical(
-  payload: Record<string, unknown>,
-): Record<string, unknown> {
-  const rawInputs = isRecord(payload.inputs)
-    ? (payload.inputs as Record<string, unknown>)
-    : {};
-
-  let dealTerms: Record<string, unknown> = {};
-  let scenario: Record<string, unknown> = {};
-
-  // If legacy already nested deal_terms, honor it; otherwise treat inputs as terms-ish.
-  if (isRecord((rawInputs as any).deal_terms)) {
-    dealTerms = (rawInputs as any).deal_terms as Record<string, unknown>;
-  } else {
-    dealTerms = rawInputs;
+  if (normalizedSv.length > 0 && normalizedSv !== SCHEMA_VERSION) {
+    return {
+      ok: false as const,
+      error: `Unsupported schema_version "${rawSv}". Expected "${SCHEMA_VERSION}"`,
+    };
   }
 
-  if (isRecord((rawInputs as any).scenario)) {
-    scenario = (rawInputs as any).scenario as Record<string, unknown>;
-  } else if (isRecord(payload.scenario)) {
-    scenario = payload.scenario as Record<string, unknown>;
-  } else if (isRecord(payload.assumptions)) {
-    scenario = payload.assumptions as Record<string, unknown>;
+  const rawCv =
+    typeof (payload as any).contract_version === "string"
+      ? String((payload as any).contract_version).trim()
+      : typeof (payload as any).compute_version === "string"
+        ? String((payload as any).compute_version).trim()
+        : "";
+
+  const normalizedCv =
+    rawCv.length > 0 && /^v?\d+(\.\d+)*$/i.test(rawCv)
+      ? rawCv.replace(/^v/i, "")
+      : rawCv;
+
+  // CONTRACT_VERSION is already a semver-like string (e.g. "10.2.0").
+  // If rawCv arrives like "v10.2.0", treat it as equivalent.
+  if (normalizedCv.length > 0 && normalizedCv !== CONTRACT_VERSION) {
+    return {
+      ok: false as const,
+      error: `Unsupported contract_version "${rawCv}". Expected "${CONTRACT_VERSION}"`,
+    };
   }
 
-  return { deal_terms: dealTerms, scenario };
+  return { ok: true as const };
 }
 
 // ---------------------------------------------------------------------------
@@ -201,7 +180,7 @@ export async function POST(request: NextRequest) {
     }
 
     // -----------------------------------------------------------------------
-    // SHAPE DETECTION + NORMALIZATION
+    // NORMALIZATION (accept nested + legacy + canonical envelopes)
     // -----------------------------------------------------------------------
 
     const rawSnapshotJson = draft.snapshot_json;
@@ -211,63 +190,48 @@ export async function POST(request: NextRequest) {
       return jsonError("Draft snapshot payload is invalid", 422);
     }
 
-    const shape = detectSnapshotShape(unwrapped);
+    // If version fields exist at this unwrapped level, enforce them.
+    // This avoids false 422s when the canonical payload is nested (e.g. canonicalSnapshot.inputs)
+    const driftCheck = enforceVersionsIfPresent(unwrapped);
+    if (!driftCheck.ok) {
+      return jsonError(driftCheck.error, 422);
+    }
 
-    let canonicalInputs: Record<string, unknown>;
+    // Normalize from ANY of:
+    // - { inputs: { deal_terms, scenario } }
+    // - { deal_terms, scenario }
+    // - { deal_terms, assumptions } (assumptions -> scenario)
+    // - token snapshot layouts: canonicalSnapshot.inputs / canonicalInputs / draftSnapshot(.inputs)
+    //
+    // IMPORTANT: the normalizer expects the full raw object so it can find nested canonicalSnapshot/canonicalInputs.
+    // So we try the raw snapshot first, then fall back to the unwrapped object.
+    const normalized =
+      normalizeCanonicalInputsFromUnknown(rawSnapshotJson) ??
+      normalizeCanonicalInputsFromUnknown(unwrapped);
 
-    if (shape === "canonical") {
-      // Validate inbound canonical version fields (drift control)
-      const sv =
-        typeof (unwrapped as any).schema_version === "string"
-          ? String((unwrapped as any).schema_version).trim()
-          : "";
-
-      if (sv.length === 0) {
-        return jsonError(
-          "Canonical snapshot missing required schema_version",
-          422,
-        );
-      }
-      if (sv !== SCHEMA_VERSION) {
-        return jsonError(
-          `Unsupported schema_version "${sv}". Expected "${SCHEMA_VERSION}"`,
-          422,
-        );
-      }
-
-      const cv =
-        typeof (unwrapped as any).contract_version === "string"
-          ? String((unwrapped as any).contract_version).trim()
-          : typeof (unwrapped as any).compute_version === "string"
-            ? String((unwrapped as any).compute_version).trim()
-            : "";
-
-      if (cv.length > 0 && cv !== CONTRACT_VERSION) {
-        return jsonError(
-          `Unsupported contract_version "${cv}". Expected "${CONTRACT_VERSION}"`,
-          422,
-        );
-      }
-
-      canonicalInputs = ensureScenario(extractCanonicalInputs(unwrapped));
-    } else if (shape === "legacy") {
-      // Keep defaults helpers imported so legacy upconversion can be expanded safely later.
-      void getDefaultDealTerms;
-      void getDefaultScenario;
-
-      canonicalInputs = ensureScenario(upconvertLegacyToCanonical(unwrapped));
-    } else {
+    if (!normalized) {
       return jsonError(
-        "Unrecognized snapshot format: expected deal_terms (canonical) or inputs (legacy)",
+        "Unrecognized snapshot format: missing canonical deal_terms + scenario",
         422,
       );
+    }
+
+    const canonicalInputs = ensureScenario({
+      deal_terms: normalized.deal_terms ?? {},
+      scenario: normalized.scenario ?? {},
+    });
+
+    // Validate after normalization (prevents false 422 due to envelope mismatch)
+    const pv = (canonicalInputs.deal_terms as any)?.property_value;
+    if (typeof pv !== "number" || !Number.isFinite(pv)) {
+      return jsonError("deal_terms.property_value is required", 422);
     }
 
     // -----------------------------------------------------------------------
     // DETERMINISTIC COMPUTE
     // -----------------------------------------------------------------------
 
-    const computeResult = await computeDeal(canonicalInputs);
+    const computeResult = await computeDeal(canonicalInputs as any);
     if (!computeResult.ok) {
       return jsonError(`Compute failed: ${computeResult.error}`, 422);
     }
@@ -357,7 +321,6 @@ export async function POST(request: NextRequest) {
             computed_at: computedAt,
             source: "resume",
             draft_token_id: draft.id,
-            snapshot_shape: shape,
           },
           created_by: user.id,
         });

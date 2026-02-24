@@ -5,6 +5,7 @@ import { insertDealSnapshot } from "@/lib/dealSnapshotDb";
 import { ensureScenario } from "@/lib/defaultScenario";
 import { assertNotRealtor } from "@/lib/authz";
 import { CONTRACT_VERSION, SCHEMA_VERSION } from "@/lib/contractVersion";
+import { normalizeCanonicalInputsFromUnknown } from "@/lib/normalizeCanonicalInputs";
 
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
@@ -29,18 +30,30 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    let body: any;
+    let body: unknown;
     try {
       body = await request.json();
     } catch {
       body = {};
     }
 
-    const rawInputs = body?.inputs ?? {};
+    // Accept multiple envelope shapes and normalize to { deal_terms, scenario }
+    const normalized = normalizeCanonicalInputsFromUnknown(body);
+    if (!normalized) {
+      return jsonError("Missing canonical inputs (deal_terms + scenario)", 422);
+    }
+
+    // Ensure scenario defaults are present, but do not change math/contract shape
     const canonicalInputs = ensureScenario({
-      deal_terms: rawInputs?.deal_terms ?? {},
-      scenario: rawInputs?.scenario ?? {},
+      deal_terms: normalized.deal_terms ?? {},
+      scenario: normalized.scenario ?? {},
     });
+
+    // Validate after normalization (prevents false 422 due to envelope mismatch)
+    const pv = (canonicalInputs.deal_terms as any)?.property_value;
+    if (typeof pv !== "number" || !Number.isFinite(pv)) {
+      return jsonError("deal_terms.property_value is required", 422);
+    }
 
     const computeResult = await computeDeal(canonicalInputs as any);
     if (!computeResult.ok) {
