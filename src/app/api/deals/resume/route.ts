@@ -71,8 +71,7 @@ function enforceVersionsIfPresent(payload: Record<string, unknown>) {
       ? String((payload as any).schema_version).trim()
       : "";
 
-  // Accept common aliases: "v1" and "1" should be treated the same.
-  // This is drift-control normalization only; compute contract + math unchanged.
+  // Accept aliases: "v1" and "1"
   const normalizedSv =
     rawSv.length > 0 && /^v?\d+$/i.test(rawSv)
       ? rawSv.replace(/^v/i, "")
@@ -97,9 +96,24 @@ function enforceVersionsIfPresent(payload: Record<string, unknown>) {
       ? rawCv.replace(/^v/i, "")
       : rawCv;
 
-  // CONTRACT_VERSION is already a semver-like string (e.g. "10.2.0").
-  // If rawCv arrives like "v10.2.0", treat it as equivalent.
-  if (normalizedCv.length > 0 && normalizedCv !== CONTRACT_VERSION) {
+  // Allow expected canonical contract version
+  if (normalizedCv.length > 0 && normalizedCv === CONTRACT_VERSION) {
+    return { ok: true as const };
+  }
+
+  // Allow known legacy "wrapper/package" versions emitted by older marketing builds.
+  // Resume always recomputes deterministically, so this is an envelope-compat allowance,
+  // not a compute/contract change.
+  const LEGACY_ACCEPTED_CONTRACT_VERSIONS = new Set<string>(["0.0.1", "1.0.0"]);
+
+  if (
+    normalizedCv.length > 0 &&
+    LEGACY_ACCEPTED_CONTRACT_VERSIONS.has(normalizedCv)
+  ) {
+    return { ok: true as const };
+  }
+
+  if (normalizedCv.length > 0) {
     return {
       ok: false as const,
       error: `Unsupported contract_version "${rawCv}". Expected "${CONTRACT_VERSION}"`,
