@@ -24,18 +24,16 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@tailwindcss/cli": "^4.2.1",
-    "@tailwindcss/postcss": "^4.2.1",
     "@types/node": "^20.19.33",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^5.1.4",
-    "autoprefixer": "^10.4.24",
+    "autoprefixer": "10.4.20",
     "dotenv": "^17.2.3",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
-    "postcss": "^8.5.6",
-    "tailwindcss": "^4.2.1",
+    "postcss": "8.4.38",
+    "tailwindcss": "3.4.17",
     "tsx": "^4.21.0",
     "typescript": "^5",
     "vite": "^7.3.1"
