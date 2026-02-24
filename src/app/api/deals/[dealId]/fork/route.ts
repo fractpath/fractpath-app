@@ -152,7 +152,7 @@ export async function POST(
     const computeResult = await computeDeal(canonicalInputs);
 
     if (computeResult.ok) {
-      const { compute_version, results } = computeResult;
+      const { compute_version, results } = computeResult.result;
 const computedAt = new Date().toISOString();
 
       const fullSnapshot = {

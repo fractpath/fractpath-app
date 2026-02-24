@@ -128,6 +128,12 @@ export function extractDealCardMeta(snapshotJson: unknown): DealCardMeta {
       ["inputs", "deal_terms", "equity_pct"],
       ["inputs", "deal_terms", "total_equity_pct"],
       ["inputs", "deal_terms", "vested_equity_total_pct"],
+
+      // App/widget payloads may be top-level deal_terms
+      ["deal_terms", "equity_pct"],
+      ["deal_terms", "total_equity_pct"],
+      ["deal_terms", "vested_equity_total_pct"],
+
       ["outputs", "results", "equity_pct"],
       ["outputs", "results", "total_equity_pct"],
     ])) ??
@@ -140,11 +146,17 @@ export function extractDealCardMeta(snapshotJson: unknown): DealCardMeta {
 
   const rawCurrentPct =
     num(first(snap, [
+      ["basic_results", "vested_equity_pct"],
+      ["basic_results", "vested_equity"],
+      ["inputs", "vested_equity"],
       ["outputs", "results", "vested_equity_pct"],
       ["outputs", "results", "vested_equity_percent"],
       ["outputs", "results", "vested_equity"],
       ["inputs", "deal_terms", "vested_equity_pct"],
     ])) ??
+    num((snap as any)?.basic_results?.vested_equity_pct) ??
+    num((snap as any)?.basic_results?.vested_equity) ??
+    num((snap as any)?.inputs?.vested_equity) ??
     num(results.vested_equity_pct) ??
     num(results.vested_equity_percent) ??
     num(results.vested_equity) ??

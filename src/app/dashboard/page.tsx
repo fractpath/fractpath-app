@@ -19,16 +19,16 @@ const PERSONA_WELCOME: Record<
 > = {
   homeowner: {
     tagline: "Welcome, Homeowner",
-    description: "You're exploring a new way to unlock equity without a loan.",
+    description: "You’re exploring a new way to unlock equity without a loan.",
   },
   buyer: {
     tagline: "Welcome, Future Homeowner",
     description:
-      "You're modeling a pathway to ownership through shared equity.",
+      "You’re modeling a pathway to ownership through shared equity.",
   },
   realtor: {
     tagline: "Welcome, Partner",
-    description: "You're participating as a referral partner and co-pilot.",
+    description: "You’re participating as a referral partner and co-pilot.",
   },
 };
 
@@ -172,7 +172,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         <main className="mx-auto max-w-3xl p-6 space-y-8">
           <h1 className="text-2xl font-semibold">Dashboard</h1>
           <div className="rounded-lg border p-4">
-            <div className="text-sm font-medium">Couldn't load your deals</div>
+            <div className="text-sm font-medium">Couldn’t load your deals</div>
             <div className="mt-2 text-sm text-muted-foreground break-words">
               {grantsRes.error.message}
             </div>
@@ -207,7 +207,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const snapRes =
     grants.length > 0
       ? await supabase
-          .from("deal_latest_snapshots")
+          .from("deal_snapshots")
           .select("deal_id, snapshot_json, created_at")
           .in(
             "deal_id",
@@ -215,11 +215,27 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           )
       : { data: [], error: null as any };
 
+
+  // TEMP DEBUG: inspect one snapshot payload
+  const __s0: any = (snapRes as any)?.data?.[0];
+  console.log("dash.snap.sample", {
+    deal_id: __s0?.deal_id,
+    created_at: __s0?.created_at,
+    top_keys: __s0?.snapshot_json ? Object.keys(__s0.snapshot_json) : null,
+    deal_terms_keys: __s0?.snapshot_json?.deal_terms ? Object.keys(__s0.snapshot_json.deal_terms) : null,
+    inputs_keys: __s0?.snapshot_json?.inputs ? Object.keys(__s0.snapshot_json.inputs) : null,
+    basics_keys: __s0?.snapshot_json?.basic_results ? Object.keys(__s0.snapshot_json.basic_results) : null,
+    upfront: __s0?.snapshot_json?.deal_terms?.upfront_payment ?? __s0?.snapshot_json?.inputs?.upfront_payment ?? null,
+    monthly: __s0?.snapshot_json?.deal_terms?.monthly_payment ?? __s0?.snapshot_json?.inputs?.monthly_payment ?? null,
+    vested_inputs: __s0?.snapshot_json?.inputs?.vested_equity ?? null,
+    vested_basic: __s0?.snapshot_json?.basic_results?.vested_equity ?? __s0?.snapshot_json?.basic_results?.vested_equity_pct ?? null,
+  });
+
   const latestSnapByDeal = new Map<string, Record<string, any>>();
   const snapDateByDeal = new Map<string, string>();
   for (const s of snapRes.data ?? []) {
     if (s?.deal_id && s.snapshot_json) {
-      latestSnapByDeal.set(s.deal_id, s.snapshot_json);
+      if (!latestSnapByDeal.has(s.deal_id)) latestSnapByDeal.set(s.deal_id, s.snapshot_json);
     }
     if (s?.deal_id && s.created_at) {
       snapDateByDeal.set(s.deal_id, s.created_at);
@@ -247,9 +263,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     const upfrontMonthlyLabel = upfrontMonthly === "\u2014" ? null : upfrontMonthly;
 
     const vestedLabel =
-      meta.vested.totalPct != null
-        ? fmtVestedProgress(meta.vested.currentPct, meta.vested.totalPct)
-        : null;
+        ACTIVE_VALUE_STATUSES.has(rawStatus) && meta.vested.totalPct != null
+          ? fmtVestedProgress(meta.vested.currentPct, meta.vested.totalPct)
+          : null;
 
     const exitYearLabel =
       meta.exitYear != null ? `Exit ${NOW_YEAR + meta.exitYear}` : null;
@@ -402,7 +418,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             {ownerCards.length === 0 ? (
               <div className="rounded-lg border p-4">
                 <p className="text-sm text-muted-foreground">
-                  You don't have any deals yet. Create one above to get started.
+                  You don’t have any deals yet. Create one above to get started.
                 </p>
               </div>
             ) : null}

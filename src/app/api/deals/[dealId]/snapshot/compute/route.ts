@@ -94,8 +94,8 @@ export async function POST(
 return jsonError(computeResult.error, status);
   }
 
-  const { compute_version, results } = computeResult;
-const computedAt = new Date().toISOString();
+  const { compute_version, results } = computeResult.result;
+  const computedAt = new Date().toISOString();
 
   // Snapshot remains validated by validateFullDealSnapshotV1
   const fullSnapshot = {

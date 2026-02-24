@@ -172,13 +172,15 @@ async function main() {
 
     const computedAt = new Date().toISOString();
 
+    const computeVersion = compute.result.compute_version;
+
     // Canonical-only structure: outputs always wrap the canonical compute results.
     const canonicalOutputs: Record<string, unknown> = {
-      results: compute.results,
+      results: compute.result,
     };
 
     const canonicalSnapshot = {
-      compute_version: compute.compute_version,
+      compute_version: computeVersion,
       computed_at: computedAt,
       inputs: {
         deal_terms: baseDealTerms,
@@ -190,7 +192,7 @@ async function main() {
 
     // 4) Persist in deal_snapshots (append-only)
     const fullSnapshot = {
-      contract_version: compute.compute_version,
+      contract_version: computeVersion,
       schema_version: "1",
       inputs: {
         deal_terms: baseDealTerms,
@@ -226,7 +228,7 @@ async function main() {
       event_type: "DEAL_SNAPSHOT_COMPUTED",
       payload: {
         snapshot_id: snap.id,
-        compute_version: compute.compute_version,
+        compute_version: computeVersion,
         computed_at: computedAt,
         source: "script_generate_canonical_snapshots",
       },
@@ -241,7 +243,7 @@ async function main() {
 
     ok++;
     console.log(
-      `[OK] deal=${dealId} snapshot=${snap.id} compute_version=${compute.compute_version}`,
+      `[OK] deal=${dealId} snapshot=${snap.id} compute_version=${computeVersion}`,
     );
   }
 

@@ -10,13 +10,65 @@ type DealWidgetShellProps = {
   initialSnapshot?: AnyRecord | null;
   canEdit: boolean;
   persona?: string;
-  onSave?: (inputs: { deal_terms: AnyRecord; scenario: AnyRecord }) => void | Promise<void>;
+  onSave?: (inputs: {
+    deal_terms: AnyRecord;
+    scenario: AnyRecord;
+  }) => void | Promise<void>;
 };
 
 function safeRecord(v: unknown): AnyRecord | null {
   return v !== null && typeof v === "object" && !Array.isArray(v)
     ? (v as AnyRecord)
     : null;
+}
+
+function safeNumber(v: unknown): number | null {
+  if (v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Normalize widget onSave payloads to deal_terms + scenario (scenario may be empty).
+ */
+function pickInputsFromPayload(
+  payload: unknown,
+): { deal_terms: AnyRecord; scenario: AnyRecord } | null {
+  const p = safeRecord(payload);
+  if (!p) return null;
+
+  const candidates: unknown[] = [
+    (p as any).inputs,
+    (p as any).snapshot?.inputs,
+    (p as any).snapshot_json?.inputs,
+    (p as any).snapshot,
+    (p as any).snapshot_json,
+    p,
+  ];
+
+  for (const c of candidates) {
+    const rec = safeRecord(c);
+    if (!rec) continue;
+
+    // Case 1: rec itself looks like "inputs"
+    const dt1 = safeRecord((rec as any).deal_terms);
+    if (dt1) {
+      const sc1 = safeRecord((rec as any).scenario) ?? {};
+      return { deal_terms: dt1, scenario: sc1 };
+    }
+
+    // Case 2: rec looks like a snapshot, and .inputs exists
+    const nestedInputs = safeRecord((rec as any).inputs);
+    if (nestedInputs) {
+      const dt2 = safeRecord((nestedInputs as any).deal_terms);
+      if (dt2) {
+        const sc2 = safeRecord((nestedInputs as any).scenario) ?? {};
+        return { deal_terms: dt2, scenario: sc2 };
+      }
+    }
+  }
+
+  return null;
 }
 
 export function DealWidgetShell({
@@ -52,25 +104,37 @@ export function DealWidgetShell({
     return null;
   }, [initialSnapshot]);
 
+  const seedScenario = useMemo(() => {
+    const s0 = safeRecord((seedSnapshot as any)?.inputs?.scenario);
+    return s0 ?? {};
+  }, [seedSnapshot]);
+
   const handleSave = useCallback(
     async (payload: unknown) => {
-      const p = safeRecord(payload) ?? {};
-      const maybeSnapshot = safeRecord((p as any).snapshot) ?? safeRecord(p);
-      const maybeInputs =
-        safeRecord((maybeSnapshot as any)?.inputs) ??
-        safeRecord((p as any)?.inputs);
+      // DEBUG (browser console): keep until save works, then remove
 
-      if (!maybeInputs) {
-        setError("Save failed: widget did not provide inputs.");
+      const normalized = pickInputsFromPayload(payload);
+
+      if (!normalized) {
+        setError("Save failed: widget did not provide deal_terms.");
         return;
       }
 
-      const dealTerms = safeRecord((maybeInputs as any).deal_terms);
-      const scenario = safeRecord((maybeInputs as any).scenario);
+      const dealTerms = normalized.deal_terms;
 
-      if (!dealTerms || !scenario) {
-        setError("Save failed: missing deal_terms or scenario.");
-        return;
+      // Ensure scenario.exit_year is present.
+      const scenario: AnyRecord = { ...(normalized.scenario ?? {}) };
+
+      const exitFromScenario = safeNumber((scenario as any).exit_year);
+      const exitFromSeed = safeNumber((seedScenario as any).exit_year);
+
+      if (exitFromScenario == null) {
+        if (exitFromSeed != null) {
+          (scenario as any).exit_year = exitFromSeed;
+        } else {
+          // last-resort default (keeps compute unblocked)
+          (scenario as any).exit_year = 5;
+        }
       }
 
       setError(null);
@@ -84,7 +148,7 @@ export function DealWidgetShell({
         setError(err?.message ?? "Save failed");
       }
     },
-    [onSave],
+    [onSave, seedScenario],
   );
 
   return (

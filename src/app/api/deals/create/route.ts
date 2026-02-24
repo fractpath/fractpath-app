@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
       return jsonError(`Compute failed: ${computeResult.error}`, 422);
     }
 
-    const { compute_version, results } = computeResult;
+    const { compute_version, results } = computeResult.result;
     const computedAt = new Date().toISOString();
 
     const { data: dealId, error: rpcErr } = await supabase.rpc(

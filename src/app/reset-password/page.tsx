@@ -55,7 +55,7 @@ export default function ResetPasswordPage() {
     <main style={{ maxWidth: 400, margin: "80px auto", padding: 16, fontFamily: "system-ui" }}>
       <h1 style={{ fontSize: 24, marginBottom: 8 }}>Reset your password</h1>
       <p style={{ color: "#666", marginTop: 0, marginBottom: 24 }}>
-        Enter your email and we'll send you a reset link
+        Enter your email and we’ll send you a reset link
       </p>
 
       <form onSubmit={handleSubmit} style={{ display: "grid", gap: 16 }}>

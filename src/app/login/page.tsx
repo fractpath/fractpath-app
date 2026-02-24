@@ -68,7 +68,7 @@ export default async function LoginPage({
       </form>
 
       <p style={{ marginTop: 16, fontSize: 13, opacity: 0.75 }}>
-        Don't have an account?{" "}
+        Don’t have an account?{" "}
         <a href={`/signup${safeReturnTo ? `?returnTo=${encodeURIComponent(safeReturnTo)}` : ""}${prefilledEmail ? `${safeReturnTo ? "&" : "?"}email=${encodeURIComponent(prefilledEmail)}` : ""}`}>
           Create one
         </a>
