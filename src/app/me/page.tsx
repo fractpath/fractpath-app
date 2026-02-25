@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { AppHeader } from "@/components/layout/AppHeader";
+import { OnboardingGate } from "@/components/onboarding/OnboardingGate";
+import { PropertyList } from "@/components/properties/PropertyList";
+
 
 export default async function MePage() {
   const supabase = await createClient();
@@ -105,19 +109,31 @@ export default async function MePage() {
     } else if (g.role === "VIEWER") {
       if (existsInCanonical) canonicalViewerIds.push(id);
       else missingViewerIds.push(id);
+
     }
   }
 
   return (
-    <main className="mx-auto max-w-3xl p-6">
-      <div className="flex items-baseline justify-between gap-4">
-        <h1 className="text-xl font-semibold">My account</h1>
-        <div className="text-sm text-muted-foreground">{user.email}</div>
-      </div>
+    <div>
+      <AppHeader />
+      <OnboardingGate />
+      <main className="mx-auto max-w-3xl p-6">
+        <div className="flex items-baseline justify-between gap-4">
+          <h1 className="text-xl font-semibold">My account</h1>
+          <div className="text-sm text-muted-foreground">{user.email}</div>
+        </div>
 
-      <div className="mt-6 grid gap-6">
+        <section className="mt-6 rounded-md border p-4">
+          <h2 className="text-sm font-medium">Profile & properties</h2>
+          <div className="mt-3">
+            <PropertyList />
+          </div>
+        </section>
+
+        <div className="mt-6 grid gap-6">
         {/* My deals (canonical only) */}
         <section className="rounded-md border p-4">
+
           <div className="flex items-baseline justify-between gap-4">
             <h2 className="text-sm font-medium">My deals</h2>
             <span className="text-xs text-muted-foreground">
@@ -227,7 +243,8 @@ export default async function MePage() {
             </div>
           )}
         </section>
-      </div>
-    </main>
+        </div>
+      </main>
+    </div>
   );
 }

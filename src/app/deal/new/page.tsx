@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { AppHeader } from "@/components/layout/AppHeader";
+import { OnboardingGate } from "@/components/onboarding/OnboardingGate";
+
 import { NewDealClient } from "./NewDealClient";
 
 export const dynamic = "force-dynamic";
@@ -21,9 +23,12 @@ export default async function NewDealPage() {
     (user.user_metadata?.role as Persona | undefined) || "homeowner";
 
   return (
+
     <div>
       <AppHeader />
       <main className="mx-auto max-w-3xl p-6">
+        <OnboardingGate />
+
         {persona === "realtor" ? (
           <div className="rounded-lg border p-6">
             <h1 className="text-lg font-semibold">Cannot create deals</h1>

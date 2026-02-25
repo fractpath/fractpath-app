@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { AppHeader } from "@/components/layout/AppHeader";
+import { OnboardingGate } from "@/components/onboarding/OnboardingGate";
+
 import { DealCard } from "@/components/dashboard/DealCard";
 import {
   extractDealCardMeta,
@@ -299,6 +301,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   return (
     <div>
       <AppHeader />
+      <OnboardingGate />
       <main className="mx-auto max-w-3xl p-6 space-y-8">
         <header>
           <h1 className="text-2xl font-semibold">{welcome.tagline}</h1>
