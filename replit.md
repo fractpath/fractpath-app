@@ -28,6 +28,8 @@ FractPath is a Next.js application that utilizes API routes for backend logic an
 - **Share Link Flow:** Owners can generate shareable URLs for deals. The `/share` page validates tokens, manages authentication, grants `VIEWER` access, and redirects to a read-only view.
 - **Access Control (RLS):** Supabase Row Level Security (RLS) governs access to deals, snapshots, events, and share tokens based on `deal_access_grants` (OWNER, VIEWER, COUNTERPARTY roles).
 - **Rate Limiting:** In-memory IP rate limiting is implemented for pre-authentication endpoints.
+- **User Profiles:** `public.profiles` table stores first/last/display name, phone, marketing opt-in (default true, negative consent), SMS consent with timestamp, and EULA version acceptance. RLS: users can only read/write their own profile row. Deletes denied.
+- **Properties:** `public.properties` table supports multiple properties per user with address, status (`unverified`/`verified`/`archived`), and visibility (`private`/`public`). Partial unique index enforces one verified property per owner. Users can only insert as `unverified`/`private`, cannot self-verify (admin only), and can only archive their own. Visibility=public requires status=verified (CHECK constraint). Migration: `supabase/migrations/20260225_app_profiles_properties.sql`.
 
 **Feature Specifications:**
 - **Homeowner Intake:** Primary data collection form.
