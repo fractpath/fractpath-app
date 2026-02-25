@@ -104,13 +104,15 @@ export async function POST(req: Request) {
   }
 
   const origin = getRequestOrigin(req);
-  const endpoint = supabaseUrl.replace(/\/+$/, "") + "/auth/v1/signup";
+  const base = supabaseUrl.replace(/\/+$/, "");
+  const redirectTo = origin + "/auth/callback";
+  const endpoint =
+    base + "/auth/v1/signup?redirect_to=" + encodeURIComponent(redirectTo);
 
   const payload = JSON.stringify({
     email,
     password,
     options: {
-      emailRedirectTo: origin + "/auth/callback",
       data: {
         role: persona,
         source: "marketing",

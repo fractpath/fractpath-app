@@ -91,7 +91,12 @@ function ResumeContent() {
               const { data: existsData } = await supabase.auth
                 .signInWithOtp({
                   email: draftEmail,
-                  options: { shouldCreateUser: false },
+                  options: {
+                    shouldCreateUser: false,
+                    emailRedirectTo:
+                      (process.env.NEXT_PUBLIC_SITE_URL || "") +
+                      "/auth/callback",
+                  },
                 })
                 .catch(() => ({ data: null as any }));
 
