@@ -20,9 +20,9 @@ $$;
 -- ============================================================
 CREATE TABLE IF NOT EXISTS public.profiles (
   id               uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  first_name       text,
-  last_name        text,
-  display_name     text,
+  first_name       text NOT NULL,
+  last_name        text NOT NULL,
+  nickname         text NOT NULL,
   phone            text,
   marketing_opt_in boolean NOT NULL DEFAULT true,
   sms_consent      boolean NOT NULL DEFAULT false,
