@@ -5,12 +5,41 @@ import { useToast } from "@/components/ui/Toast";
 import { LoadingButton } from "@/components/ui/LoadingButton";
 import { Modal } from "@/components/ui/Modal";
 
+type PropertyStatus = "unverified" | "under_review" | "verified" | "archived";
+
 type Property = {
   id: string;
   address: string;
-  status: "unverified" | "verified" | "archived";
+  status: PropertyStatus;
   visibility: "private" | "public";
 };
+
+const STATUS_BADGE: Record<PropertyStatus, { label: string; className: string; hint: string }> = {
+  unverified: {
+    label: "Unverified",
+    className: "bg-yellow-100 text-yellow-800",
+    hint: "Not yet reviewed by FractPath",
+  },
+  under_review: {
+    label: "Under review",
+    className: "bg-blue-100 text-blue-800",
+    hint: "Being reviewed",
+  },
+  verified: {
+    label: "Verified \u2713",
+    className: "bg-green-100 text-green-800",
+    hint: "Approved for participation",
+  },
+  archived: {
+    label: "Archived",
+    className: "bg-gray-100 text-gray-600",
+    hint: "No longer active",
+  },
+};
+
+function canArchive(status: PropertyStatus): boolean {
+  return status === "unverified" || status === "verified";
+}
 
 export function PropertyList() {
   const t = useToast();
@@ -24,7 +53,7 @@ export function PropertyList() {
     try {
       const res = await fetch("/api/me/properties");
       const json = await res.json().catch(() => null);
-      if (!res.ok) return t.error(json?.error || "Couldn’t load properties.");
+      if (!res.ok) return t.error(json?.error || "Couldn't load properties.");
       setItems(json?.properties ?? []);
     } finally {
       setLoading(false);
@@ -44,7 +73,7 @@ export function PropertyList() {
       });
       const json = await res.json().catch(() => null);
       if (!res.ok)
-        return t.error(json?.error || "Couldn’t archive that — try again.");
+        return t.error(json?.error || "Couldn't archive that — try again.");
       t.success("Archived.");
       setArchiveId(null);
       await load();
@@ -56,29 +85,41 @@ export function PropertyList() {
   return (
     <div className="space-y-3">
       {loading ? (
-        <div className="text-sm text-muted-foreground">Loading…</div>
+        <div className="text-sm text-muted-foreground">Loading...</div>
       ) : items.length === 0 ? (
         <div className="text-sm text-muted-foreground">No properties yet.</div>
       ) : (
         <ul className="space-y-2">
-          {items.map((p) => (
-            <li key={p.id} className="rounded-md border p-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-medium">{p.address}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {p.status} • {p.visibility}
+          {items.map((p) => {
+            const badge = STATUS_BADGE[p.status] ?? STATUS_BADGE.unverified;
+            return (
+              <li key={p.id} className="rounded-md border p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">{p.address}</div>
+                    <div className="mt-1 flex items-center gap-2">
+                      <span
+                        className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-medium ${badge.className}`}
+                      >
+                        {badge.label}
+                      </span>
+                      <span className="text-[11px] text-muted-foreground">
+                        {badge.hint}
+                      </span>
+                    </div>
                   </div>
+                  {canArchive(p.status) && (
+                    <button
+                      className="shrink-0 text-sm underline"
+                      onClick={() => setArchiveId(p.id)}
+                    >
+                      Archive
+                    </button>
+                  )}
                 </div>
-                <button
-                  className="text-sm underline"
-                  onClick={() => setArchiveId(p.id)}
-                >
-                  Archive
-                </button>
-              </div>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       )}
 
@@ -90,7 +131,7 @@ export function PropertyList() {
         >
           <div className="space-y-4">
             <div className="text-sm text-muted-foreground">
-              This will mark the property as archived.
+              This will mark the property as archived. It cannot be undone.
             </div>
             <div className="flex justify-end gap-2">
               <button

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 
 function jsonError(msg: string, status: number) {
   return NextResponse.json({ ok: false, error: msg }, { status });
@@ -16,21 +17,46 @@ export async function POST(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return jsonError("Unauthorized", 401);
-
   if (!propertyId) return jsonError("Missing propertyId", 400);
 
-  // NOTE: We cannot enforce "cannot archive if in active deal" yet because deals
-  // do not reference properties via property_id. (See T0 discovery.)
-  const { data, error } = await supabase
+  const { data: existing } = await supabase
     .from("properties")
+    .select("id, status, owner_user_id")
+    .eq("id", propertyId)
+    .eq("owner_user_id", user.id)
+    .maybeSingle();
+
+  if (!existing) return jsonError("Not found", 404);
+
+  if (existing.status !== "unverified" && existing.status !== "verified") {
+    return jsonError(
+      `Cannot archive from "${existing.status}". Only unverified or verified properties can be archived.`,
+      409,
+    );
+  }
+
+  const fromStatus = existing.status;
+  const svc = createServiceClient();
+
+  const { data, error } = await (svc
+    .from("properties") as any)
     .update({ status: "archived" })
     .eq("id", propertyId)
     .eq("owner_user_id", user.id)
-    .select()
+    .select("id, status")
     .maybeSingle();
 
   if (error) return jsonError(error.message, 500);
-  if (!data) return jsonError("Not found", 404);
+  if (!data) return jsonError("Update failed", 500);
+
+  await (svc.from("property_status_audit") as any).insert({
+    property_id: propertyId,
+    from_status: fromStatus,
+    to_status: "archived",
+    changed_by: user.id,
+    notes: null,
+    actor_type: "human",
+  });
 
   return NextResponse.json({ ok: true, property: data });
 }
