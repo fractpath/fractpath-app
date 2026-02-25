@@ -11,6 +11,7 @@ export async function POST() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
   if (!user) return jsonError("Unauthorized", 401);
 
   const { error } = await supabase
@@ -19,7 +20,7 @@ export async function POST() {
       eula_version: EULA_VERSION,
       eula_accepted_at: new Date().toISOString(),
     })
-    .eq("id", user.id);
+    .eq("user_id", user.id);
 
   if (error) return jsonError(error.message, 500);
 

@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { OnboardingGate } from "@/components/onboarding/OnboardingGate";
 import { PropertyList } from "@/components/properties/PropertyList";
+import { ProfileReviewCard } from "@/components/profile/ProfileReviewCard";
 
 
 export default async function MePage() {
@@ -123,8 +124,12 @@ export default async function MePage() {
           <div className="text-sm text-muted-foreground">{user.email}</div>
         </div>
 
+        <div className="mt-6">
+          <ProfileReviewCard email={user.email ?? ""} />
+        </div>
+
         <section className="mt-6 rounded-md border p-4">
-          <h2 className="text-sm font-medium">Profile & properties</h2>
+          <h2 className="text-sm font-medium">Properties</h2>
           <div className="mt-3">
             <PropertyList />
           </div>

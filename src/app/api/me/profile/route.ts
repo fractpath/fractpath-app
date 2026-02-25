@@ -10,12 +10,13 @@ export async function GET() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
   if (!user) return jsonError("Unauthorized", 401);
 
   const { data, error } = await supabase
     .from("profiles")
     .select("*")
-    .eq("id", user.id)
+    .eq("user_id", user.id)
     .maybeSingle();
 
   if (error) return jsonError(error.message, 500);
@@ -28,6 +29,7 @@ export async function POST(req: Request) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
   if (!user) return jsonError("Unauthorized", 401);
 
   const body = await req.json().catch(() => null);
@@ -41,14 +43,13 @@ export async function POST(req: Request) {
   if (!lastName) return jsonError("Last name is required", 422);
   if (!nickname) return jsonError("Nickname is required", 422);
 
-  const phone = body.phone != null ? String(body.phone).trim() || null : null;
   const marketingOptIn = body.marketing_opt_in !== false;
   const smsConsent = body.sms_consent === true;
 
   const { data: existing } = await supabase
     .from("profiles")
     .select("sms_consent")
-    .eq("id", user.id)
+    .eq("user_id", user.id)
     .maybeSingle();
 
   const smsConsentAt =
@@ -57,19 +58,19 @@ export async function POST(req: Request) {
       : undefined;
 
   const row: Record<string, unknown> = {
-    id: user.id,
+    user_id: user.id,
     first_name: firstName,
     last_name: lastName,
     nickname,
-    phone,
     marketing_opt_in: marketingOptIn,
-    sms_consent: smsConsent,
   };
+
+  if (smsConsent) row.sms_consent = true;
   if (smsConsentAt) row.sms_consent_at = smsConsentAt;
 
   const { data, error } = await supabase
     .from("profiles")
-    .upsert(row, { onConflict: "id" })
+    .upsert(row, { onConflict: "user_id" })
     .select()
     .single();
 
