@@ -216,21 +216,6 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       : { data: [], error: null as any };
 
 
-  // TEMP DEBUG: inspect one snapshot payload
-  const __s0: any = (snapRes as any)?.data?.[0];
-  console.log("dash.snap.sample", {
-    deal_id: __s0?.deal_id,
-    created_at: __s0?.created_at,
-    top_keys: __s0?.snapshot_json ? Object.keys(__s0.snapshot_json) : null,
-    deal_terms_keys: __s0?.snapshot_json?.deal_terms ? Object.keys(__s0.snapshot_json.deal_terms) : null,
-    inputs_keys: __s0?.snapshot_json?.inputs ? Object.keys(__s0.snapshot_json.inputs) : null,
-    basics_keys: __s0?.snapshot_json?.basic_results ? Object.keys(__s0.snapshot_json.basic_results) : null,
-    upfront: __s0?.snapshot_json?.deal_terms?.upfront_payment ?? __s0?.snapshot_json?.inputs?.upfront_payment ?? null,
-    monthly: __s0?.snapshot_json?.deal_terms?.monthly_payment ?? __s0?.snapshot_json?.inputs?.monthly_payment ?? null,
-    vested_inputs: __s0?.snapshot_json?.inputs?.vested_equity ?? null,
-    vested_basic: __s0?.snapshot_json?.basic_results?.vested_equity ?? __s0?.snapshot_json?.basic_results?.vested_equity_pct ?? null,
-  });
-
   const latestSnapByDeal = new Map<string, Record<string, any>>();
   const snapDateByDeal = new Map<string, string>();
   for (const s of snapRes.data ?? []) {
