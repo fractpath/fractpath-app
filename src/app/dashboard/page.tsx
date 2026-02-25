@@ -62,11 +62,7 @@ const ACTIVE_STATUSES = new Set([
 
 const NEEDS_ATTENTION_STATUSES = new Set(["NEEDS_REVIEW", "UNDER_REVIEW"]);
 
-const ACTIVE_VALUE_STATUSES = new Set([
-  "UNDER_REVIEW",
-  "ACTIVE",
-  "ACCEPTED",
-]);
+const ACTIVE_VALUE_STATUSES = new Set(["UNDER_REVIEW", "ACTIVE", "ACCEPTED"]);
 
 const STATUS_DISPLAY: Record<string, string> = {
   IMPORTED: "Imported",
@@ -156,10 +152,18 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     redirect(`/login?returnTo=${encodeURIComponent("/dashboard")}`);
   }
 
-  const role: Persona =
-    (user.user_metadata?.role as Persona | undefined) || "homeowner";
-  const welcome = PERSONA_WELCOME[role];
-  const steps = NEXT_STEPS[role];
+  const personaFromMeta =
+    user.user_metadata?.persona ?? user.user_metadata?.role;
+
+  const persona: Persona =
+    personaFromMeta === "homeowner" ||
+    personaFromMeta === "buyer" ||
+    personaFromMeta === "realtor"
+      ? personaFromMeta
+      : "homeowner";
+
+  const welcome = PERSONA_WELCOME[persona];
+  const steps = NEXT_STEPS[persona];
 
   const grantsRes = await supabase
     .from("deal_access_grants")
@@ -217,12 +221,12 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           )
       : { data: [], error: null as any };
 
-
   const latestSnapByDeal = new Map<string, Record<string, any>>();
   const snapDateByDeal = new Map<string, string>();
   for (const s of snapRes.data ?? []) {
     if (s?.deal_id && s.snapshot_json) {
-      if (!latestSnapByDeal.has(s.deal_id)) latestSnapByDeal.set(s.deal_id, s.snapshot_json);
+      if (!latestSnapByDeal.has(s.deal_id))
+        latestSnapByDeal.set(s.deal_id, s.snapshot_json);
     }
     if (s?.deal_id && s.created_at) {
       snapDateByDeal.set(s.deal_id, s.created_at);
@@ -247,17 +251,21 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     const fmvLabel = meta.fmv != null ? fmtMoneyAbbrev(meta.fmv) : null;
 
     const upfrontMonthly = fmtUpfrontPlusMonthly(meta.upfront, meta.monthly);
-    const upfrontMonthlyLabel = upfrontMonthly === "\u2014" ? null : upfrontMonthly;
+    const upfrontMonthlyLabel =
+      upfrontMonthly === "\u2014" ? null : upfrontMonthly;
 
     const vestedLabel =
-        ACTIVE_VALUE_STATUSES.has(rawStatus) && meta.vested.totalPct != null
-          ? fmtVestedProgress(meta.vested.currentPct, meta.vested.totalPct)
-          : null;
+      ACTIVE_VALUE_STATUSES.has(rawStatus) && meta.vested.totalPct != null
+        ? fmtVestedProgress(meta.vested.currentPct, meta.vested.totalPct)
+        : null;
 
     const exitYearLabel =
       meta.exitYear != null ? `Exit ${NOW_YEAR + meta.exitYear}` : null;
 
-    const updatedLabel = relativeAge(snapDateByDeal.get(dealId) ?? null, NOW_MS);
+    const updatedLabel = relativeAge(
+      snapDateByDeal.get(dealId) ?? null,
+      NOW_MS,
+    );
 
     return {
       dealId,
@@ -328,7 +336,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
               Total Modeled Value
             </div>
             <div className="mt-1 text-lg font-semibold">
-              {totalModeledValue > 0 ? fmtMoneyAbbrev(totalModeledValue) : "\u2014"}
+              {totalModeledValue > 0
+                ? fmtMoneyAbbrev(totalModeledValue)
+                : "\u2014"}
             </div>
           </div>
           <div className="rounded-lg border bg-background p-4">

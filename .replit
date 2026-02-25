@@ -4,7 +4,7 @@ expertMode = true
 
 [nix]
 channel = "stable-25_05"
-packages = ["gh", "lsof", "nano", "iproute2", "psmisc"]
+packages = ["gh", "lsof", "nano", "iproute2", "psmisc", "supabase-cli"]
 
 [workflows]
 runButton = "Project"
