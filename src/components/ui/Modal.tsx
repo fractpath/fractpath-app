@@ -62,7 +62,7 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="w-full max-w-md rounded-lg border bg-background p-6 shadow-lg animate-in fade-in"
+        className="w-full max-w-md rounded-lg border bg-background p-6 shadow-lg"
       >
         <h2 className="text-lg font-semibold">{title}</h2>
         {description ? (
