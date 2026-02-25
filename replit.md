@@ -28,8 +28,10 @@ FractPath is built with Next.js, leveraging API routes for backend logic and Sup
 - **Access Control (RLS):** Supabase Row Level Security governs access to data based on user roles (OWNER, VIEWER, COUNTERPARTY).
 - **Rate Limiting:** In-memory IP rate limiting protects pre-authentication endpoints.
 - **User Profiles:** Stores user details, marketing preferences, and EULA acceptance.
-- **Properties:** Manages multiple properties per user with status tracking and verification workflow.
-- **Property Verification Pipeline:** Defines the lifecycle of property statuses (`unverified` to `verified`) with admin-controlled transitions and an immutable audit trail.
+- **Properties:** Manages multiple properties per user with structured address fields (`address_line1`, `address_line2`, `city`, `state`, `postal_code`), status tracking, and verification workflow. Properties table uses `owner_user_id` (not `client_id`) and `is_private` boolean.
+- **Property Verification Pipeline:** Defines the lifecycle of property statuses (`unverified` → `under_review` → `verified` → `archived`) with admin-controlled transitions and an immutable audit trail.
+- **Property Documents:** `property_documents` table stores verification uploads (selfie, drivers_license, utility_bill) with references to Supabase Storage bucket `property-verification`. Files stored at path `{user_id}/{property_id}/{doc_type}.{ext}`. RLS allows owner read/insert/update only when property is unverified. Admin access via service-role client. Signed URLs (10 min TTL) used for viewing.
+- **Add Property Flow:** Modal form collects structured address fields + 3 mandatory document uploads (selfie, driver license, utility bill). Multipart FormData POST to `/api/me/properties`. Edit flow (PATCH) allowed only for unverified properties. Archive allowed for unverified and verified.
 - **Feature Specifications:**
     - **Homeowner Intake:** Core data collection form.
     - **User Dashboard:** Role-specific content displaying deal cards and next steps.

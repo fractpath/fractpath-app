@@ -41,7 +41,7 @@ export default async function AdminPropertiesPage({
   const propsRes = await (supabase
     .from("properties") as any)
     .select(
-      "id, owner_user_id, address, status, created_at, updated_at, reviewed_at, reviewed_by, verified_at, verified_by, review_notes",
+      "id, owner_user_id, address_line1, address_line2, city, state, postal_code, status, created_at, updated_at, reviewed_at, reviewed_by, verified_at, verified_by, review_notes",
     )
     .eq("status", statusFilter)
     .order("created_at", { ascending: false });
@@ -116,7 +116,7 @@ export default async function AdminPropertiesPage({
               rows.map((p: any) => (
                 <tr key={p.id} className="border-t">
                   <td className="p-3">
-                    <div className="font-medium">{p.address || "—"}</div>
+                    <div className="font-medium">{[p.address_line1, p.address_line2, p.city, p.state, p.postal_code].filter(Boolean).join(", ") || "—"}</div>
                     <div className="text-xs text-muted-foreground">
                       <Link
                         className="underline"

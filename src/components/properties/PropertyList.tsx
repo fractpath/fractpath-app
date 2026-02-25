@@ -4,14 +4,20 @@ import { useEffect, useState } from "react";
 import { useToast } from "@/components/ui/Toast";
 import { LoadingButton } from "@/components/ui/LoadingButton";
 import { Modal } from "@/components/ui/Modal";
+import { PropertyForm } from "@/components/properties/PropertyForm";
 
 type PropertyStatus = "unverified" | "under_review" | "verified" | "archived";
 
 type Property = {
   id: string;
-  address: string;
+  address_line1: string;
+  address_line2: string | null;
+  city: string | null;
+  state: string;
+  postal_code: string;
+  address_display: string;
   status: PropertyStatus;
-  visibility: "private" | "public";
+  is_private: boolean;
 };
 
 const STATUS_BADGE: Record<PropertyStatus, { label: string; className: string; hint: string }> = {
@@ -41,12 +47,18 @@ function canArchive(status: PropertyStatus): boolean {
   return status === "unverified" || status === "verified";
 }
 
+function canEdit(status: PropertyStatus): boolean {
+  return status === "unverified";
+}
+
 export function PropertyList() {
   const t = useToast();
   const [items, setItems] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
   const [archiveId, setArchiveId] = useState<string | null>(null);
   const [archiving, setArchiving] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [editTarget, setEditTarget] = useState<Property | null>(null);
 
   async function load() {
     setLoading(true);
@@ -84,6 +96,14 @@ export function PropertyList() {
 
   return (
     <div className="space-y-3">
+      <button
+        type="button"
+        className="w-full rounded-md border border-dashed p-3 text-sm font-medium hover:bg-muted/40 transition-colors"
+        onClick={() => setShowAdd(true)}
+      >
+        + Add property
+      </button>
+
       {loading ? (
         <div className="text-sm text-muted-foreground">Loading...</div>
       ) : items.length === 0 ? (
@@ -96,7 +116,9 @@ export function PropertyList() {
               <li key={p.id} className="rounded-md border p-3">
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
-                    <div className="text-sm font-medium">{p.address}</div>
+                    <div className="text-sm font-medium">
+                      {p.address_display || p.address_line1}
+                    </div>
                     <div className="mt-1 flex items-center gap-2">
                       <span
                         className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-medium ${badge.className}`}
@@ -108,19 +130,56 @@ export function PropertyList() {
                       </span>
                     </div>
                   </div>
-                  {canArchive(p.status) && (
-                    <button
-                      className="shrink-0 text-sm underline"
-                      onClick={() => setArchiveId(p.id)}
-                    >
-                      Archive
-                    </button>
-                  )}
+                  <div className="flex shrink-0 gap-2">
+                    {canEdit(p.status) && (
+                      <button
+                        className="text-sm underline"
+                        onClick={() => setEditTarget(p)}
+                      >
+                        Edit
+                      </button>
+                    )}
+                    {canArchive(p.status) && (
+                      <button
+                        className="text-sm underline"
+                        onClick={() => setArchiveId(p.id)}
+                      >
+                        Archive
+                      </button>
+                    )}
+                  </div>
                 </div>
               </li>
             );
           })}
         </ul>
+      )}
+
+      {showAdd && (
+        <PropertyForm
+          open={true}
+          onClose={() => setShowAdd(false)}
+          onSuccess={() => load()}
+        />
+      )}
+
+      {editTarget && (
+        <PropertyForm
+          open={true}
+          onClose={() => setEditTarget(null)}
+          onSuccess={() => {
+            setEditTarget(null);
+            load();
+          }}
+          editPrefill={{
+            propertyId: editTarget.id,
+            address_line1: editTarget.address_line1,
+            address_line2: editTarget.address_line2 ?? "",
+            city: editTarget.city ?? "",
+            state: editTarget.state,
+            postal_code: editTarget.postal_code,
+          }}
+        />
       )}
 
       {archiveId && (
