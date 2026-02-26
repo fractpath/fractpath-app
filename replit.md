@@ -30,7 +30,8 @@ FractPath is built with Next.js, leveraging API routes for backend logic and Sup
 - **User Profiles:** Stores user details, marketing preferences, and EULA acceptance.
 - **Properties:** Manages multiple properties per user with structured address fields (`address_line1`, `address_line2`, `city`, `state`, `postal_code`), status tracking, and verification workflow. Properties table uses `owner_user_id` (not `client_id`) and `is_private` boolean.
 - **Property Verification Pipeline:** Defines the lifecycle of property statuses (`unverified` → `under_review` → `verified` → `archived`) with admin-controlled transitions and an immutable audit trail.
-- **Property Documents:** `property_documents` table stores verification uploads (selfie, drivers_license, utility_bill) with references to Supabase Storage bucket `property-verification`. Files stored at path `{user_id}/{property_id}/{doc_type}.{ext}`. RLS allows owner read/insert/update only when property is unverified. Admin access via service-role client. Signed URLs (10 min TTL) used for viewing.
+- **Property Documents:** `property_documents` table stores verification uploads (selfie, drivers_license, utility_bill) with references to Supabase Storage bucket `property-verification`. Files stored at path `{user_id}/{property_id}/{doc_type}.{ext}`. RLS allows owner read/insert/update only when property is unverified. Admin access via service-role client. Signed URLs (10 min TTL) used for viewing. Meta columns: `byte_size`, `sha256`, `width`, `height`, `original_content_type`, `phash` (all nullable).
+- **Document Upload Hardening:** Server-side pipeline via `src/lib/uploads/documentProcessing.ts`. Enforces 12MB max per file (413), magic-byte content-type sniffing (rejects HEIC/HEIF with 415, rejects unknown types), transcodes all images (JPEG/PNG/WebP) to JPEG via `sharp` (rotates per EXIF, max 2400px long edge, quality 82, strips metadata). PDFs pass through as-is. Computes fraud signals (sha256, byte_size, width, height) and persists to `property_documents`. Original untrusted bytes are never stored.
 - **Add Property Flow:** Modal form collects structured address fields + 3 mandatory document uploads (selfie, driver license, utility bill). Multipart FormData POST to `/api/me/properties`. Edit flow (PATCH) allowed only for unverified properties. Archive allowed for unverified and verified.
 - **Feature Specifications:**
     - **Homeowner Intake:** Core data collection form.
@@ -58,3 +59,4 @@ FractPath is built with Next.js, leveraging API routes for backend logic and Sup
 - **HubSpot:** Integration for sales follow-up.
 - **@fractpath/compute:** Canonical compute engine package.
 - **fractpath-calculator-widget:** UI components and compute utilities package.
+- **sharp:** Server-side image processing for document upload hardening (EXIF rotation, resize, JPEG transcode, metadata stripping).
