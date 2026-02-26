@@ -2,15 +2,11 @@ import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { createServiceClient } from "@/lib/supabase/service";
 import { AdminPropertyActions } from "@/components/admin/AdminPropertyActions";
+import { PropertyDocumentsPreview } from "@/components/admin/PropertyDocumentsPreview";
+import { AdminPropertyStatusControls } from "@/components/admin/AdminPropertyStatusControls";
 
 const BUCKET = "property-verification";
 const SIGNED_URL_TTL = 600;
-
-const DOC_TYPE_LABELS: Record<string, string> = {
-  selfie: "Selfie",
-  drivers_license: "Driver License",
-  utility_bill: "Utility / Bill",
-};
 
 export default async function AdminPropertyAuditPage({
   params,
@@ -131,49 +127,9 @@ export default async function AdminPropertyAuditPage({
 
       <AdminPropertyActions propertyId={propertyId} status={p.status} />
 
-      <div className="rounded-lg border p-4">
-        <h2 className="text-base font-semibold mb-3">Verification documents</h2>
-        {docsWithUrls.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No documents uploaded.</p>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {docsWithUrls.map((d: any) => (
-              <div key={d.id} className="rounded-md border p-3 space-y-2">
-                <div className="text-sm font-medium">
-                  {DOC_TYPE_LABELS[d.doc_type] ?? d.doc_type}
-                </div>
-                {d.signed_url ? (
-                  d.content_type?.startsWith("image/") ? (
-                    <a href={d.signed_url} target="_blank" rel="noopener noreferrer">
-                      <img
-                        src={d.signed_url}
-                        alt={d.doc_type}
-                        className="w-full h-32 object-cover rounded border"
-                      />
-                    </a>
-                  ) : (
-                    <a
-                      href={d.signed_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="block rounded border p-3 text-center text-xs hover:bg-muted"
-                    >
-                      View document (PDF)
-                    </a>
-                  )
-                ) : (
-                  <div className="text-xs text-muted-foreground">
-                    URL unavailable
-                  </div>
-                )}
-                <div className="text-[10px] text-muted-foreground">
-                  {d.content_type}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      <PropertyDocumentsPreview docs={docsWithUrls as any} />
+
+      <AdminPropertyStatusControls propertyId={propertyId} currentStatus={p.status} />
 
       <div className="rounded-lg border overflow-x-auto">
         <table className="w-full text-sm">
