@@ -5,9 +5,6 @@ import { AdminPropertyActions } from "@/components/admin/AdminPropertyActions";
 import { PropertyDocumentsPreview } from "@/components/admin/PropertyDocumentsPreview";
 import { AdminPropertyStatusControls } from "@/components/admin/AdminPropertyStatusControls";
 
-const BUCKET = "property-verification";
-const SIGNED_URL_TTL = 600;
-
 export default async function AdminPropertyAuditPage({
   params,
 }: {
@@ -47,31 +44,37 @@ export default async function AdminPropertyAuditPage({
 
   const p: any = propRes.data;
 
-  const addressDisplay = [p.address_line1, p.address_line2, p.city, p.state, p.postal_code]
+  const addressDisplay = [
+    p.address_line1,
+    p.address_line2,
+    p.city,
+    p.state,
+    p.postal_code,
+  ]
     .filter(Boolean)
     .join(", ");
 
   const [auditRes, docsRes] = await Promise.all([
     (supabase.from("property_status_audit") as any)
-      .select("id, from_status, to_status, changed_by, actor_type, changed_at, notes")
+      .select(
+        "id, from_status, to_status, changed_by, actor_type, changed_at, notes",
+      )
       .eq("property_id", propertyId)
       .order("changed_at", { ascending: false }),
     (supabase.from("property_documents") as any)
-      .select("id, doc_type, storage_path, content_type, created_at")
+      .select("id, doc_type, content_type, created_at")
       .eq("property_id", propertyId),
   ]);
 
   const auditRows = (auditRes.data ?? []) as any[];
-  const docRows = (docsRes.data ?? []) as any[];
 
-  const docsWithUrls = await Promise.all(
-    docRows.map(async (d: any) => {
-      const { data: signed } = await supabase.storage
-        .from(BUCKET)
-        .createSignedUrl(d.storage_path, SIGNED_URL_TTL);
-      return { ...d, signed_url: signed?.signedUrl ?? null };
-    }),
-  );
+  // IMPORTANT: Do NOT use signed URLs for rendering in the admin UI.
+  // The preview component must render via the proxy route:
+  // /api/admin/properties/{propertyId}/documents/{docType}
+  const docs = ((docsRes.data ?? []) as any[]).map((d) => ({
+    doc_type: d.doc_type,
+    content_type: d.content_type ?? null,
+  }));
 
   return (
     <main className="mx-auto max-w-4xl p-6 space-y-6">
@@ -89,13 +92,17 @@ export default async function AdminPropertyAuditPage({
 
       <div>
         <h1 className="text-2xl font-semibold">Property review</h1>
-        <p className="text-sm text-muted-foreground">{addressDisplay || p.id}</p>
+        <p className="text-sm text-muted-foreground">
+          {addressDisplay || p.id}
+        </p>
       </div>
 
       <div className="rounded-lg border p-4 text-sm space-y-1">
         <div>
           <span className="text-muted-foreground">Status:</span>{" "}
-          <span className="font-medium">{String(p.status).replace("_", " ")}</span>
+          <span className="font-medium">
+            {String(p.status).replace("_", " ")}
+          </span>
         </div>
         <div>
           <span className="text-muted-foreground">Owner:</span>{" "}
@@ -127,9 +134,12 @@ export default async function AdminPropertyAuditPage({
 
       <AdminPropertyActions propertyId={propertyId} status={p.status} />
 
-      <PropertyDocumentsPreview docs={docsWithUrls as any} />
+      <PropertyDocumentsPreview propertyId={propertyId} docs={docs} />
 
-      <AdminPropertyStatusControls propertyId={propertyId} currentStatus={p.status} />
+      <AdminPropertyStatusControls
+        propertyId={propertyId}
+        currentStatus={p.status}
+      />
 
       <div className="rounded-lg border overflow-x-auto">
         <table className="w-full text-sm">

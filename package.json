@@ -17,6 +17,7 @@
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.97.0",
     "fractpath-calculator-widget": "https://github.com/fractpath/fractpath-calculator-widget/archive/refs/tags/v1.0.3.tar.gz",
+    "heic2any": "^0.0.4",
     "next": "16.1.6",
     "node-fetch": "^3.3.2",
     "react": "19.2.3",

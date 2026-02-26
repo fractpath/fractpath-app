@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import heic2any from "heic2any";
@@ -8,9 +8,11 @@ import heic2any from "heic2any";
 async function normalizeUploadToJpeg(file: File): Promise<File> {
   const name = file.name || "upload";
   const lower = name.toLowerCase();
+  const type = (file.type || "").toLowerCase();
+
   const isHeic =
-    file.type.toLowerCase().includes("heic") ||
-    file.type.toLowerCase().includes("heif") ||
+    type.includes("heic") ||
+    type.includes("heif") ||
     lower.endsWith(".heic") ||
     lower.endsWith(".heif");
 
@@ -43,6 +45,14 @@ type EditPrefill = {
   postal_code: string;
 };
 
+type FilesState = Record<DocType, File | null>;
+
+const EMPTY_FILES: FilesState = {
+  selfie: null,
+  drivers_license: null,
+  utility_bill: null,
+};
+
 export function PropertyForm(props: {
   onSuccess?: () => void;
   editPrefill?: EditPrefill | null;
@@ -51,17 +61,15 @@ export function PropertyForm(props: {
 }) {
   const t = useToast();
   const isEdit = !!props.editPrefill;
-  const [address_line1, setLine1] = useState(props.editPrefill?.address_line1 ?? "");
-  const [address_line2, setLine2] = useState(props.editPrefill?.address_line2 ?? "");
-  const [city, setCity] = useState(props.editPrefill?.city ?? "");
-  const [state, setState] = useState(props.editPrefill?.state ?? "");
-  const [postal_code, setZip] = useState(props.editPrefill?.postal_code ?? "");
 
-  const [files, setFiles] = useState<Record<DocType, File | null>>({
-    selfie: null,
-    drivers_license: null,
-    utility_bill: null,
-  });
+  const [address_line1, setLine1] = useState("");
+  const [address_line2, setLine2] = useState("");
+  const [city, setCity] = useState("");
+  const [state, setState] = useState("");
+  const [postal_code, setZip] = useState("");
+
+  const [files, setFiles] = useState<FilesState>(EMPTY_FILES);
+  const [submitting, setSubmitting] = useState(false);
 
   const fileRefs = {
     selfie: useRef<HTMLInputElement>(null),
@@ -69,32 +77,92 @@ export function PropertyForm(props: {
     utility_bill: useRef<HTMLInputElement>(null),
   };
 
-  const [submitting, setSubmitting] = useState(false);
+  // Reset form each time the modal opens (or edit target changes)
+  useEffect(() => {
+    if (!props.open) return;
+
+    setLine1(props.editPrefill?.address_line1 ?? "");
+    setLine2(props.editPrefill?.address_line2 ?? "");
+    setCity(props.editPrefill?.city ?? "");
+    setState(props.editPrefill?.state ?? "");
+    setZip(props.editPrefill?.postal_code ?? "");
+    setFiles(EMPTY_FILES);
+    setSubmitting(false);
+
+    // Clear native file inputs so re-selecting same file triggers onChange
+    (Object.keys(fileRefs) as DocType[]).forEach((k) => {
+      const el = fileRefs[k].current;
+      if (el) el.value = "";
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.open, props.editPrefill?.propertyId]);
 
   function setFile(docType: DocType, file: File | null) {
     setFiles((prev) => ({ ...prev, [docType]: file }));
   }
 
+  // Build preview URLs + revoke them when files change/unmount
+  const previews = useMemo(() => {
+    const out: Partial<Record<DocType, { url: string; isImage: boolean }>> = {};
+    (Object.keys(DOC_LABELS) as DocType[]).forEach((k) => {
+      const f = files[k];
+      if (!f) return;
+      const isImage = (f.type || "").toLowerCase().startsWith("image/");
+      out[k] = { url: URL.createObjectURL(f), isImage };
+    });
+    return out;
+  }, [files]);
+
+  useEffect(() => {
+    return () => {
+      (Object.values(previews) as any[]).forEach((p) => {
+        if (p?.url) URL.revokeObjectURL(p.url);
+      });
+    };
+  }, [previews]);
+
   const allFilesPresent = isEdit || Object.values(files).every((f) => f !== null);
-  const addressValid = address_line1.trim() && state.trim() && postal_code.trim();
+  const addressValid =
+    !!address_line1.trim() && !!state.trim() && !!postal_code.trim();
   const canSubmit = addressValid && allFilesPresent && !submitting;
+
+  async function handlePickFile(docType: DocType, raw: File | null) {
+    if (!raw) {
+      setFile(docType, null);
+      return;
+    }
+
+    try {
+      // Convert HEIC/HEIF to JPEG so admin preview works everywhere
+      const normalized = await normalizeUploadToJpeg(raw);
+      setFile(docType, normalized);
+
+      // Clear the input so selecting the same file again still triggers onChange
+      const el = fileRefs[docType].current;
+      if (el) el.value = "";
+    } catch (e) {
+      console.error(e);
+      t.error("Could not process that image. Try a different file.");
+      setFile(docType, null);
+    }
+  }
 
   async function handleSubmit() {
     if (!canSubmit) return;
     setSubmitting(true);
+
     try {
       const fd = new FormData();
       fd.set("address_line1", address_line1.trim());
       fd.set("address_line2", address_line2.trim());
       fd.set("city", city.trim());
-      fd.set("state", state.trim());
+      fd.set("state", state.trim().toUpperCase());
       fd.set("postal_code", postal_code.trim());
 
-      for (const docType of Object.keys(DOC_LABELS) as DocType[]) {
-        if (files[docType]) {
-          fd.set(docType, files[docType]!);
-        }
-      }
+      (Object.keys(DOC_LABELS) as DocType[]).forEach((docType) => {
+        const f = files[docType];
+        if (f) fd.set(docType, f);
+      });
 
       const url = isEdit
         ? `/api/me/properties/${props.editPrefill!.propertyId}/edit`
@@ -112,7 +180,8 @@ export function PropertyForm(props: {
       t.success(isEdit ? "Property updated." : "Submitted for verification.");
       props.onClose();
       props.onSuccess?.();
-    } catch {
+    } catch (e) {
+      console.error(e);
       t.error("Something went wrong — try again.");
     } finally {
       setSubmitting(false);
@@ -124,7 +193,11 @@ export function PropertyForm(props: {
       open={props.open}
       onClose={props.onClose}
       title={isEdit ? "Edit property" : "Add property"}
-      description={isEdit ? "Update your property details" : "Submit for verification with address and photos"}
+      description={
+        isEdit
+          ? "Update your property details"
+          : "Submit for verification with address and photos"
+      }
       primaryLabel={submitting ? "Saving..." : isEdit ? "Save changes" : "Submit"}
       primaryLoading={submitting}
       primaryDisabled={!canSubmit}
@@ -143,6 +216,7 @@ export function PropertyForm(props: {
               placeholder="123 Main St"
             />
           </label>
+
           <label className="block space-y-1">
             <span className="text-sm font-medium">Address line 2</span>
             <input
@@ -152,6 +226,7 @@ export function PropertyForm(props: {
               placeholder="Apt, Suite, etc."
             />
           </label>
+
           <label className="block space-y-1">
             <span className="text-sm font-medium">City</span>
             <input
@@ -161,17 +236,19 @@ export function PropertyForm(props: {
               placeholder="City"
             />
           </label>
+
           <div className="grid grid-cols-2 gap-3">
             <label className="block space-y-1">
               <span className="text-sm font-medium">State *</span>
               <input
                 className="w-full rounded-md border px-3 py-2 text-sm"
                 value={state}
-                onChange={(e) => setState(e.target.value)}
+                onChange={(e) => setState(e.target.value.toUpperCase())}
                 placeholder="CA"
                 maxLength={2}
               />
             </label>
+
             <label className="block space-y-1">
               <span className="text-sm font-medium">Zip code *</span>
               <input
@@ -192,10 +269,13 @@ export function PropertyForm(props: {
           <div className="text-xs text-muted-foreground mb-3">
             Upload clear photos for each category.
           </div>
+
           <div className="space-y-3">
             {(Object.keys(DOC_LABELS) as DocType[]).map((docType) => {
               const { label, hint } = DOC_LABELS[docType];
               const file = files[docType];
+              const preview = previews[docType];
+
               return (
                 <div key={docType} className="rounded-md border p-3">
                   <div className="flex items-center justify-between gap-2">
@@ -203,6 +283,7 @@ export function PropertyForm(props: {
                       <div className="text-sm font-medium">{label}</div>
                       <div className="text-xs text-muted-foreground">{hint}</div>
                     </div>
+
                     <button
                       type="button"
                       className="shrink-0 text-xs px-3 py-1 rounded border hover:bg-muted"
@@ -211,18 +292,20 @@ export function PropertyForm(props: {
                       {file ? "Replace" : "Choose file"}
                     </button>
                   </div>
+
                   <input
                     ref={fileRefs[docType]}
                     type="file"
                     accept="image/*,.pdf"
                     className="hidden"
-                    onChange={(e) => setFile(docType, e.target.files?.[0] ?? null)}
+                    onChange={(e) => handlePickFile(docType, e.target.files?.[0] ?? null)}
                   />
+
                   {file && (
                     <div className="mt-2 flex items-center gap-2">
-                      {file.type.startsWith("image/") ? (
+                      {preview?.isImage ? (
                         <img
-                          src={URL.createObjectURL(file)}
+                          src={preview.url}
                           alt={label}
                           className="h-12 w-12 rounded object-cover border"
                         />
