@@ -2,15 +2,77 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 
-const REQUIRED_DOC_TYPES = ["selfie", "drivers_license", "utility_bill"] as const;
+const REQUIRED_DOC_TYPES = [
+  "selfie",
+  "drivers_license",
+  "utility_bill",
+] as const;
 const BUCKET = "property-verification";
+
+function isHeicBuffer(buf: Buffer): boolean {
+  // HEIF/HEIC brand is typically at bytes 4..11: "ftyp" + brand
+  if (!buf || buf.length < 12) return false;
+  const box = buf.subarray(4, 12).toString("ascii"); // e.g. "ftypheic"
+  return (
+    box === "ftypheic" ||
+    box === "ftypheix" ||
+    box === "ftyphevc" ||
+    box === "ftyphevx" ||
+    box === "ftypmif1" || // generic HEIF
+    box === "ftypmsf1"
+  );
+}
+
+function inferContentType(file: File, buf: Buffer): string {
+  const t = (file.type || "").toLowerCase();
+  if (t) return t;
+
+  // Fallback: sniff a couple common cases
+  if (buf.length >= 4) {
+    // JPEG magic: FF D8 FF
+    if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff)
+      return "image/jpeg";
+    // PNG magic: 89 50 4E 47
+    if (
+      buf[0] === 0x89 &&
+      buf[1] === 0x50 &&
+      buf[2] === 0x4e &&
+      buf[3] === 0x47
+    )
+      return "image/png";
+    // PDF: %PDF
+    if (
+      buf[0] === 0x25 &&
+      buf[1] === 0x50 &&
+      buf[2] === 0x44 &&
+      buf[3] === 0x46
+    )
+      return "application/pdf";
+  }
+
+  return "application/octet-stream";
+}
+
+function extForContentType(contentType: string): string {
+  const ct = contentType.toLowerCase();
+  if (ct === "image/jpeg") return "jpg";
+  if (ct === "image/png") return "png";
+  if (ct === "application/pdf") return "pdf";
+  return "bin";
+}
 
 function jsonError(msg: string, status: number) {
   return NextResponse.json({ ok: false, error: msg }, { status });
 }
 
 function formatAddress(row: Record<string, any>): string {
-  return [row.address_line1, row.address_line2, row.city, row.state, row.postal_code]
+  return [
+    row.address_line1,
+    row.address_line2,
+    row.city,
+    row.state,
+    row.postal_code,
+  ]
     .filter(Boolean)
     .join(", ");
 }
@@ -23,7 +85,9 @@ export async function GET() {
   if (!user) return jsonError("Unauthorized", 401);
 
   const { data, error } = await (supabase.from("properties") as any)
-    .select("id, owner_user_id, address_line1, address_line2, city, state, postal_code, status, is_private, created_at, updated_at")
+    .select(
+      "id, owner_user_id, address_line1, address_line2, city, state, postal_code, status, is_private, created_at, updated_at",
+    )
     .eq("owner_user_id", user.id)
     .order("created_at", { ascending: false });
 
@@ -99,41 +163,62 @@ export async function POST(req: Request) {
 
   await ensureBucket(svc);
 
-  const docRows: Array<{ property_id: string; doc_type: string; storage_path: string; content_type: string }> = [];
+  const docRows: Array<{
+    property_id: string;
+    doc_type: string;
+    storage_path: string;
+    content_type: string;
+  }> = [];
 
   for (const docType of REQUIRED_DOC_TYPES) {
     const file = files[docType];
-    const ext = file.name.split(".").pop() || "bin";
-    const storagePath = `${user.id}/${propertyId}/${docType}.${ext}`;
-
     const buf = Buffer.from(await file.arrayBuffer());
+
+    if (isHeicBuffer(buf)) {
+      await (svc.from("properties") as any).delete().eq("id", propertyId);
+      return jsonError(
+        `${docType.replace("_", " ")} is an HEIC/HEIF image. Please upload JPG/PNG (the app will convert HEIC automatically when working correctly).`,
+        415,
+      );
+    }
+
+    const contentType = inferContentType(file, buf);
+    const ext = extForContentType(contentType);
+    const storagePath = `${user.id}/${propertyId}/${docType}.${ext}`;
 
     const { error: uploadErr } = await svc.storage
       .from(BUCKET)
       .upload(storagePath, buf, {
-        contentType: file.type || "application/octet-stream",
+        contentType,
         upsert: true,
       });
 
     if (uploadErr) {
       await (svc.from("properties") as any).delete().eq("id", propertyId);
-      return jsonError(`Upload failed for ${docType}: ${uploadErr.message}`, 500);
+      return jsonError(
+        `Upload failed for ${docType}: ${uploadErr.message}`,
+        500,
+      );
     }
 
     docRows.push({
       property_id: propertyId,
       doc_type: docType,
       storage_path: storagePath,
-      content_type: file.type || "application/octet-stream",
+      content_type: contentType,
     });
   }
 
-  const { error: docInsertErr } = await (svc.from("property_documents") as any)
-    .insert(docRows);
+  const { error: docInsertErr } = await (
+    svc.from("property_documents") as any
+  ).insert(docRows);
 
   if (docInsertErr) {
     return jsonError(`Document records failed: ${docInsertErr.message}`, 500);
   }
 
-  return NextResponse.json({ ok: true, property: { id: propertyId, status: "unverified" } }, { status: 201 });
+  return NextResponse.json(
+    { ok: true, property: { id: propertyId, status: "unverified" } },
+    { status: 201 },
+  );
 }

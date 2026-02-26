@@ -1,9 +1,42 @@
+import crypto from "crypto";
 import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { createServiceClient } from "@/lib/supabase/service";
 import { AdminPropertyActions } from "@/components/admin/AdminPropertyActions";
 import { PropertyDocumentsPreview } from "@/components/admin/PropertyDocumentsPreview";
 import { AdminPropertyStatusControls } from "@/components/admin/AdminPropertyStatusControls";
+
+type DocType = "selfie" | "drivers_license" | "utility_bill";
+
+function requirePreviewSecret(): string {
+  const v = process.env.ADMIN_DOC_PREVIEW_SECRET;
+  if (!v) throw new Error("Missing env: ADMIN_DOC_PREVIEW_SECRET");
+  return v;
+}
+
+function b64url(buf: Buffer) {
+  return buf
+    .toString("base64")
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replaceAll("=", "");
+}
+
+// token format: "<exp>.<sigB64url>"
+// sig = HMAC_SHA256(secret, `${exp}.${propertyId}.${docType}.${storagePath}`)
+function mintPreviewToken(args: {
+  propertyId: string;
+  docType: DocType;
+  storagePath: string;
+  expSecondsFromNow: number;
+}): string {
+  const exp = Math.floor(Date.now() / 1000) + args.expSecondsFromNow;
+  const expStr = String(exp);
+  const secret = requirePreviewSecret();
+  const msg = `${expStr}.${args.propertyId}.${args.docType}.${args.storagePath}`;
+  const sig = b64url(crypto.createHmac("sha256", secret).update(msg).digest());
+  return `${expStr}.${sig}`;
+}
 
 export default async function AdminPropertyAuditPage({
   params,
@@ -62,19 +95,28 @@ export default async function AdminPropertyAuditPage({
       .eq("property_id", propertyId)
       .order("changed_at", { ascending: false }),
     (supabase.from("property_documents") as any)
-      .select("id, doc_type, content_type, created_at")
+      .select("doc_type, storage_path, content_type, created_at")
       .eq("property_id", propertyId),
   ]);
 
   const auditRows = (auditRes.data ?? []) as any[];
 
-  // IMPORTANT: Do NOT use signed URLs for rendering in the admin UI.
-  // The preview component must render via the proxy route:
-  // /api/admin/properties/{propertyId}/documents/{docType}
-  const docs = ((docsRes.data ?? []) as any[]).map((d) => ({
-    doc_type: d.doc_type,
-    content_type: d.content_type ?? null,
-  }));
+  // Mint short-lived per-doc tokens (10 minutes)
+  const docs = ((docsRes.data ?? []) as any[]).map((d) => {
+    const docType = d.doc_type as DocType;
+    const storagePath = String(d.storage_path);
+
+    return {
+      doc_type: docType,
+      content_type: d.content_type ?? null,
+      preview_token: mintPreviewToken({
+        propertyId,
+        docType,
+        storagePath,
+        expSecondsFromNow: 10 * 60,
+      }),
+    };
+  });
 
   return (
     <main className="mx-auto max-w-4xl p-6 space-y-6">

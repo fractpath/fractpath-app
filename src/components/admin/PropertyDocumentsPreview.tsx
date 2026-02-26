@@ -7,6 +7,7 @@ type DocType = "selfie" | "drivers_license" | "utility_bill";
 type DocRow = {
   doc_type: DocType;
   content_type: string | null;
+  preview_token: string;
 };
 
 const DOCS: Array<{ docType: DocType; label: string }> = [
@@ -15,10 +16,17 @@ const DOCS: Array<{ docType: DocType; label: string }> = [
   { docType: "utility_bill", label: "Utility Bill" },
 ];
 
-function proxyUrl(propertyId: string, docType: DocType) {
-  return `/api/admin/properties/${encodeURIComponent(
+// Always return a ROOT-ABSOLUTE path (must start with "/")
+function proxyUrl(propertyId: string, docType: DocType, token: string) {
+  const path = `/api/admin/properties/${encodeURIComponent(
     propertyId,
   )}/documents/${encodeURIComponent(docType)}`;
+
+  // Ensure browser treats it as root-absolute (not relative)
+  // Using URL normalizes edge cases like accidental missing leading slash.
+  const u = new URL(path, "http://local");
+  u.searchParams.set("t", token);
+  return u.pathname + u.search;
 }
 
 export function PropertyDocumentsPreview(props: {
@@ -42,15 +50,18 @@ export function PropertyDocumentsPreview(props: {
         {DOCS.map(({ docType, label }) => {
           const row = byType.get(docType);
           const exists = !!row;
-          const contentType = row?.content_type ?? "";
-          const src = proxyUrl(propertyId, docType);
 
+          const contentType = row?.content_type ?? "";
           const isImage = contentType.startsWith("image/");
           const isPdf = contentType === "application/pdf";
 
+          const src = row
+            ? proxyUrl(propertyId, docType, row.preview_token)
+            : "";
+
           return (
             <button
-              key={docType} // UNIQUE + STABLE
+              key={docType}
               type="button"
               className="rounded-md border p-3 text-left space-y-2 hover:bg-muted/30 disabled:opacity-50"
               disabled={!exists}
@@ -118,9 +129,6 @@ export function PropertyDocumentsPreview(props: {
 
             {(() => {
               const row = byType.get(open);
-              const contentType = row?.content_type ?? "";
-              const src = proxyUrl(propertyId, open);
-
               if (!row) {
                 return (
                   <div className="rounded bg-muted p-4 text-sm text-muted-foreground">
@@ -128,6 +136,9 @@ export function PropertyDocumentsPreview(props: {
                   </div>
                 );
               }
+
+              const contentType = row.content_type ?? "";
+              const src = proxyUrl(propertyId, open, row.preview_token);
 
               if (contentType.startsWith("image/")) {
                 return (

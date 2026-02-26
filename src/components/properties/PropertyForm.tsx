@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import heic2any from "heic2any";
@@ -8,9 +8,11 @@ import heic2any from "heic2any";
 async function normalizeUploadToJpeg(file: File): Promise<File> {
   const name = file.name || "upload";
   const lower = name.toLowerCase();
+  const type = (file.type || "").toLowerCase();
+
   const isHeic =
-    file.type.toLowerCase().includes("heic") ||
-    file.type.toLowerCase().includes("heif") ||
+    type.includes("heic") ||
+    type.includes("heif") ||
     lower.endsWith(".heic") ||
     lower.endsWith(".heif");
 
@@ -22,7 +24,7 @@ async function normalizeUploadToJpeg(file: File): Promise<File> {
     quality: 0.9,
   })) as Blob;
 
-  const safeBase = name.replace(/\.(heic|heif)$/i, "");
+  const safeBase = name.replace(/\.(heic|heif)$/i, "") || "upload";
   return new File([blob], `${safeBase}.jpg`, { type: "image/jpeg" });
 }
 
@@ -51,8 +53,13 @@ export function PropertyForm(props: {
 }) {
   const t = useToast();
   const isEdit = !!props.editPrefill;
-  const [address_line1, setLine1] = useState(props.editPrefill?.address_line1 ?? "");
-  const [address_line2, setLine2] = useState(props.editPrefill?.address_line2 ?? "");
+
+  const [address_line1, setLine1] = useState(
+    props.editPrefill?.address_line1 ?? "",
+  );
+  const [address_line2, setLine2] = useState(
+    props.editPrefill?.address_line2 ?? "",
+  );
   const [city, setCity] = useState(props.editPrefill?.city ?? "");
   const [state, setState] = useState(props.editPrefill?.state ?? "");
   const [postal_code, setZip] = useState(props.editPrefill?.postal_code ?? "");
@@ -71,12 +78,53 @@ export function PropertyForm(props: {
 
   const [submitting, setSubmitting] = useState(false);
 
+  // Optional: preview URLs for chosen files
+  const previews = useMemo(() => {
+    const out: Partial<Record<DocType, { url: string; isImage: boolean }>> = {};
+    (Object.keys(DOC_LABELS) as DocType[]).forEach((k) => {
+      const f = files[k];
+      if (!f) return;
+      const isImage = (f.type || "").toLowerCase().startsWith("image/");
+      out[k] = { url: URL.createObjectURL(f), isImage };
+    });
+    return out;
+  }, [files]);
+
+  useEffect(() => {
+    return () => {
+      (Object.values(previews) as any[]).forEach((p) => {
+        if (p?.url) URL.revokeObjectURL(p.url);
+      });
+    };
+  }, [previews]);
+
   function setFile(docType: DocType, file: File | null) {
     setFiles((prev) => ({ ...prev, [docType]: file }));
   }
 
-  const allFilesPresent = isEdit || Object.values(files).every((f) => f !== null);
-  const addressValid = address_line1.trim() && state.trim() && postal_code.trim();
+  async function handlePickFile(docType: DocType, raw: File | null) {
+    if (!raw) {
+      setFile(docType, null);
+      return;
+    }
+    try {
+      const normalized = await normalizeUploadToJpeg(raw);
+      setFile(docType, normalized);
+
+      // Clear input so picking same file again triggers onChange
+      const el = fileRefs[docType].current;
+      if (el) el.value = "";
+    } catch (e) {
+      console.error(e);
+      t.error("Could not process that image. Try a different file.");
+      setFile(docType, null);
+    }
+  }
+
+  const allFilesPresent =
+    isEdit || Object.values(files).every((f) => f !== null);
+  const addressValid =
+    !!address_line1.trim() && !!state.trim() && !!postal_code.trim();
   const canSubmit = addressValid && allFilesPresent && !submitting;
 
   async function handleSubmit() {
@@ -91,9 +139,7 @@ export function PropertyForm(props: {
       fd.set("postal_code", postal_code.trim());
 
       for (const docType of Object.keys(DOC_LABELS) as DocType[]) {
-        if (files[docType]) {
-          fd.set(docType, files[docType]!);
-        }
+        if (files[docType]) fd.set(docType, files[docType]!);
       }
 
       const url = isEdit
@@ -112,7 +158,8 @@ export function PropertyForm(props: {
       t.success(isEdit ? "Property updated." : "Submitted for verification.");
       props.onClose();
       props.onSuccess?.();
-    } catch {
+    } catch (e) {
+      console.error(e);
       t.error("Something went wrong — try again.");
     } finally {
       setSubmitting(false);
@@ -124,8 +171,14 @@ export function PropertyForm(props: {
       open={props.open}
       onClose={props.onClose}
       title={isEdit ? "Edit property" : "Add property"}
-      description={isEdit ? "Update your property details" : "Submit for verification with address and photos"}
-      primaryLabel={submitting ? "Saving..." : isEdit ? "Save changes" : "Submit"}
+      description={
+        isEdit
+          ? "Update your property details"
+          : "Submit for verification with address and photos"
+      }
+      primaryLabel={
+        submitting ? "Saving..." : isEdit ? "Save changes" : "Submit"
+      }
       primaryLoading={submitting}
       primaryDisabled={!canSubmit}
       onPrimary={handleSubmit}
@@ -143,6 +196,7 @@ export function PropertyForm(props: {
               placeholder="123 Main St"
             />
           </label>
+
           <label className="block space-y-1">
             <span className="text-sm font-medium">Address line 2</span>
             <input
@@ -152,6 +206,7 @@ export function PropertyForm(props: {
               placeholder="Apt, Suite, etc."
             />
           </label>
+
           <label className="block space-y-1">
             <span className="text-sm font-medium">City</span>
             <input
@@ -161,6 +216,7 @@ export function PropertyForm(props: {
               placeholder="City"
             />
           </label>
+
           <div className="grid grid-cols-2 gap-3">
             <label className="block space-y-1">
               <span className="text-sm font-medium">State *</span>
@@ -192,17 +248,23 @@ export function PropertyForm(props: {
           <div className="text-xs text-muted-foreground mb-3">
             Upload clear photos for each category.
           </div>
+
           <div className="space-y-3">
             {(Object.keys(DOC_LABELS) as DocType[]).map((docType) => {
               const { label, hint } = DOC_LABELS[docType];
               const file = files[docType];
+              const preview = previews[docType];
+
               return (
                 <div key={docType} className="rounded-md border p-3">
                   <div className="flex items-center justify-between gap-2">
                     <div>
                       <div className="text-sm font-medium">{label}</div>
-                      <div className="text-xs text-muted-foreground">{hint}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {hint}
+                      </div>
                     </div>
+
                     <button
                       type="button"
                       className="shrink-0 text-xs px-3 py-1 rounded border hover:bg-muted"
@@ -211,18 +273,22 @@ export function PropertyForm(props: {
                       {file ? "Replace" : "Choose file"}
                     </button>
                   </div>
+
                   <input
                     ref={fileRefs[docType]}
                     type="file"
                     accept="image/*,.pdf"
                     className="hidden"
-                    onChange={(e) => setFile(docType, e.target.files?.[0] ?? null)}
+                    onChange={(e) =>
+                      handlePickFile(docType, e.target.files?.[0] ?? null)
+                    }
                   />
+
                   {file && (
                     <div className="mt-2 flex items-center gap-2">
-                      {file.type.startsWith("image/") ? (
+                      {preview?.isImage ? (
                         <img
-                          src={URL.createObjectURL(file)}
+                          src={preview.url}
                           alt={label}
                           className="h-12 w-12 rounded object-cover border"
                         />
