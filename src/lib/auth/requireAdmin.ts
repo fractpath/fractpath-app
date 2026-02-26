@@ -20,8 +20,19 @@ export async function requireAdmin(): Promise<AdminResult> {
     return { ok: false, status: 401, error: "Unauthorized" };
   }
 
-  const role = user.user_metadata?.role;
-  if (role !== "admin") {
+  // DB-backed admin check (single source of truth)
+  const { data, error } = await supabase.rpc("is_admin");
+
+  if (error) {
+    // Fail closed
+    return {
+      ok: false,
+      status: 403,
+      error: `Forbidden (admin check failed): ${error.message}`,
+    };
+  }
+
+  if (data !== true) {
     return { ok: false, status: 403, error: "Forbidden (admin only)" };
   }
 
@@ -30,7 +41,7 @@ export async function requireAdmin(): Promise<AdminResult> {
     user: {
       id: user.id,
       email: user.email,
-      user_metadata: user.user_metadata ?? {},
+      user_metadata: (user.user_metadata ?? {}) as Record<string, unknown>,
     },
   };
 }

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -10,13 +10,15 @@ function jsonError(msg: string, status: number) {
 }
 
 export async function GET(
-  _req: Request,
+  _req: NextRequest,
   ctx: { params: Promise<{ propertyId: string }> },
 ) {
   const admin = await requireAdmin();
   if (!admin.ok) return jsonError(admin.error, admin.status);
 
   const { propertyId } = await ctx.params;
+  if (!propertyId) return jsonError("Missing propertyId", 400);
+
   const svc = createServiceClient();
 
   const { data: docs, error } = await (svc.from("property_documents") as any)
@@ -27,12 +29,13 @@ export async function GET(
 
   const docsWithUrls = await Promise.all(
     (docs ?? []).map(async (d: any) => {
-      const { data: signed } = await svc.storage
+      const { data: signed, error: signErr } = await svc.storage
         .from(BUCKET)
         .createSignedUrl(d.storage_path, SIGNED_URL_TTL);
+
       return {
         ...d,
-        signed_url: signed?.signedUrl ?? null,
+        signed_url: signErr ? null : signed?.signedUrl ?? null,
       };
     }),
   );

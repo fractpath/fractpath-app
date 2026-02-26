@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -39,9 +38,9 @@ export default async function AdminPropertyAuditPage({
   if (propRes.error || !propRes.data) {
     return (
       <main className="mx-auto max-w-4xl p-6 space-y-4">
-        <Link className="text-sm underline" href="/admin/properties">
-          &larr; Back
-        </Link>
+        <a className="text-sm underline" href="/admin/properties?status=queue">
+          &larr; Back to queue
+        </a>
         <h1 className="text-2xl font-semibold">Audit</h1>
         <div className="rounded-lg border p-4 text-sm text-muted-foreground">
           Property not found (or failed to load).
@@ -81,26 +80,26 @@ export default async function AdminPropertyAuditPage({
   return (
     <main className="mx-auto max-w-4xl p-6 space-y-6">
       <div className="flex items-center justify-between">
-        <Link className="text-sm underline" href="/admin/properties">
-          &larr; Back
-        </Link>
-        <Link
+        <a className="text-sm underline" href="/admin/properties?status=queue">
+          &larr; Back to queue
+        </a>
+        <a
           className="text-sm underline"
           href={`/admin/properties?status=${encodeURIComponent(p.status)}`}
         >
-          View list ({p.status})
-        </Link>
+          View list ({String(p.status).replace("_", " ")})
+        </a>
       </div>
 
       <div>
-        <h1 className="text-2xl font-semibold">Property audit</h1>
+        <h1 className="text-2xl font-semibold">Property review</h1>
         <p className="text-sm text-muted-foreground">{addressDisplay || p.id}</p>
       </div>
 
       <div className="rounded-lg border p-4 text-sm space-y-1">
         <div>
           <span className="text-muted-foreground">Status:</span>{" "}
-          {String(p.status)}
+          <span className="font-medium">{String(p.status).replace("_", " ")}</span>
         </div>
         <div>
           <span className="text-muted-foreground">Owner:</span>{" "}
@@ -109,6 +108,10 @@ export default async function AdminPropertyAuditPage({
         <div>
           <span className="text-muted-foreground">Address:</span>{" "}
           {addressDisplay || "—"}
+        </div>
+        <div>
+          <span className="text-muted-foreground">Created:</span>{" "}
+          {p.created_at ? String(p.created_at) : "—"}
         </div>
         <div>
           <span className="text-muted-foreground">Reviewed:</span>{" "}
@@ -126,9 +129,7 @@ export default async function AdminPropertyAuditPage({
         )}
       </div>
 
-      <div className="flex gap-2">
-        <AdminPropertyActions propertyId={propertyId} status={p.status} />
-      </div>
+      <AdminPropertyActions propertyId={propertyId} status={p.status} />
 
       <div className="rounded-lg border p-4">
         <h2 className="text-base font-semibold mb-3">Verification documents</h2>

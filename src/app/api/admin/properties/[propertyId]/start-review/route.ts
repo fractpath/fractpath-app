@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -7,7 +7,7 @@ function jsonError(msg: string, status: number) {
 }
 
 export async function POST(
-  req: Request,
+  req: NextRequest,
   ctx: { params: Promise<{ propertyId: string }> },
 ) {
   const admin = await requireAdmin();
@@ -17,12 +17,14 @@ export async function POST(
   if (!propertyId) return jsonError("Missing propertyId", 400);
 
   const body = await req.json().catch(() => ({}));
-  const notes = typeof (body as any)?.notes === "string" ? (body as any).notes.trim() || null : null;
+  const notes =
+    typeof (body as any)?.notes === "string"
+      ? (body as any).notes.trim() || null
+      : null;
 
   const svc = createServiceClient();
 
-  const { data, error } = await (svc
-    .from("properties") as any)
+  const { data, error } = await (svc.from("properties") as any)
     .update({
       status: "under_review",
       reviewed_at: new Date().toISOString(),
@@ -35,8 +37,14 @@ export async function POST(
     .maybeSingle();
 
   if (error) return jsonError(error.message, 500);
-  if (!data) return jsonError("Property not found or invalid transition (must be unverified)", 409);
+  if (!data) {
+    return jsonError(
+      "Property not found or invalid transition (must be unverified)",
+      409,
+    );
+  }
 
+  // Best-effort audit insert (do not fail transition if audit insert fails)
   await (svc.from("property_status_audit") as any).insert({
     property_id: propertyId,
     from_status: "unverified",
@@ -46,5 +54,9 @@ export async function POST(
     actor_type: "human",
   });
 
-  return NextResponse.json({ ok: true, propertyId: data.id, status: data.status });
+  return NextResponse.json({
+    ok: true,
+    propertyId: data.id,
+    status: data.status,
+  });
 }

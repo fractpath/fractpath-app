@@ -1,15 +1,21 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { createServiceClient } from "@/lib/supabase/service";
-import { AdminPropertyActions } from "@/components/admin/AdminPropertyActions";
 
 type Status = "unverified" | "under_review" | "verified" | "archived";
+type Filter = "queue" | Status;
 
-const STATUS_ORDER: Status[] = ["unverified", "under_review", "verified", "archived"];
+const FILTER_ORDER: Filter[] = [
+  "queue",
+  "unverified",
+  "under_review",
+  "verified",
+  "archived",
+];
 
-function isStatus(v: unknown): v is Status {
+function isFilter(v: unknown): v is Filter {
   return (
+    v === "queue" ||
     v === "unverified" ||
     v === "under_review" ||
     v === "verified" ||
@@ -29,22 +35,24 @@ export default async function AdminPropertiesPage({
     redirect(`/login?returnTo=${encodeURIComponent("/admin/properties")}`);
   }
 
-  const resolved = (await Promise.resolve(searchParams)) as
-    | SearchParams
-    | undefined;
-  const filterRaw =
-    typeof resolved?.status === "string" ? resolved.status : "unverified";
-  const statusFilter: Status = isStatus(filterRaw) ? filterRaw : "unverified";
+  const resolved = (await Promise.resolve(searchParams)) as SearchParams | undefined;
+  const raw = resolved?.status;
+  const filterRaw = Array.isArray(raw) ? raw[0] : raw;
+  const filter: Filter = isFilter(filterRaw) ? filterRaw : "queue";
 
   const supabase = createServiceClient();
 
-  const propsRes = await (supabase
-    .from("properties") as any)
-    .select(
-      "id, owner_user_id, address_line1, address_line2, city, state, postal_code, status, created_at, updated_at, reviewed_at, reviewed_by, verified_at, verified_by, review_notes",
-    )
-    .eq("status", statusFilter)
-    .order("created_at", { ascending: false });
+  let q = (supabase.from("properties") as any).select(
+    "id, owner_user_id, address_line1, address_line2, city, state, postal_code, status, created_at, updated_at, reviewed_at, reviewed_by, verified_at, verified_by, review_notes",
+  );
+
+  if (filter === "queue") {
+    q = q.in("status", ["unverified", "under_review"]);
+  } else {
+    q = q.eq("status", filter);
+  }
+
+  const propsRes = await q.order("created_at", { ascending: false });
 
   if (propsRes.error) {
     return (
@@ -71,25 +79,26 @@ export default async function AdminPropertiesPage({
             Property verification ops surface
           </p>
         </div>
-        <Link className="text-sm underline" href="/dashboard">
+        <a className="text-sm underline" href="/dashboard">
           Back to dashboard
-        </Link>
+        </a>
       </div>
 
       <div className="flex gap-2 flex-wrap">
-        {STATUS_ORDER.map((s) => {
-          const active = s === statusFilter;
+        {FILTER_ORDER.map((s) => {
+          const active = s === filter;
+          const href = `/admin/properties?status=${encodeURIComponent(s)}`;
           return (
-            <Link
+            <a
               key={s}
-              href={`/admin/properties?status=${encodeURIComponent(s)}`}
+              href={href}
               className={[
                 "text-sm px-3 py-1 rounded-full border",
                 active ? "bg-foreground text-background" : "hover:bg-muted",
               ].join(" ")}
             >
-              {s.replace("_", " ")}
-            </Link>
+              {s === "queue" ? "queue" : s.replace("_", " ")}
+            </a>
           );
         })}
       </div>
@@ -102,53 +111,68 @@ export default async function AdminPropertiesPage({
               <th className="p-3">Owner</th>
               <th className="p-3">Status</th>
               <th className="p-3">Notes</th>
-              <th className="p-3 w-[260px]">Actions</th>
+              <th className="p-3 w-[120px]">Action</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <tr>
                 <td className="p-3 text-muted-foreground" colSpan={5}>
-                  No properties found for status: {statusFilter}
+                  No properties found for: {filter}
                 </td>
               </tr>
             ) : (
-              rows.map((p: any) => (
-                <tr key={p.id} className="border-t">
-                  <td className="p-3">
-                    <div className="font-medium">{[p.address_line1, p.address_line2, p.city, p.state, p.postal_code].filter(Boolean).join(", ") || "—"}</div>
-                    <div className="text-xs text-muted-foreground">
-                      <Link
-                        className="underline"
+              rows.map((p: any) => {
+                const label = [
+                  p.address_line1,
+                  p.address_line2,
+                  p.city,
+                  p.state,
+                  p.postal_code,
+                ]
+                  .filter(Boolean)
+                  .join(", ");
+
+                return (
+                  <tr key={p.id} className="border-t">
+                    <td className="p-3">
+                      <a
+                        className="font-medium underline"
                         href={`/admin/properties/${p.id}`}
                       >
-                        View audit
-                      </Link>
-                    </div>
-                  </td>
-                  <td className="p-3">
-                    <div className="font-mono text-xs break-all">
-                      {p.owner_user_id}
-                    </div>
-                  </td>
-                  <td className="p-3">
-                    <span className="inline-flex items-center rounded-full border px-2 py-0.5">
-                      {String(p.status)}
-                    </span>
-                  </td>
-                  <td className="p-3">
-                    <div className="text-xs text-muted-foreground break-words">
-                      {p.review_notes ?? ""}
-                    </div>
-                  </td>
-                  <td className="p-3">
-                    <AdminPropertyActions
-                      propertyId={p.id}
-                      status={p.status}
-                    />
-                  </td>
-                </tr>
-              ))
+                        {label || "—"}
+                      </a>
+                    </td>
+
+                    <td className="p-3">
+                      <div className="font-mono text-xs break-all">
+                        {p.owner_user_id}
+                      </div>
+                    </td>
+
+                    <td className="p-3">
+                      <span className="inline-flex items-center rounded-full border px-2 py-0.5">
+                        {String(p.status).replace("_", " ")}
+                      </span>
+                    </td>
+
+                    <td className="p-3">
+                      <div className="text-xs text-muted-foreground break-words">
+                        {p.review_notes ?? ""}
+                      </div>
+                    </td>
+
+                    <td className="p-3">
+                      <a
+                        className="text-xs px-3 py-1 rounded border hover:bg-muted inline-block"
+                        href={`/admin/properties/${p.id}`}
+                      >
+                        Review
+                      </a>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
