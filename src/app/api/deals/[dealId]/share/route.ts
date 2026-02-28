@@ -59,7 +59,7 @@ export async function POST(
   const recipientEmail = recipientEmailRaw.trim().toLowerCase();
 
   const { data: token, error: rpcErr } = await supabase.rpc(
-    "mint_deal_share_token",
+    "mint_deal_share_token_v2",
     {
       p_deal_id: dealId,
       p_actor_user_id: user.id,

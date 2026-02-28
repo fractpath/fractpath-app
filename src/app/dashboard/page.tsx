@@ -21,16 +21,16 @@ const PERSONA_WELCOME: Record<
 > = {
   homeowner: {
     tagline: "Welcome, Homeowner",
-    description: "You’re exploring a new way to unlock equity without a loan.",
+    description: "You're exploring a new way to unlock equity without a loan.",
   },
   buyer: {
     tagline: "Welcome, Future Homeowner",
     description:
-      "You’re modeling a pathway to ownership through shared equity.",
+      "You're modeling a pathway to ownership through shared equity.",
   },
   realtor: {
     tagline: "Welcome, Partner",
-    description: "You’re participating as a referral partner and co-pilot.",
+    description: "You're participating as a referral partner and co-pilot.",
   },
 };
 
@@ -52,15 +52,13 @@ const NEXT_STEPS: Record<Persona, string[]> = {
   ],
 };
 
-const ACTIVE_STATUSES = new Set([
+const IN_PROGRESS_STATUSES = new Set([
   "DRAFT",
   "NEEDS_REVIEW",
   "UNDER_REVIEW",
   "ACTIVE",
   "IMPORTED",
 ]);
-
-const NEEDS_ATTENTION_STATUSES = new Set(["NEEDS_REVIEW", "UNDER_REVIEW"]);
 
 const ACTIVE_VALUE_STATUSES = new Set(["UNDER_REVIEW", "ACTIVE", "ACCEPTED"]);
 
@@ -74,6 +72,18 @@ const STATUS_DISPLAY: Record<string, string> = {
   REJECTED: "Rejected",
   ARCHIVED: "Archived",
   CLOSED: "Closed",
+};
+
+const STATUS_TONE: Record<string, string> = {
+  DRAFT: "yellow",
+  NEEDS_REVIEW: "amber",
+  UNDER_REVIEW: "amber",
+  ACTIVE: "green",
+  ACCEPTED: "emerald",
+  REJECTED: "red",
+  ARCHIVED: "gray",
+  CLOSED: "gray",
+  IMPORTED: "blue",
 };
 
 const NOW_MS = Date.now();
@@ -97,7 +107,7 @@ function relativeAge(dateStr: string | null, nowMs: number): string {
 
 function shortId(id: string): string {
   if (id.length <= 12) return id;
-  return `Deal ${id.slice(0, 4)}…${id.slice(-5)}`;
+  return `Deal ${id.slice(0, 4)}\u2026${id.slice(-5)}`;
 }
 
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -110,15 +120,13 @@ type CardVm = {
   dealId: string;
   href: string;
   title: string;
-  secondaryId: string | null;
+  secondaryFmvLabel: string | null;
+  kpiLine: string | null;
+  metaLine: string | null;
   statusLabel: string;
+  statusTone: string;
   rawStatus: string;
   roleChipLabel: string | null;
-  fmvLabel: string | null;
-  upfrontMonthlyLabel: string | null;
-  vestedLabel: string | null;
-  exitYearLabel: string | null;
-  updatedLabel: string | null;
   fmvRaw: number | null;
 };
 
@@ -178,7 +186,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         <main className="mx-auto max-w-3xl p-6 space-y-8">
           <h1 className="text-2xl font-semibold">Dashboard</h1>
           <div className="rounded-lg border p-4">
-            <div className="text-sm font-medium">Couldn’t load your deals</div>
+            <div className="text-sm font-medium">Couldn't load your deals</div>
             <div className="mt-2 text-sm text-muted-foreground break-words">
               {grantsRes.error.message}
             </div>
@@ -219,6 +227,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             "deal_id",
             grants.map((g) => g.deal_id),
           )
+          .order("created_at", { ascending: false })
       : { data: [], error: null as any };
 
   const latestSnapByDeal = new Map<string, Record<string, any>>();
@@ -240,46 +249,51 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
     const rawStatus = ((deal?.status as string) || "IMPORTED").toUpperCase();
     const statusLabel = formatStatusLabel(rawStatus);
+    const tone = STATUS_TONE[rawStatus] ?? "gray";
 
     const href =
       grantRole === "OWNER" ? `/deal/${dealId}` : `/deal/${dealId}?mode=shared`;
 
     const addressTitle = meta.addressTitle;
     const title = addressTitle || shortId(dealId);
-    const secondaryId = addressTitle ? shortId(dealId) : null;
 
-    const fmvLabel = meta.fmv != null ? fmtMoneyAbbrev(meta.fmv) : null;
+    const fmvStr = meta.fmv != null ? fmtMoneyAbbrev(meta.fmv) : null;
+    const secondaryFmvLabel = fmvStr ? `FMV ${fmvStr}` : (addressTitle ? shortId(dealId) : null);
 
     const upfrontMonthly = fmtUpfrontPlusMonthly(meta.upfront, meta.monthly);
-    const upfrontMonthlyLabel =
-      upfrontMonthly === "\u2014" ? null : upfrontMonthly;
-
-    const vestedLabel =
-      ACTIVE_VALUE_STATUSES.has(rawStatus) && meta.vested.totalPct != null
+    const vestedStr =
+      meta.vested.totalPct != null
         ? fmtVestedProgress(meta.vested.currentPct, meta.vested.totalPct)
         : null;
-
-    const exitYearLabel =
+    const exitStr =
       meta.exitYear != null ? `Exit ${NOW_YEAR + meta.exitYear}` : null;
 
-    const updatedLabel = relativeAge(
-      snapDateByDeal.get(dealId) ?? null,
-      NOW_MS,
-    );
+    const kpiParts: string[] = [];
+    if (upfrontMonthly !== "\u2014") kpiParts.push(upfrontMonthly);
+    if (vestedStr) kpiParts.push(vestedStr);
+    const kpiLine = kpiParts.length > 0 ? kpiParts.join("  \u00B7  ") : null;
+
+    const metaParts: string[] = [];
+    if (exitStr) metaParts.push(exitStr);
+    const updated = relativeAge(snapDateByDeal.get(dealId) ?? null, NOW_MS);
+    if (updated) metaParts.push(updated);
+    if (!addressTitle) {
+      const idLabel = shortId(dealId);
+      if (!metaParts.some((p) => p.includes(dealId.slice(0, 4)))) metaParts.unshift(idLabel);
+    }
+    const metaLine = metaParts.length > 0 ? metaParts.join("  \u00B7  ") : null;
 
     return {
       dealId,
       href,
       title,
-      secondaryId,
+      secondaryFmvLabel,
+      kpiLine,
+      metaLine,
       statusLabel,
+      statusTone: tone,
       rawStatus,
       roleChipLabel: grantRole === "VIEWER" ? "Shared" : null,
-      fmvLabel,
-      upfrontMonthlyLabel,
-      vestedLabel,
-      exitYearLabel,
-      updatedLabel: updatedLabel || null,
       fmvRaw: meta.fmv,
     };
   }
@@ -294,17 +308,20 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   const allCards = [...ownerCards, ...viewerCards];
 
-  const totalModeledValue = ownerCards.reduce(
+  const totalDeals = allCards.length;
+  const inProgress = allCards.filter((c) =>
+    IN_PROGRESS_STATUSES.has(c.rawStatus),
+  ).length;
+  const sharedCount = viewerCards.length;
+  const followUpsDue = 0;
+
+  const totalPotentialValue = ownerCards.reduce(
     (sum, c) => sum + (c.fmvRaw ?? 0),
     0,
   );
-  const activeDeals = allCards.filter((c) =>
-    ACTIVE_STATUSES.has(c.rawStatus),
-  ).length;
-  const needsAttention = allCards.filter((c) =>
-    NEEDS_ATTENTION_STATUSES.has(c.rawStatus),
-  ).length;
-  const sharedCount = viewerCards.length;
+  const totalActiveValue = ownerCards
+    .filter((c) => ACTIVE_VALUE_STATUSES.has(c.rawStatus))
+    .reduce((sum, c) => sum + (c.fmvRaw ?? 0), 0);
 
   return (
     <div>
@@ -333,31 +350,50 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="rounded-lg border bg-background p-4">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-              Total Modeled Value
+              Total Deals
             </div>
-            <div className="mt-1 text-lg font-semibold">
-              {totalModeledValue > 0
-                ? fmtMoneyAbbrev(totalModeledValue)
-                : "\u2014"}
-            </div>
+            <div className="mt-1 text-lg font-semibold">{totalDeals}</div>
           </div>
           <div className="rounded-lg border bg-background p-4">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-              Active Deals
+              In Progress
             </div>
-            <div className="mt-1 text-lg font-semibold">{activeDeals}</div>
-          </div>
-          <div className="rounded-lg border bg-background p-4">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-              Needs Attention
-            </div>
-            <div className="mt-1 text-lg font-semibold">{needsAttention}</div>
+            <div className="mt-1 text-lg font-semibold">{inProgress}</div>
           </div>
           <div className="rounded-lg border bg-background p-4">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
               Shared With Me
             </div>
             <div className="mt-1 text-lg font-semibold">{sharedCount}</div>
+          </div>
+          <div className="rounded-lg border bg-background p-4">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Follow-ups Due
+            </div>
+            <div className="mt-1 text-lg font-semibold">{followUpsDue}</div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div className="rounded-lg border bg-background p-4">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Total Potential Value
+            </div>
+            <div className="mt-1 text-lg font-semibold">
+              {totalPotentialValue > 0
+                ? fmtMoneyAbbrev(totalPotentialValue)
+                : "\u2014"}
+            </div>
+          </div>
+          <div className="rounded-lg border bg-background p-4">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Total Active Value
+            </div>
+            <div className="mt-1 text-lg font-semibold">
+              {totalActiveValue > 0
+                ? fmtMoneyAbbrev(totalActiveValue)
+                : "\u2014"}
+            </div>
           </div>
         </div>
 
@@ -378,48 +414,47 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         </section>
 
         <section className="space-y-6">
-          <div>
-            <h2 className="text-lg font-semibold">My deals</h2>
-            <p className="text-sm text-muted-foreground">
-              Deals you own and manage
-            </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold">My deals</h2>
+              <p className="text-sm text-muted-foreground">
+                Deals you own and manage
+              </p>
+            </div>
+            <Link
+              href="/deal/new"
+              className="inline-flex items-center rounded-md bg-foreground px-3 py-1.5 text-sm font-medium text-background"
+            >
+              + Create Deal
+            </Link>
           </div>
 
           <div className="space-y-2">
-            <Link
-              href="/deal/new"
-              className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed p-6 transition-colors hover:bg-muted/40 cursor-pointer"
-            >
-              <span className="text-2xl text-muted-foreground">+</span>
-              <span className="text-sm font-medium">Create Deal</span>
-              <span className="text-xs text-muted-foreground">
-                Start a new scenario
-              </span>
-            </Link>
-
             {ownerCards.map((vm) => (
               <DealCard
                 key={vm.dealId}
                 href={vm.href}
                 title={vm.title}
-                secondaryId={vm.secondaryId}
+                secondaryFmvLabel={vm.secondaryFmvLabel}
+                kpiLine={vm.kpiLine}
+                metaLine={vm.metaLine}
                 statusLabel={vm.statusLabel}
-                statusKey={vm.rawStatus}
+                statusTone={vm.statusTone}
                 roleChipLabel={vm.roleChipLabel}
-                fmvLabel={vm.fmvLabel}
-                upfrontMonthlyLabel={vm.upfrontMonthlyLabel}
-                vestedLabel={vm.vestedLabel}
-                exitYearLabel={vm.exitYearLabel}
-                updatedLabel={vm.updatedLabel}
               />
             ))}
 
             {ownerCards.length === 0 ? (
-              <div className="rounded-lg border p-4">
-                <p className="text-sm text-muted-foreground">
-                  You don’t have any deals yet. Create one above to get started.
-                </p>
-              </div>
+              <Link
+                href="/deal/new"
+                className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed p-6 transition-colors hover:bg-muted/40 cursor-pointer"
+              >
+                <span className="text-2xl text-muted-foreground">+</span>
+                <span className="text-sm font-medium">Create Deal</span>
+                <span className="text-xs text-muted-foreground">
+                  Start a new scenario
+                </span>
+              </Link>
             ) : null}
           </div>
         </section>
@@ -445,15 +480,12 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                   key={vm.dealId}
                   href={vm.href}
                   title={vm.title}
-                  secondaryId={vm.secondaryId}
+                  secondaryFmvLabel={vm.secondaryFmvLabel}
+                  kpiLine={vm.kpiLine}
+                  metaLine={vm.metaLine}
                   statusLabel={vm.statusLabel}
-                  statusKey={vm.rawStatus}
+                  statusTone={vm.statusTone}
                   roleChipLabel={vm.roleChipLabel}
-                  fmvLabel={vm.fmvLabel}
-                  upfrontMonthlyLabel={vm.upfrontMonthlyLabel}
-                  vestedLabel={vm.vestedLabel}
-                  exitYearLabel={vm.exitYearLabel}
-                  updatedLabel={vm.updatedLabel}
                 />
               ))}
             </div>

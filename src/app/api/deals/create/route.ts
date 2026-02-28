@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
     const computedAt = new Date().toISOString();
 
     const { data: dealId, error: rpcErr } = await supabase.rpc(
-      "create_deal_with_owner_grant",
+      "create_deal_with_owner_grant_v2",
       { p_user_id: user.id },
     );
 

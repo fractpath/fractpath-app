@@ -210,7 +210,7 @@ export default async function SharePage({ searchParams }: PageProps) {
   }
 
   // 4) Redeem token via canonical RPC (authenticated)
-  const redeem = await supabase.rpc("redeem_deal_share_token", { p_token: t });
+  const redeem = await supabase.rpc("redeem_deal_share_token_v2", { p_token: t });
 
   if (redeem.error) {
     const re = safeErr(redeem.error);

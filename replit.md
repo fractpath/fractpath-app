@@ -24,7 +24,7 @@ FractPath is built with Next.js, leveraging API routes for backend logic and Sup
     - **Deal Creation:** DraftSnapshots convert to `Deal` objects and `FullDealSnapshotV1` records upon user authentication.
     - **Snapshots:** Calculator snapshots are append-only, immutable, and versioned.
     - **Deal Versions & Events:** Tracks deal changes and maintains an audit trail of activities.
-- **Share Link Flow:** Enables generation of shareable URLs for read-only deal viewing with token validation and access management.
+- **Share Link Flow:** Enables generation of shareable URLs for read-only deal viewing with token validation and access management. Uses `mint_deal_share_token_v2` / `redeem_deal_share_token_v2` RPCs (migration-managed as of Sprint 11.5).
 - **Access Control (RLS):** Supabase Row Level Security governs access to data based on user roles (OWNER, VIEWER, COUNTERPARTY).
 - **Rate Limiting:** In-memory IP rate limiting protects pre-authentication endpoints.
 - **User Profiles:** Stores user details, marketing preferences, and EULA acceptance.
