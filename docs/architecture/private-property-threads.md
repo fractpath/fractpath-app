@@ -231,6 +231,25 @@ The following tables referenced in the prompt do **not exist** in the current mi
 
 ---
 
+## SQL Function Inventory
+
+### Functions Defined in Migrations
+
+| Function | Migration File | Purpose |
+|----------|---------------|---------|
+| `no_update_delete()` | `20260210_app_int_001_deals_snapshots_events.sql` | Immutability guard — raises exception on UPDATE/DELETE. Used by triggers on `deal_snapshots`, `deal_versions`, `deal_events`, `calculator_snapshots`. |
+| `set_updated_at()` | `20260225_app_profiles_properties.sql` (also `20260131_*`) | Sets `updated_at = now()` on UPDATE. Used by triggers on `profiles`, `properties`. |
+| `create_deal_with_owner_grant(p_property_address TEXT, p_user_id UUID)` | `20260210_create_deal_with_owner_grant.sql` | SECURITY DEFINER. Creates a deal + OWNER grant atomically. **See drift #10 — signature likely differs in live env.** |
+
+### Functions Called by App Code but NOT in Migrations
+
+| Function | Called From | Purpose |
+|----------|-------------|---------|
+| `mint_deal_share_token(p_deal_id, p_actor_user_id)` | `src/app/api/deals/[dealId]/share/route.ts` | Generates a share token for a deal. Only OWNER should call. |
+| `redeem_deal_share_token(...)` | `src/app/share/page.tsx` | Redeems a share token, creating a VIEWER grant. |
+
+---
+
 ## Snapshot Reuse Audit
 
 ### Does `deal_snapshots.snapshot_json` match canonical compute schema?
@@ -387,6 +406,18 @@ The `ACCEPT` version_type can be created by any OWNER regardless of whether the 
 
 ### 9. Legacy `calculator_snapshots` Table
 The old `calculator_snapshots` table still exists alongside the current `deal_snapshots`. No app code references it, but it represents dead schema weight.
+
+### 10. `create_deal_with_owner_grant` RPC Signature Mismatch
+The migration-defined function signature is `(p_property_address TEXT, p_user_id UUID)` and validates `p_property_address` with a minimum length check. The app code (`/api/deals/create/route.ts`) calls it with only `{ p_user_id: user.id }`, omitting `p_property_address` entirely. The RPC also references `deals.property_address` and `deals.created_by` columns, which do not exist in the `deals` table migration (`owner_user_id`, `status`, `created_from`, `source_ref`). The live Supabase environment likely has a modified version of both the RPC and the `deals` table that differs from the migration files.
+
+### 11. `deals` Table Column Divergence
+The `deals` migration defines columns: `id`, `owner_user_id`, `status`, `created_from`, `source_ref`, `created_at`. The `create_deal_with_owner_grant` RPC migration references `property_address` and `created_by` columns. App code also queries `deal.mode`. These columns (`property_address`, `created_by`, `mode`) are absent from the migration-defined schema, indicating the live `deals` table has been altered outside of migration files.
+
+### 12. `redeem_deal_share_token` RPC Not in Migrations
+In addition to `mint_deal_share_token` (drift #5), the `redeem_deal_share_token` RPC — called in the share page redemption flow — is also missing from the migration files. Both RPCs exist only in the live Supabase environment.
+
+### 13. `deal_share_tokens` May Have Undocumented Columns
+App code references `max_redemptions` and `redemption_count` on `deal_share_tokens`, but the migration defines only: `id`, `token`, `deal_id`, `to_email`, `created_by`, `expires_at`, `revoked_at`, `created_at`. These columns were likely added via ALTER TABLE or are part of the missing `mint_deal_share_token`/`redeem_deal_share_token` RPC logic.
 
 ---
 
