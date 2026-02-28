@@ -17,6 +17,4 @@ ALTER TABLE public.deals
 COMMENT ON COLUMN public.deals.mode IS
   'Deal creation mode. Values: app (created in-app), marketing (from marketing widget/draft token), fork (forked from another deal). Default: app.';
 
-UPDATE public.deals SET mode = 'app' WHERE mode IS NULL;
-
 COMMIT;
