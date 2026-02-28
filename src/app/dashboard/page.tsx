@@ -404,6 +404,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                 title={vm.title}
                 secondaryId={vm.secondaryId}
                 statusLabel={vm.statusLabel}
+                statusKey={vm.rawStatus}
                 roleChipLabel={vm.roleChipLabel}
                 fmvLabel={vm.fmvLabel}
                 upfrontMonthlyLabel={vm.upfrontMonthlyLabel}
@@ -446,6 +447,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                   title={vm.title}
                   secondaryId={vm.secondaryId}
                   statusLabel={vm.statusLabel}
+                  statusKey={vm.rawStatus}
                   roleChipLabel={vm.roleChipLabel}
                   fmvLabel={vm.fmvLabel}
                   upfrontMonthlyLabel={vm.upfrontMonthlyLabel}

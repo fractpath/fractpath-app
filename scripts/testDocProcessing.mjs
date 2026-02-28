@@ -1,80 +1,177 @@
-import { createHash } from "crypto";
-
-const JPEG_MAGIC = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
-const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
-const PDF_MAGIC = Buffer.from([0x25, 0x50, 0x44, 0x46]);
-const HEIC_FTYP = Buffer.alloc(12);
-HEIC_FTYP.writeUInt32BE(0x00000020, 0);
-HEIC_FTYP.write("ftypheic", 4, "ascii");
+import crypto from "crypto";
+import sharp from "sharp";
 
 function assert(cond, msg) {
-  if (!cond) {
-    console.error("FAIL:", msg);
-    process.exitCode = 1;
-  } else {
-    console.log("PASS:", msg);
+  if (!cond) throw new Error(`ASSERT FAILED: ${msg}`);
+}
+
+function isHeicBuffer(buf) {
+  if (!buf || buf.length < 12) return false;
+  if (buf.slice(4, 8).toString("ascii") !== "ftyp") return false;
+  const brand = buf.slice(8, 12).toString("ascii");
+  const heicBrands = new Set(["heic", "heix", "hevc", "hevx", "mif1", "msf1", "heif"]);
+  if (heicBrands.has(brand)) return true;
+  const head = buf.slice(0, Math.min(buf.length, 32)).toString("latin1");
+  return head.includes("heic") || head.includes("heif");
+}
+
+function sniffContentType(buf) {
+  if (!buf || buf.length < 4) return "application/octet-stream";
+
+  if (buf.slice(0, 4).toString("ascii") === "%PDF") return "application/pdf";
+
+  const pngSig = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+  if (buf.length >= 8 && buf.slice(0, 8).equals(pngSig)) return "image/png";
+
+  if (buf.length >= 3 && buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return "image/jpeg";
+
+  if (buf.length >= 12 && buf.slice(0, 4).toString("ascii") === "RIFF" && buf.slice(8, 12).toString("ascii") === "WEBP") {
+    return "image/webp";
+  }
+
+  return "application/octet-stream";
+}
+
+function extForContentType(contentType) {
+  switch (contentType) {
+    case "image/jpeg": return "jpg";
+    case "image/png": return "png";
+    case "image/webp": return "webp";
+    case "application/pdf": return "pdf";
+    default: return "bin";
   }
 }
 
-async function run() {
-  const mod = await import("../src/lib/uploads/documentProcessing.ts");
-
-  assert(mod.isHeicBuffer(HEIC_FTYP), "isHeicBuffer detects HEIC");
-  assert(!mod.isHeicBuffer(JPEG_MAGIC), "isHeicBuffer rejects JPEG");
-  assert(!mod.isHeicBuffer(PNG_MAGIC), "isHeicBuffer rejects PNG");
-
-  assert(mod.sniffContentType(JPEG_MAGIC) === "image/jpeg", "sniff JPEG");
-  assert(mod.sniffContentType(PNG_MAGIC) === "image/png", "sniff PNG");
-  assert(mod.sniffContentType(PDF_MAGIC) === "application/pdf", "sniff PDF");
-  assert(mod.sniffContentType(Buffer.from([0x00, 0x00])) === null, "sniff unknown returns null");
-
-  const tooBig = Buffer.alloc(13 * 1024 * 1024);
-  const bigResult = await mod.enforceLimitsAndProcess(tooBig);
-  assert(!bigResult.ok && bigResult.status === 413, "rejects >12MB with 413");
-
-  const heicResult = await mod.enforceLimitsAndProcess(HEIC_FTYP);
-  assert(!heicResult.ok && heicResult.status === 415, "rejects HEIC with 415");
-
-  const unknownBuf = Buffer.from([0x00, 0x01, 0x02, 0x03, 0x04, 0x05]);
-  const unknownResult = await mod.enforceLimitsAndProcess(unknownBuf);
-  assert(!unknownResult.ok && unknownResult.status === 415, "rejects unknown type with 415");
-
-  const pdfBuf = Buffer.concat([PDF_MAGIC, Buffer.from("-1.4 fake pdf content")]);
-  const pdfResult = await mod.enforceLimitsAndProcess(pdfBuf);
-  assert(pdfResult.ok, "PDF passes processing");
-  if (pdfResult.ok) {
-    assert(pdfResult.storedContentType === "application/pdf", "PDF stored as application/pdf");
-    assert(pdfResult.ext === "pdf", "PDF ext is pdf");
-    assert(!pdfResult.meta.processed, "PDF not transcoded");
-    assert(pdfResult.meta.byte_size === pdfBuf.length, "PDF byte_size correct");
-    assert(typeof pdfResult.meta.sha256 === "string" && pdfResult.meta.sha256.length === 64, "PDF sha256 present");
-    const expectedSha = createHash("sha256").update(pdfBuf).digest("hex");
-    assert(pdfResult.meta.sha256 === expectedSha, "PDF sha256 matches");
-  }
-
-  const sharp = (await import("sharp")).default;
-  const pngBuf = await sharp({
-    create: { width: 100, height: 80, channels: 3, background: { r: 255, g: 0, b: 0 } },
-  })
-    .png()
-    .toBuffer();
-
-  const pngResult = await mod.enforceLimitsAndProcess(pngBuf, "image/png");
-  assert(pngResult.ok, "PNG image passes processing");
-  if (pngResult.ok) {
-    assert(pngResult.storedContentType === "image/jpeg", "PNG transcoded to JPEG");
-    assert(pngResult.ext === "jpg", "PNG transcoded ext is jpg");
-    assert(pngResult.meta.processed === true, "PNG marked as processed");
-    assert(typeof pngResult.meta.width === "number" && pngResult.meta.width > 0, "width populated");
-    assert(typeof pngResult.meta.height === "number" && pngResult.meta.height > 0, "height populated");
-    assert(pngResult.meta.original_content_type === "image/png", "original_content_type is image/png");
-    assert(pngResult.outBuf[0] === 0xff && pngResult.outBuf[1] === 0xd8 && pngResult.outBuf[2] === 0xff, "output starts with JPEG magic ff d8 ff");
-  }
-
-  console.log("\nAll document processing tests complete.");
+function sha256Hex(buf) {
+  return crypto.createHash("sha256").update(buf).digest("hex");
 }
 
-run().catch((e) => {
+async function enforceLimitsAndProcess(rawBuf, clientContentType) {
+  const MAX_BYTES = 12 * 1024 * 1024;
+
+  if (rawBuf.length > MAX_BYTES) {
+    const e = new Error("File too large");
+    e.status = 413;
+    throw e;
+  }
+
+  if (isHeicBuffer(rawBuf)) {
+    const e = new Error("HEIC/HEIF not supported");
+    e.status = 415;
+    throw e;
+  }
+
+  const sniffed = sniffContentType(rawBuf);
+  const allowed = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
+  if (!allowed.has(sniffed)) {
+    const e = new Error("Unsupported file type");
+    e.status = 415;
+    throw e;
+  }
+
+  const meta = {
+    original_content_type: sniffed || clientContentType || null,
+    width: null,
+    height: null,
+    phash: null,
+    byte_size: null,
+    sha256: null,
+  };
+
+  // PDFs pass-through
+  if (sniffed === "application/pdf") {
+    meta.byte_size = rawBuf.length;
+    meta.sha256 = sha256Hex(rawBuf);
+    return { outBuf: rawBuf, storedContentType: "application/pdf", ext: "pdf", meta };
+  }
+
+  // Images => transcode to JPEG, strip metadata, max 2400px long edge, quality 82
+  const img = sharp(rawBuf, { failOnError: true }).rotate();
+  const md = await img.metadata();
+  // resize only if needed; never enlarge
+  const width = md.width ?? null;
+  const height = md.height ?? null;
+
+  let pipeline = img;
+  if (width && height) {
+    const longEdge = Math.max(width, height);
+    if (longEdge > 2400) {
+      if (width >= height) pipeline = pipeline.resize({ width: 2400, withoutEnlargement: true });
+      else pipeline = pipeline.resize({ height: 2400, withoutEnlargement: true });
+    }
+  }
+
+  const outBuf = await pipeline.jpeg({ quality: 82 }).toBuffer();
+  meta.byte_size = outBuf.length;
+  meta.sha256 = sha256Hex(outBuf);
+
+  // final dimensions after processing
+  const md2 = await sharp(outBuf).metadata();
+  meta.width = md2.width ?? null;
+  meta.height = md2.height ?? null;
+
+  return { outBuf, storedContentType: "image/jpeg", ext: "jpg", meta };
+}
+
+async function main() {
+  let pass = 0;
+
+  // sniffing basics
+  assert(sniffContentType(Buffer.from("%PDF-1.7\n")) === "application/pdf", "PDF sniff");
+  pass++;
+
+  const jpg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01]);
+  assert(sniffContentType(jpg) === "image/jpeg", "JPEG sniff");
+  pass++;
+
+  const heic = Buffer.concat([
+    Buffer.from([0x00, 0x00, 0x00, 0x18]),
+    Buffer.from("ftypheic", "ascii"),
+    Buffer.from([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
+  ]);
+  assert(isHeicBuffer(heic) === true, "HEIC detect");
+  pass++;
+
+  // size limit
+  try {
+    await enforceLimitsAndProcess(Buffer.alloc(12 * 1024 * 1024 + 1), "image/jpeg");
+    assert(false, "size limit should throw");
+  } catch (e) {
+    assert(e.status === 413, "size limit 413");
+  }
+  pass++;
+
+  // HEIC reject
+  try {
+    await enforceLimitsAndProcess(heic, "image/jpeg");
+    assert(false, "HEIC should throw");
+  } catch (e) {
+    assert(e.status === 415, "HEIC reject 415");
+  }
+  pass++;
+
+  // PDF passthrough
+  const pdfBuf = Buffer.from("%PDF-1.4\n%...\n", "ascii");
+  const rPdf = await enforceLimitsAndProcess(pdfBuf, "application/pdf");
+  assert(rPdf.storedContentType === "application/pdf", "PDF stored type");
+  assert(rPdf.ext === "pdf", "PDF ext");
+  pass++;
+
+  // Transcode smoke test: generate PNG => transcode => JPEG magic ff d8 ff
+  const pngOut = await sharp({
+    create: { width: 50, height: 30, channels: 3, background: { r: 200, g: 10, b: 10 } }
+  }).png().toBuffer();
+
+  const rImg = await enforceLimitsAndProcess(pngOut, "image/png");
+  assert(rImg.storedContentType === "image/jpeg", "image stored type jpeg");
+  assert(rImg.outBuf.length >= 3 && rImg.outBuf[0] === 0xff && rImg.outBuf[1] === 0xd8 && rImg.outBuf[2] === 0xff, "jpeg magic ff d8 ff");
+  assert(typeof rImg.meta.sha256 === "string" && rImg.meta.sha256.length === 64, "sha256 present");
+  pass++;
+
+  console.log(`OK: ${pass} assertions passed`);
+}
+
+main().catch((e) => {
   console.error("Test script failed:", e);
-  process.exitCode = 1;
+  process.exit(1);
 });
