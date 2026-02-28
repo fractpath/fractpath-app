@@ -21,7 +21,7 @@ export async function requireAdmin(): Promise<AdminResult> {
   }
 
   // DB-backed admin check (single source of truth)
-  const { data, error } = await supabase.rpc("is_admin");
+  const { data, error } = await supabase.rpc("is_admin_v2");
 
   if (error) {
     // Fail closed
