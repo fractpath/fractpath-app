@@ -25,9 +25,7 @@ export async function POST(request: NextRequest) {
   }
 
   const address = typeof body?.address === "string" ? body.address.trim() : "";
-  if (!address) {
-    return jsonError("address is required", 422);
-  }
+  if (!address) return jsonError("address is required", 422);
 
   try {
     const svc = createServiceClient();
@@ -42,8 +40,6 @@ export async function POST(request: NextRequest) {
     const msg = err?.message ?? String(err);
     const code = err?.code ?? err?.cause?.code;
     console.error("property_resolve_error", err);
-    return NextResponse.json(
-      { ok: false, error: msg, code },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: msg, code }, { status: 500 });
   }
+}
