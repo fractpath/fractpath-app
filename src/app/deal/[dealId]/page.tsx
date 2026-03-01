@@ -14,6 +14,7 @@ import { buildDealSummaryViewModel } from "@/lib/dealSummaryViewModel";
 import { DealDetailWidgetPanel } from "@/components/deal/DealDetailWidgetPanel";
 import { RecomputeSnapshotButton } from "@/components/deal/RecomputeSnapshotButton";
 import { VersionTimelineCard } from "@/components/deal/VersionTimelineCard";
+import { ManageAccessPanel } from "@/components/deal/ManageAccessPanel";
 import { getDealSnapshots } from "@/lib/dealSnapshotDb";
 import { getDealVersions } from "@/lib/dealVersionDb";
 import { getDealEvents, buildDealTimeline } from "@/lib/dealTimeline";
@@ -433,8 +434,9 @@ export default async function DealPage({ params, searchParams }: PageProps) {
       </section>
 
       {role === "OWNER" && !readOnly && userPersona !== "realtor" ? (
-        <div className="mt-6">
+        <div className="mt-6 space-y-4">
           <ShareDealCard dealId={dealId} />
+          <ManageAccessPanel dealId={dealId} />
         </div>
       ) : null}
 

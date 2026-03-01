@@ -43,6 +43,7 @@ FractPath is built with Next.js, leveraging API routes for backend logic and Sup
     - **Historical Snapshot Mode:** Provides read-only view of past snapshots.
     - **Compute Endpoint:** Handles computation of deal snapshots for owners.
     - **Fork Endpoint:** Allows users with read access to create a new deal based on an existing one.
+    - **Manage Access:** OWNER can list active grants, revoke VIEWER/COUNTERPARTY grants, with audit logging via deal_events (ACCESS_REVOKED).
     - **Compute Adapter:** Integrates the canonical `@fractpath/compute` engine for all calculations.
     - **Default Scenario:** Provides baseline `deal_terms` and `scenario` for new deals.
     - **Recompute Button:** Enables owners to regenerate snapshots with current inputs.
