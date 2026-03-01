@@ -6,12 +6,24 @@ export default async function LoginPage({
     | Promise<Record<string, string | string[] | undefined>>;
 }) {
   const sp: any = await searchParams;
+
   const rtRaw = sp?.returnTo;
   const returnTo = Array.isArray(rtRaw) ? rtRaw[0] || "" : rtRaw || "";
-  const safeReturnTo = typeof returnTo === "string" ? returnTo : "";
+
+  // Keep querystring if present; prevent open redirects.
+  // Accept only same-origin absolute paths like "/share?t=..." or "/deal/123?mode=shared".
+  const safeReturnTo =
+    typeof returnTo === "string" && returnTo.startsWith("/")
+      ? returnTo
+      : "/dashboard";
 
   const emailRaw = sp?.email;
-  const prefilledEmail = typeof emailRaw === "string" ? emailRaw : Array.isArray(emailRaw) ? emailRaw[0] || "" : "";
+  const prefilledEmail =
+    typeof emailRaw === "string"
+      ? emailRaw
+      : Array.isArray(emailRaw)
+        ? emailRaw[0] || ""
+        : "";
 
   return (
     <main style={{ maxWidth: 420, margin: "48px auto", padding: 16 }}>
@@ -69,7 +81,15 @@ export default async function LoginPage({
 
       <p style={{ marginTop: 16, fontSize: 13, opacity: 0.75 }}>
         Don’t have an account?{" "}
-        <a href={`/signup${safeReturnTo ? `?returnTo=${encodeURIComponent(safeReturnTo)}` : ""}${prefilledEmail ? `${safeReturnTo ? "&" : "?"}email=${encodeURIComponent(prefilledEmail)}` : ""}`}>
+        <a
+          href={`/signup${
+            safeReturnTo ? `?returnTo=${encodeURIComponent(safeReturnTo)}` : ""
+          }${
+            prefilledEmail
+              ? `${safeReturnTo ? "&" : "?"}email=${encodeURIComponent(prefilledEmail)}`
+              : ""
+          }`}
+        >
           Create one
         </a>
       </p>

@@ -131,6 +131,7 @@ export default async function DealPage({ params, searchParams }: PageProps) {
       .select("role")
       .eq("deal_id", dealId)
       .eq("user_id", user.id)
+      .is("revoked_at", null)
       .maybeSingle();
 
     const grantRole = grantRes.data?.role;

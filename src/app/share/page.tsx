@@ -1,236 +1,172 @@
-// src/app/share/page.tsx
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+"use client";
 
-import Link from "next/link";
-import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
-import { createServiceClient } from "@/lib/supabase/service";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 
-type SearchParams = Record<string, string | string[] | undefined>;
+type RedeemState =
+  | { status: "loading" }
+  | { status: "no-token" }
+  | { status: "redirecting-login" }
+  | { status: "redeeming" }
+  | { status: "success"; dealId: string }
+  | { status: "error"; message: string; requestId?: string };
 
-type PageProps = {
-  searchParams?: SearchParams | Promise<SearchParams>;
-};
-
-function firstParam(v: string | string[] | undefined): string | null {
-  if (!v) return null;
-  return Array.isArray(v) ? (v[0] ?? null) : v;
+function getToken(params: URLSearchParams): string | null {
+  return params.get("t") ?? params.get("token") ?? params.get("share_token");
 }
 
-function isExpired(row: Record<string, any>): boolean {
-  const now = Date.now();
-  const expiresAt = row.expires_at ? Date.parse(row.expires_at) : NaN;
-  if (!Number.isNaN(expiresAt) && now > expiresAt) return true;
-  return false;
+function isAuthSessionMissing(err: any): boolean {
+  const msg = String(err?.message || "");
+  // Supabase v2 commonly returns: "Auth session missing!"
+  return msg.toLowerCase().includes("auth session missing");
 }
 
-function safeErr(e: any) {
-  if (!e) return null;
-  return {
-    message: typeof e.message === "string" ? e.message : undefined,
-    details: typeof e.details === "string" ? e.details : undefined,
-    hint: typeof e.hint === "string" ? e.hint : undefined,
-    code: typeof e.code === "string" ? e.code : undefined,
-    raw: (() => {
-      try {
-        return JSON.parse(JSON.stringify(e));
-      } catch {
-        return String(e);
+export default function SharePage() {
+  return (
+    <Suspense
+      fallback={
+        <main style={{ maxWidth: 520, margin: "80px auto", padding: 16 }}>
+          <p>Opening shared deal…</p>
+        </main>
       }
-    })(),
-  };
+    >
+      <ShareContent />
+    </Suspense>
+  );
 }
 
-export default async function SharePage({ searchParams }: PageProps) {
-  const sp = await Promise.resolve(searchParams as any);
-  const t = firstParam(sp?.t);
-  const mode = firstParam(sp?.mode);
+function ShareContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const supabase = useMemo(() => createClient(), []);
+  const redeemOnceRef = useRef(false);
 
-  if (!t) {
-    return (
-      <main className="mx-auto max-w-xl p-6">
-        <h1 className="text-lg font-semibold">Share link</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Missing share token. Please use the link from your email.
-        </p>
-      </main>
-    );
-  }
+  const token = useMemo(() => {
+    const rawQs = searchParams?.toString() ?? "";
+    const urlParams = new URLSearchParams(rawQs);
+    return getToken(urlParams);
+  }, [searchParams]);
 
-  const service = createServiceClient();
+  const [state, setState] = useState<RedeemState>(() =>
+    token ? { status: "loading" } : { status: "no-token" },
+  );
 
-  // Service-role sanity check: draft_tokens is RLS deny-all for client roles.
-  const sanity = await (service.from("draft_tokens") as any)
-    .select("id")
-    .limit(1);
+  useEffect(() => {
+    if (!token) return;
 
-  if (sanity.error) {
-    const se = safeErr(sanity.error);
-    console.error("SERVICE_SANITY_CHECK_FAILED draft_tokens select:", se);
-    return (
-      <main className="mx-auto max-w-xl p-6">
-        <h1 className="text-lg font-semibold">Unable to open shared deal</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Server is not authorized to validate share tokens (service role
-          misconfigured).
-        </p>
-        <div className="mt-4 rounded-md border p-3 text-xs">
-          <div className="font-medium">Details</div>
-          <pre className="mt-2 whitespace-pre-wrap break-words">
-            {JSON.stringify(se, null, 2)}
-          </pre>
-        </div>
-      </main>
-    );
-  }
+    const qs = searchParams?.toString() ?? "";
+    const returnTo = qs ? `/share?${qs}` : "/share";
 
-  // 1) Validate share token row (service role read)
-  const tokenRes = await (service.from("deal_share_tokens") as any)
-    .select(
-      "token, deal_id, created_by, created_at, expires_at, max_redemptions, redemption_count",
-    )
-    .eq("token", t)
-    .maybeSingle();
+    let cancelled = false;
 
-  if (tokenRes.error || !tokenRes.data) {
-    const te = safeErr(tokenRes.error);
-    if (tokenRes.error) console.error("deal_share_tokens select error:", te);
-    return (
-      <main className="mx-auto max-w-xl p-6">
-        <h1 className="text-lg font-semibold">Unable to open shared deal</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          This share link is invalid or has expired.
-        </p>
-      </main>
-    );
-  }
+    (async () => {
+      // 1) Auth check
+      const { data, error } = await supabase.auth.getUser();
+      if (cancelled) return;
 
-  const tokenRow = tokenRes.data as Record<string, any>;
+      const user = data?.user ?? null;
 
-  if (!tokenRow.deal_id) {
-    return (
-      <main className="mx-auto max-w-xl p-6">
-        <h1 className="text-lg font-semibold">Unable to open shared deal</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          This share link is invalid.
-        </p>
-      </main>
-    );
-  }
+      // IMPORTANT: In Supabase v2, unauthenticated often returns error "Auth session missing!"
+      // Treat that as "not logged in", not a hard error.
+      if (!user) {
+        setState({ status: "redirecting-login" });
+        router.replace(`/login?returnTo=${encodeURIComponent(returnTo)}`);
+        return;
+      }
 
-  if (isExpired(tokenRow)) {
-    return (
-      <main className="mx-auto max-w-xl p-6">
-        <h1 className="text-lg font-semibold">Unable to open shared deal</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          This share link has expired.
-        </p>
-      </main>
-    );
-  }
+      // If we *do* have a user but also got an error, surface it (rare, but real).
+      if (error && !isAuthSessionMissing(error)) {
+        setState({ status: "error", message: `Auth error: ${error.message}` });
+        return;
+      }
 
-  const max =
-    typeof tokenRow.max_redemptions === "number"
-      ? tokenRow.max_redemptions
-      : null;
-  const used =
-    typeof tokenRow.redemption_count === "number"
-      ? tokenRow.redemption_count
-      : 0;
+      // 2) Redeem exactly once
+      if (redeemOnceRef.current) return;
+      redeemOnceRef.current = true;
 
-  if (max != null && used >= max) {
-    return (
-      <main className="mx-auto max-w-xl p-6">
-        <h1 className="text-lg font-semibold">Unable to open shared deal</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          This share link has already been used.
-        </p>
-      </main>
-    );
-  }
+      try {
+        setState({ status: "redeeming" });
 
-  const dealId = String(tokenRow.deal_id);
+        const res = await fetch("/api/deals/share/redeem", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ token }),
+        });
 
-  // 2) Require auth (normal client)
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+        const json = await res.json().catch(() => ({}) as any);
+        if (!res.ok || !json?.ok || !json?.dealId) {
+          const requestId = json?.requestId;
+          const msg =
+            json?.error ??
+            json?.message ??
+            `Redeem failed (HTTP ${res.status})`;
+          setState({ status: "error", message: msg, requestId });
+          return;
+        }
 
-  if (!user) {
-    const returnTo = `/share?t=${encodeURIComponent(t)}${
-      mode ? `&mode=${encodeURIComponent(mode)}` : ""
-    }`;
-    return (
-      <main className="mx-auto max-w-xl p-6">
-        <div className="mb-4 rounded-md border p-3">
-          <div className="text-sm font-medium">Read-only shared deal</div>
-          <div className="mt-1 text-sm text-muted-foreground">
-            Sign in or create an account to view this deal.
-          </div>
-        </div>
+        const dealId: string = json.dealId;
+        setState({ status: "success", dealId });
 
-        <div className="mt-6 flex gap-4">
-          <Link
-            className="rounded-md border px-4 py-2 text-sm"
-            href={`/login?returnTo=${encodeURIComponent(returnTo)}`}
-          >
-            Sign in
-          </Link>
-          <Link
-            className="rounded-md border px-4 py-2 text-sm"
-            href={`/signup?returnTo=${encodeURIComponent(returnTo)}`}
-          >
-            Create an account
-          </Link>
-        </div>
-      </main>
-    );
-  }
+        // 3) Clean token from URL; canonical shared-mode deal view
+        router.replace(`/deal/${dealId}?mode=shared`);
+      } catch (e: any) {
+        setState({
+          status: "error",
+          message: e?.message ?? "Redeem failed",
+        });
+      }
+    })();
 
-  // 3) Ensure deal exists (service read)
-  const dealRes = await (service.from("deals") as any)
-    .select("id, owner_user_id")
-    .eq("id", dealId)
-    .maybeSingle();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, router, searchParams, supabase]);
 
-  if (dealRes.error || !dealRes.data) {
-    const de = safeErr(dealRes.error);
-    if (dealRes.error) console.error("deals select error:", de);
-    return (
-      <main className="mx-auto max-w-xl p-6">
-        <h1 className="text-lg font-semibold">Unable to open shared deal</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          This deal no longer exists.
-        </p>
-      </main>
-    );
-  }
+  return (
+    <main style={{ maxWidth: 520, margin: "80px auto", padding: 16 }}>
+      {state.status === "loading" && <p>Loading…</p>}
 
-  // 4) Redeem token via canonical RPC (authenticated)
-  const redeem = await supabase.rpc("redeem_deal_share_token_v2", { p_token: t });
+      {state.status === "no-token" && (
+        <>
+          <h1>Invalid link</h1>
+          <p>This share link is missing a token.</p>
+          <p style={{ opacity: 0.7 }}>
+            Expected a URL like <code>/share?t=...</code>
+          </p>
+        </>
+      )}
 
-  if (redeem.error) {
-    const re = safeErr(redeem.error);
-    console.error("redeem_deal_share_token error:", re);
-    return (
-      <main className="mx-auto max-w-xl p-6">
-        <h1 className="text-lg font-semibold">Unable to open shared deal</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          We couldn&apos;t redeem this share link. Please ask the deal owner to
-          resend it.
-        </p>
-        <div className="mt-4 rounded-md border p-3 text-xs">
-          <div className="font-medium">Details</div>
-          <pre className="mt-2 whitespace-pre-wrap break-words">
-            {JSON.stringify(re, null, 2)}
-          </pre>
-        </div>
-      </main>
-    );
-  }
+      {state.status === "redirecting-login" && (
+        <>
+          <h1>Sign in required</h1>
+          <p>Redirecting you to sign in…</p>
+        </>
+      )}
 
-  redirect(`/deal/${dealId}?mode=shared`);
+      {state.status === "redeeming" && (
+        <>
+          <h1>Preparing your deal…</h1>
+          <p>Redeeming the share token…</p>
+        </>
+      )}
+
+      {state.status === "error" && (
+        <>
+          <h1>Couldn’t open shared deal</h1>
+          <p>{state.message}</p>
+          {state.requestId && (
+            <p style={{ opacity: 0.7 }}>Request ID: {state.requestId}</p>
+          )}
+        </>
+      )}
+
+      {state.status === "success" && (
+        <>
+          <h1>Success</h1>
+          <p>Redirecting…</p>
+        </>
+      )}
+    </main>
+  );
 }

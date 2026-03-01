@@ -1,75 +1,77 @@
 import { NextResponse } from "next/server";
-import {
-  createSupabaseRouteClient,
-  getRequestOrigin,
-} from "@/app/lib/supabaseRoute";
+import { createServerClient } from "@supabase/ssr";
+import type { CookieOptions } from "@supabase/ssr";
 
-export const dynamic = "force-dynamic";
+function pickFirst(v: FormDataEntryValue | null): string {
+  return typeof v === "string" ? v : "";
+}
 
-function sanitizeReturnTo(v: unknown): string | null {
-  const s = typeof v === "string" ? v.trim() : "";
-  if (!s) return null;
+function sanitizeReturnTo(rt: string): string {
+  // Same-origin only; allow absolute paths with query.
+  // Examples: "/share?t=...", "/dashboard", "/deal/abc?mode=shared"
+  if (typeof rt !== "string") return "/dashboard";
+  if (!rt.startsWith("/")) return "/dashboard";
+  if (rt.startsWith("//")) return "/dashboard";
+  return rt;
+}
 
-  // Only allow relative paths to prevent open redirect.
-  // Must start with "/" and must NOT start with "//".
-  if (!s.startsWith("/") || s.startsWith("//")) return null;
-
-  // Optional: basic length guard
-  if (s.length > 2048) return null;
-
-  return s;
+function redirect303Relative(path: string) {
+  // CRITICAL: Use a RELATIVE Location so we never jump to 0.0.0.0 / localhost.
+  // Also 303 converts POST -> GET on the follow-up request.
+  return new NextResponse(null, {
+    status: 303,
+    headers: { Location: path },
+  });
 }
 
 export async function POST(req: Request) {
-  const origin = getRequestOrigin(req);
+  const form = await req.formData();
 
-  const ct = req.headers.get("content-type") || "";
+  const email = pickFirst(form.get("email"));
+  const password = pickFirst(form.get("password"));
+  const returnTo = sanitizeReturnTo(pickFirst(form.get("returnTo")));
 
-  let email = "";
-  let password = "";
-  let returnToRaw: unknown = null;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  if (ct.includes("application/json")) {
-    const body = (await req.json().catch(() => ({}))) as any;
-    email = String(body?.email || "").trim();
-    password = String(body?.password || "");
-    returnToRaw = body?.returnTo ?? null;
-  } else {
-    const form = await req.formData();
-    email = String(form.get("email") || "").trim();
-    password = String(form.get("password") || "");
-    returnToRaw = form.get("returnTo");
+  if (!supabaseUrl || !supabaseAnonKey) {
+    const errPath = `/login?returnTo=${encodeURIComponent(returnTo)}&error=missing_supabase_env`;
+    return redirect303Relative(errPath);
   }
 
-  const returnTo = sanitizeReturnTo(returnToRaw);
+  // Build the redirect response FIRST so cookies can be attached to it
+  const res = redirect303Relative(returnTo);
 
-  if (!email || !password) {
-    const url = new URL("/login?error=missing_fields", origin);
-    if (returnTo) url.searchParams.set("returnTo", returnTo);
-    return NextResponse.redirect(url, { status: 303 });
-  }
-
-  // Default success redirect is dashboard, unless returnTo is present.
-  const successPath = returnTo || "/dashboard";
-  const res = NextResponse.redirect(new URL(successPath, origin), { status: 303 });
-
-  let supabase;
-  try {
-    supabase = await createSupabaseRouteClient(req, res);
-  } catch (e: any) {
-    const msg = encodeURIComponent(e?.message || "server_misconfigured");
-    const url = new URL(`/login?error=${msg}`, origin);
-    if (returnTo) url.searchParams.set("returnTo", returnTo);
-    return NextResponse.redirect(url, { status: 303 });
-  }
+  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      get(name: string) {
+        return (
+          req.headers
+            .get("cookie")
+            ?.split(";")
+            .map((c) => c.trim())
+            .find((c) => c.startsWith(`${name}=`))
+            ?.split("=")
+            .slice(1)
+            .join("=") ?? undefined
+        );
+      },
+      set(name: string, value: string, options: CookieOptions) {
+        res.cookies.set({ name, value, ...options });
+      },
+      remove(name: string, options: CookieOptions) {
+        res.cookies.set({ name, value: "", ...options, maxAge: 0 });
+      },
+    },
+  });
 
   const { error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error) {
-    // Keep it simple + safe: do not leak whether an account exists.
-    const url = new URL("/login?error=invalid_credentials", origin);
-    if (returnTo) url.searchParams.set("returnTo", returnTo);
-    return NextResponse.redirect(url, { status: 303 });
+    const errPath =
+      `/login?returnTo=${encodeURIComponent(returnTo)}` +
+      `&error=auth_failed&errorMessage=${encodeURIComponent(error.message)}`;
+    return redirect303Relative(errPath);
   }
 
   return res;

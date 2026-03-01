@@ -65,6 +65,8 @@ export async function POST(
     .select("role")
     .eq("deal_id", dealId)
     .eq("user_id", user.id)
+    .is("revoked_at", null)
+    .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`)
     .maybeSingle();
 
   const hasAccess =

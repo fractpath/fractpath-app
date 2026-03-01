@@ -1,68 +1,84 @@
-import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
+// src/app/lib/supabaseRoute.ts
 import { createServerClient } from "@supabase/ssr";
+import type { CookieOptions } from "@supabase/ssr";
+import type { NextResponse } from "next/server";
 
 /**
- * Prefer a single canonical site origin (NEXT_PUBLIC_SITE_URL) so auth redirects
- * don't accidentally point to localhost or preview hosts.
+ * External origin helper (Replit/proxy-safe).
+ * Prefers x-forwarded-* headers so we generate URLs on the same host the browser is using.
  */
 export function getRequestOrigin(req: Request): string {
-  const configured = (
-    process.env.NEXT_PUBLIC_SITE_URL ||
-    process.env.SITE_URL ||
-    ""
-  ).trim();
-
-  if (configured) {
-    // normalize: strip trailing slashes
-    return configured.replace(/\/+$/, "");
-  }
-
-  // Fallback to request headers (useful for local dev if env not set)
-  const h = req.headers;
-  const proto = h.get("x-forwarded-proto") || "http";
-  const host = h.get("x-forwarded-host") || h.get("host") || "localhost:3000";
+  const proto = req.headers.get("x-forwarded-proto") || "http";
+  const host =
+    req.headers.get("x-forwarded-host") ||
+    req.headers.get("host") ||
+    "localhost:5000";
   return `${proto}://${host}`;
 }
 
-// Minimal cookie getter for route handlers using request headers.
-function getCookieFromHeader(req: Request, name: string): string | undefined {
-  const raw = req.headers.get("cookie") || "";
-  // Basic parse, ok for Supabase cookies.
-  const parts = raw.split(/;\s*/g);
-  for (const p of parts) {
-    if (p.startsWith(name + "=")) return p.slice(name.length + 1);
-  }
-  return undefined;
+/**
+ * Fallback for contexts where you don't have a Request object.
+ * Avoid relying on NEXT_PUBLIC_SITE_URL for browser redirects in dev; it can poison origin on Replit.
+ */
+export function getSiteOrigin(req?: Request): string {
+  if (req) return getRequestOrigin(req);
+  return (
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    process.env.SITE_URL ||
+    "http://localhost:5000"
+  );
 }
 
-export async function createSupabaseRouteClient(
-  request: Request,
-  response: NextResponse,
-) {
-  // Required in this Next.js environment to avoid Promise cookies() behavior.
-  await cookies();
+export function absUrl(path: string, req?: Request): string {
+  const origin = getSiteOrigin(req);
+  if (!path.startsWith("/"))
+    throw new Error(`absUrl path must start with "/": ${path}`);
+  return new URL(path, origin).toString();
+}
 
+/**
+ * Route-handler Supabase client that reads cookies from the incoming Request
+ * and writes cookies onto the provided NextResponse.
+ *
+ * Usage:
+ *   const res = NextResponse.redirect(..., { status: 303 })
+ *   const supabase = await createSupabaseRouteClient(req, res)
+ */
+export async function createSupabaseRouteClient(
+  req: Request,
+  res: NextResponse,
+) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!supabaseUrl || !supabaseAnonKey) {
     throw new Error(
-      "Missing Supabase env vars: NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY",
+      "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY",
     );
   }
 
-  return createServerClient(supabaseUrl, supabaseAnonKey, {
+  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
       get(name: string) {
-        return getCookieFromHeader(request, name);
+        return (
+          req.headers
+            .get("cookie")
+            ?.split(";")
+            .map((c) => c.trim())
+            .find((c) => c.startsWith(`${name}=`))
+            ?.split("=")
+            .slice(1)
+            .join("=") ?? undefined
+        );
       },
-      set(name: string, value: string, options: any) {
-        response.cookies.set({ name, value, ...options });
+      set(name: string, value: string, options: CookieOptions) {
+        res.cookies.set({ name, value, ...options });
       },
-      remove(name: string, options: any) {
-        response.cookies.set({ name, value: "", ...options, maxAge: 0 });
+      remove(name: string, options: CookieOptions) {
+        res.cookies.set({ name, value: "", ...options, maxAge: 0 });
       },
     },
   });
+
+  return supabase;
 }

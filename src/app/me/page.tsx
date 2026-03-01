@@ -23,6 +23,7 @@ export default async function MePage() {
     .from("deal_access_grants")
     .select("deal_id, role, created_at")
     .eq("user_id", user.id)
+    .is("revoked_at", null)
     .order("created_at", { ascending: false });
 
   if (grantsRes.error) {
