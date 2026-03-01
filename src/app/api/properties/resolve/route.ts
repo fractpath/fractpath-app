@@ -39,7 +39,11 @@ export async function POST(request: NextRequest) {
       normalized_address: result.normalized_address,
     });
   } catch (err: any) {
-    console.error("property_resolve_error", err?.message);
-    return jsonError(err?.message ?? "Failed to resolve property", 500);
+    const msg = err?.message ?? String(err);
+    const code = err?.code ?? err?.cause?.code;
+    console.error("property_resolve_error", err);
+    return NextResponse.json(
+      { ok: false, error: msg, code },
+      { status: 500 }
+    );
   }
-}
