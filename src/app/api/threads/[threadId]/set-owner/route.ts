@@ -1,34 +1,41 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createServiceClient } from "@/lib/supabase/service";
 
 function json(status: number, body: any) {
   return NextResponse.json(body, { status });
 }
 
-function diagErr(err: any) {
+function errPayload(where: string, e: any) {
   return {
-    error: err?.message ?? String(err),
-    code: err?.code ?? null,
-    hint: err?.hint ?? null,
-    details: err?.details ?? null,
+    ok: false,
+    where,
+    error: e?.message ?? String(e),
+    code: e?.code ?? null,
+    hint: e?.hint ?? null,
+    details: e?.details ?? null,
   };
 }
 
 export async function POST(
   req: NextRequest,
-  ctx: { params: { threadId: string } },
+  ctx: { params: Promise<{ threadId: string }> },
 ) {
   try {
-    const threadId = ctx?.params?.threadId;
-    if (!threadId)
-      return json(400, { ok: false, error: "threadId is required" });
+    const { threadId } = await ctx.params;
+    if (!threadId) {
+      return json(400, {
+        ok: false,
+        where: "input",
+        error: "threadId is required",
+      });
+    }
 
     const supabase = await createClient();
 
     const { data: auth, error: authErr } = await supabase.auth.getUser();
-    if (authErr) return json(401, { ok: false, error: authErr.message });
-    if (!auth?.user) return json(401, { ok: false, error: "Unauthorized" });
+    if (authErr) return json(401, errPayload("auth", authErr));
+    if (!auth?.user)
+      return json(401, { ok: false, where: "auth", error: "Unauthorized" });
 
     let body: any = null;
     try {
@@ -38,32 +45,42 @@ export async function POST(
     }
 
     const owner_user_id = (body?.owner_user_id ?? "").toString().trim();
-    if (!owner_user_id)
-      return json(400, { ok: false, error: "owner_user_id is required" });
+    if (!owner_user_id) {
+      return json(400, {
+        ok: false,
+        where: "input",
+        error: "owner_user_id is required",
+      });
+    }
     if (owner_user_id === auth.user.id) {
       return json(400, {
         ok: false,
+        where: "input",
         error: "owner_user_id cannot equal caller",
       });
     }
 
-    const svc = createServiceClient();
-    const { data: thread, error: threadErr } = await (svc.from("deal_threads") as any)
+    const { data: thread, error: threadErr } = await supabase
+      .from("deal_threads")
       .select("id, created_by_user_id, buyer_user_id, owner_user_id, status")
       .eq("id", threadId)
       .maybeSingle();
 
-    if (threadErr)
-      return json(400, { ok: false, where: "select_thread", ...diagErr(threadErr) });
-    if (!thread)
-      return json(404, { ok: false, where: "select_thread", error: "Thread not found" });
+    if (threadErr) return json(400, errPayload("select_thread", threadErr));
+    if (!thread) {
+      return json(404, {
+        ok: false,
+        where: "select_thread",
+        error: "Thread not found",
+      });
+    }
 
     const callerId = auth.user.id;
     const isBuyerOrCreator =
       thread.buyer_user_id === callerId ||
       thread.created_by_user_id === callerId;
 
-    if (!isBuyerOrCreator)
+    if (!isBuyerOrCreator) {
       return json(403, {
         ok: false,
         where: "authz",
@@ -72,34 +89,41 @@ export async function POST(
         thread_created_by_user_id: thread.created_by_user_id,
         thread_buyer_user_id: thread.buyer_user_id,
       });
+    }
 
     if (thread.owner_user_id && thread.owner_user_id !== owner_user_id) {
       return json(409, {
         ok: false,
+        where: "update_thread_owner",
         error: "owner_user_id already set to a different user",
         current_owner_user_id: thread.owner_user_id,
       });
     }
 
     if (!thread.owner_user_id) {
-      const { error: updErr } = await (svc.from("deal_threads") as any)
+      const { error: updErr } = await supabase
+        .from("deal_threads")
         .update({ owner_user_id })
         .eq("id", threadId);
 
-      if (updErr)
-        return json(400, { ok: false, where: "update_thread_owner", ...diagErr(updErr) });
+      if (updErr) return json(400, errPayload("update_thread_owner", updErr));
     }
 
-    const { data: existingPart } = await (svc.from("deal_thread_participants") as any)
-      .select("thread_id, user_id")
+    const { data: existingPart, error: partSelErr } = await supabase
+      .from("deal_thread_participants")
+      .select("thread_id")
       .eq("thread_id", threadId)
       .eq("user_id", owner_user_id)
       .maybeSingle();
 
+    if (partSelErr)
+      return json(400, errPayload("insert_owner_participant", partSelErr));
+
     let participant_created = false;
 
     if (!existingPart) {
-      const { error: insErr } = await (svc.from("deal_thread_participants") as any)
+      const { error: insErr } = await supabase
+        .from("deal_thread_participants")
         .insert({
           thread_id: threadId,
           user_id: owner_user_id,
@@ -109,7 +133,7 @@ export async function POST(
         });
 
       if (insErr)
-        return json(400, { ok: false, where: "insert_owner_participant", ...diagErr(insErr) });
+        return json(400, errPayload("insert_owner_participant", insErr));
       participant_created = true;
     }
 
@@ -122,8 +146,8 @@ export async function POST(
   } catch (e: any) {
     return json(500, {
       ok: false,
-      error: "Internal Server Error",
-      detail: e?.message ?? String(e),
+      where: "unexpected",
+      error: e?.message ?? String(e),
     });
   }
 }

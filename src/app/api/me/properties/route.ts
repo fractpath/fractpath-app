@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
-import { enforceLimitsAndProcess, type DocProcessingMeta } from "@/lib/uploads/documentProcessing";
+import {
+  enforceLimitsAndProcess,
+  type DocProcessingMeta,
+} from "@/lib/uploads/documentProcessing";
 
 export const runtime = "nodejs";
 
@@ -37,10 +40,10 @@ export async function GET() {
 
   const { data, error } = await (supabase.from("properties") as any)
     .select(
-      "id, owner_user_id, address_line1, address_line2, city, state, postal_code, status, is_private, created_at, updated_at",
+      "id, status, ownership_status, claimed_by_user_id, created_by_user_id, created_at, updated_at",
     )
-    .eq("owner_user_id", user.id)
-    .order("created_at", { ascending: false });
+    .or(`created_by_user_id.eq.${user.id},claimed_by_user_id.eq.${user.id}`)
+    .order("updated_at", { ascending: false });
 
   if (error) return jsonError(error.message, 500);
 
