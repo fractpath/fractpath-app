@@ -98,15 +98,29 @@ return jsonError(computeResult.error, status);
   const { compute_version, results } = computeResult.result;
   const computedAt = new Date().toISOString();
 
-  // Snapshot remains validated by validateFullDealSnapshotV1
-  const fullSnapshot = {
+  const headerObj =
+    body.header && typeof body.header === "object" && !Array.isArray(body.header)
+      ? {
+          title: typeof body.header.title === "string" ? body.header.title : undefined,
+          display_address: typeof body.header.display_address === "string" ? body.header.display_address : undefined,
+          property_id: typeof body.header.property_id === "string" ? body.header.property_id : undefined,
+          property_status: typeof body.header.property_status === "string" ? body.header.property_status : undefined,
+          ownership_status: typeof body.header.ownership_status === "string" ? body.header.ownership_status : undefined,
+        }
+      : undefined;
+
+  const fullSnapshot: Record<string, unknown> = {
     contract_version: compute_version,
     schema_version: "1",
-    inputs: body.inputs, // { deal_terms, scenario }
-    outputs: { results }, // canonical nesting
+    inputs: body.inputs,
+    outputs: { results },
     computed_at: computedAt,
     computed_by: user.id,
   };
+
+  if (headerObj) {
+    fullSnapshot.meta = { header: headerObj };
+  }
 
   // Runs under user-scoped client so RLS + immutability triggers apply.
   const result = await insertDealSnapshot(

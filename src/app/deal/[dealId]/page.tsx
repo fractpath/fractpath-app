@@ -223,16 +223,19 @@ export default async function DealPage({ params, searchParams }: PageProps) {
       .maybeSingle(),
   ]);
 
+  const snapshotHeader = (initialSnapshot as any)?.meta?.header ?? null;
   const headerPayload = headerEventResult?.data?.payload ?? null;
+
+  const resolvedHeader = snapshotHeader ?? headerPayload ?? {};
   const persistedTitle =
-    typeof headerPayload?.title === "string" ? headerPayload.title : null;
+    typeof resolvedHeader?.title === "string" ? resolvedHeader.title : null;
   const persistedProperty =
-    headerPayload?.property_id && headerPayload?.display_address
+    resolvedHeader?.property_id && resolvedHeader?.display_address
       ? {
-          property_id: headerPayload.property_id as string,
-          display_address: headerPayload.display_address as string,
-          property_status: (headerPayload.property_status as string) ?? null,
-          ownership_status: (headerPayload.ownership_status as string) ?? null,
+          property_id: resolvedHeader.property_id as string,
+          display_address: resolvedHeader.display_address as string,
+          property_status: (resolvedHeader.property_status as string) ?? null,
+          ownership_status: (resolvedHeader.ownership_status as string) ?? null,
         }
       : null;
   const versions = versionsResult.ok ? versionsResult.versions : [];

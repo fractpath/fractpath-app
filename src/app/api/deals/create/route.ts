@@ -73,7 +73,19 @@ export async function POST(request: NextRequest) {
       return jsonError("Failed to create deal", 500);
     }
 
-    const fullSnapshot = {
+    const rawHeader = (body as any)?.header;
+    const headerObj =
+      rawHeader && typeof rawHeader === "object" && !Array.isArray(rawHeader)
+        ? {
+            title: typeof rawHeader.title === "string" ? rawHeader.title : undefined,
+            display_address: typeof rawHeader.display_address === "string" ? rawHeader.display_address : undefined,
+            property_id: typeof rawHeader.property_id === "string" ? rawHeader.property_id : undefined,
+            property_status: typeof rawHeader.property_status === "string" ? rawHeader.property_status : undefined,
+            ownership_status: typeof rawHeader.ownership_status === "string" ? rawHeader.ownership_status : undefined,
+          }
+        : undefined;
+
+    const fullSnapshot: Record<string, unknown> = {
       contract_version: CONTRACT_VERSION,
       schema_version: SCHEMA_VERSION,
       inputs: canonicalInputs,
@@ -82,6 +94,10 @@ export async function POST(request: NextRequest) {
       computed_at: computedAt,
       computed_by: user.id,
     };
+
+    if (headerObj) {
+      fullSnapshot.meta = { header: headerObj };
+    }
 
     const snapshotResult = await insertDealSnapshot(
       supabase as any,

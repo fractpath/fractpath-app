@@ -114,9 +114,24 @@ export async function POST(
     return jsonError(400, "bad_request", "snapshot_json must be an object");
   }
 
+  if (
+    body.header &&
+    typeof body.header === "object" &&
+    !Array.isArray(body.header)
+  ) {
+    const h = body.header;
+    const headerObj: Record<string, string | undefined> = {};
+    if (typeof h.title === "string") headerObj.title = h.title;
+    if (typeof h.display_address === "string") headerObj.display_address = h.display_address;
+    if (typeof h.property_id === "string") headerObj.property_id = h.property_id;
+    if (typeof h.property_status === "string") headerObj.property_status = h.property_status;
+    if (typeof h.ownership_status === "string") headerObj.ownership_status = h.ownership_status;
+    snapshot_json.meta = { ...(snapshot_json.meta ?? {}), header: headerObj };
+  }
+
   const insertPayload = {
     deal_id: dealId,
-    created_by: user.id, // required by schema
+    created_by: user.id,
     contract_version,
     schema_version,
     input_hash,

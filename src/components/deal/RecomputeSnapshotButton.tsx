@@ -25,6 +25,22 @@ export function RecomputeSnapshotButton({ dealId, initialInputs, disabled }: Pro
         body.inputs = {};
       }
 
+      try {
+        const raw = localStorage.getItem(`fractpath:deal:${dealId}:header`);
+        if (raw) {
+          const h = JSON.parse(raw);
+          if (h && typeof h === "object") {
+            const header: Record<string, string> = {};
+            if (typeof h.title === "string") header.title = h.title;
+            if (typeof h.display_address === "string") header.display_address = h.display_address;
+            if (typeof h.property_id === "string") header.property_id = h.property_id;
+            if (typeof h.property_status === "string") header.property_status = h.property_status;
+            if (typeof h.ownership_status === "string") header.ownership_status = h.ownership_status;
+            body.header = header;
+          }
+        }
+      } catch { /* ignore */ }
+
       const res = await fetch(`/api/deals/${dealId}/snapshot/compute`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

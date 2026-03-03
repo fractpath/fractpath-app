@@ -33,10 +33,29 @@ export function NewDealClient({ persona }: NewDealClientProps) {
       setError(null);
 
       try {
+        let header: AnyRecord | undefined;
+        try {
+          const raw = localStorage.getItem("fractpath:deal:new:header");
+          if (raw) {
+            const h = JSON.parse(raw);
+            if (h && typeof h === "object") {
+              header = {};
+              if (typeof h.title === "string") header.title = h.title;
+              if (typeof h.display_address === "string") header.display_address = h.display_address;
+              if (typeof h.property_id === "string") header.property_id = h.property_id;
+              if (typeof h.property_status === "string") header.property_status = h.property_status;
+              if (typeof h.ownership_status === "string") header.ownership_status = h.ownership_status;
+            }
+          }
+        } catch { /* ignore */ }
+
+        const createPayload: AnyRecord = { inputs: parsed };
+        if (header) createPayload.header = header;
+
         const res = await fetch("/api/deals/create", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ inputs: parsed }),
+          body: JSON.stringify(createPayload),
         });
 
         const body = await res
