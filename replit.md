@@ -40,6 +40,7 @@ FractPath is built with Next.js, leveraging API routes for backend logic and Sup
     - **Deal Resume:** Converts marketing drafts into authenticated deals, generating initial snapshots and audit events.
     - **Marketing Lead:** Endpoint for marketing integrations to create draft snapshots.
     - **Offer/Counter-Offer/Accept/Reject:** Functionality to manage deal negotiation states.
+    - **Submit Offer Flow (Sprint 13):** Deal page detects active threads (status=pending_owner) and locks calculator editing. `SubmitOfferModal` supports three modes: verified_owner (direct submit), known_email (invite via email), outreach (FractPath finds owner). `POST /api/deals/[dealId]/submit-offer` creates thread + proposal + optional invite atomically (with cleanup on failure). `ActiveThreadBanner` shows locking message with withdraw button. `POST /api/threads/[threadId]/withdraw` sets status to withdrawn (buyer-only). `GET /api/properties/[propertyId]` returns property status/owner info for modal lookups.
     - **Snapshot Comparison:** Allows comparison of two snapshots of the same deal.
     - **Historical Snapshot Mode:** Provides read-only view of past snapshots.
     - **Compute Endpoint:** Handles computation of deal snapshots for owners.

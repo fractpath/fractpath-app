@@ -5,9 +5,11 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 import { DealHeader } from "@/components/deals/DealHeader";
+import { ActiveThreadBanner } from "@/components/deal/ActiveThreadBanner";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { ShareDealCard } from "@/components/ShareDealCard";
 import { DealSummary } from "@/components/deal/DealSummary";
@@ -150,7 +152,22 @@ export default async function DealPage({ params, searchParams }: PageProps) {
 
   const userPersona =
     (user.user_metadata?.role as string | undefined) ?? "homeowner";
-  const canEdit = role === "OWNER" && !readOnly && userPersona !== "realtor";
+
+  const svc = createServiceClient();
+  const { data: activeThreadRows } = await (svc.from("deal_threads") as any)
+    .select("id, status")
+    .eq("deal_id", dealId)
+    .in("status", ["pending_owner"])
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  const activeThread =
+    activeThreadRows && activeThreadRows.length > 0
+      ? { id: activeThreadRows[0].id as string, status: activeThreadRows[0].status as string }
+      : null;
+
+  const hasActiveThread = !!activeThread;
+  const canEdit = role === "OWNER" && !readOnly && userPersona !== "realtor" && !hasActiveThread;
 
   const snapshotsResult = await getDealSnapshots(supabase, dealId, 20);
   const snapshots = snapshotsResult.ok ? snapshotsResult.snapshots : [];
@@ -274,9 +291,17 @@ export default async function DealPage({ params, searchParams }: PageProps) {
         <DealHeader
           dealId={dealId}
           readOnly={readOnly}
+          activeThread={activeThread}
           initialTitle={persistedTitle}
           initialProperty={persistedProperty}
         />
+
+        {activeThread ? (
+          <ActiveThreadBanner
+            threadId={activeThread.id}
+            threadStatus={activeThread.status}
+          />
+        ) : null}
 
         {readOnly ? (
           <div className="mb-4 rounded-md border p-3">

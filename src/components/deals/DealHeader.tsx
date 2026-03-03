@@ -3,11 +3,18 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PropertyForm } from "@/components/properties/PropertyForm";
+import { SubmitOfferModal } from "@/components/deal/SubmitOfferModal";
 import type { ResolvedProperty } from "@/components/threads/AddressTypeahead";
+
+type ActiveThread = {
+  id: string;
+  status: string;
+};
 
 type Props = {
   dealId: string;
   readOnly: boolean;
+  activeThread?: ActiveThread | null;
   initialTitle?: string | null;
   initialProperty?: {
     property_id: string;
@@ -32,6 +39,7 @@ type Stored = {
 export function DealHeader({
   dealId,
   readOnly,
+  activeThread,
   initialTitle,
   initialProperty,
 }: Props) {
@@ -59,10 +67,9 @@ export function DealHeader({
   );
 
   const [openAddProperty, setOpenAddProperty] = useState(false);
+  const [openSubmitOffer, setOpenSubmitOffer] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const router = useRouter();
-  const [makeOfferBusy, setMakeOfferBusy] = useState(false);
-  const [makeOfferError, setMakeOfferError] = useState<string | null>(null);
 
   const key = useMemo(() => lsKey(dealId), [dealId]);
 
@@ -193,39 +200,8 @@ export function DealHeader({
     setSavedAt(Date.now());
   }
 
-  const handleMakeOffer = useCallback(async () => {
-    if (readOnly) return;
-    const propertyId = property?.property_id;
-    if (!propertyId) return;
-
-    setMakeOfferBusy(true);
-    setMakeOfferError(null);
-
-    try {
-      const res = await fetch("/api/threads", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ property_id: propertyId }),
-      });
-
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok || body?.ok === false) {
-        throw new Error(body?.error ?? `Make Offer failed (${res.status})`);
-      }
-
-      const threadId = String(body?.thread_id ?? "");
-      if (!threadId) throw new Error("Make Offer failed: missing thread_id");
-
-      router.push(`/threads/${threadId}`);
-    } catch (err: any) {
-      setMakeOfferError(err?.message ?? "Network error");
-    } finally {
-      setMakeOfferBusy(false);
-    }
-  }, [readOnly, property?.property_id, router]);
-
-  const canMakeOffer = !!property?.property_id && !readOnly;
+  const hasActiveThread = activeThread?.status === "pending_owner";
+  const canMakeOffer = !!property?.property_id && !readOnly && !hasActiveThread;
 
   const statusLabel = (() => {
     const ps =
@@ -281,28 +257,22 @@ export function DealHeader({
 
             <button
               type="button"
-              disabled={!canMakeOffer || makeOfferBusy}
+              disabled={!canMakeOffer}
               className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50"
               data-testid="deal-propose-btn"
               title={
-                makeOfferBusy
-                  ? "Creating offer..."
+                hasActiveThread
+                  ? "Offer already pending"
                   : !property?.property_id
                     ? "Add a property first"
                     : undefined
               }
-              onClick={handleMakeOffer}
+              onClick={() => setOpenSubmitOffer(true)}
             >
-              {makeOfferBusy ? "Creating..." : "Make Offer"}
+              Submit Offer
             </button>
           </div>
         </div>
-
-        {makeOfferError ? (
-          <div className="text-xs text-red-600" data-testid="deal-make-offer-error">
-            {makeOfferError}
-          </div>
-        ) : null}
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
@@ -362,6 +332,13 @@ export function DealHeader({
           persistLocal(payload);
           persistServer(payload);
         }}
+      />
+
+      <SubmitOfferModal
+        open={openSubmitOffer}
+        onClose={() => setOpenSubmitOffer(false)}
+        dealId={dealId}
+        propertyId={property?.property_id ?? null}
       />
     </section>
   );
