@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PropertyForm } from "@/components/properties/PropertyForm";
 import type { ResolvedProperty } from "@/components/threads/AddressTypeahead";
 
@@ -63,7 +63,9 @@ export function DealHeader({
   const key = useMemo(() => lsKey(dealId), [dealId]);
 
   useEffect(() => {
+    // If server provided initial values (shared mode), don't override from LS.
     if (initialTitle || initialProperty) return;
+
     try {
       const raw = localStorage.getItem(key);
       if (!raw) return;
@@ -105,15 +107,64 @@ export function DealHeader({
       dealId,
     );
 
+  // IMPORTANT: we cannot rely on non-existent DB tables (e.g., deal_events).
+  // Persist header into the latest deal snapshot so it "travels" to shared viewers.
   const persistServer = useCallback(
     async (next: Stored) => {
       if (!isRealDeal) return;
+
       try {
-        await fetch(`/api/deals/${dealId}/header`, {
-          method: "PATCH",
+        // Read latest snapshot
+        const latestRes = await fetch(`/api/deals/${dealId}/snapshot`, {
+          method: "GET",
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        });
+        if (!latestRes.ok) return;
+
+        const latestJson = await latestRes.json().catch(() => null);
+        const latest = latestJson?.snapshot ?? null;
+        if (!latest?.snapshot_json) return;
+
+        const prevSnap = latest.snapshot_json as any;
+
+        // Merge header into snapshot_json.meta.header
+        const mergedSnap = {
+          ...prevSnap,
+          meta: {
+            ...(prevSnap?.meta ?? {}),
+            header: {
+              title: typeof next.title === "string" ? next.title : null,
+              property_id:
+                typeof next.property_id === "string" ? next.property_id : null,
+              display_address:
+                typeof next.display_address === "string"
+                  ? next.display_address
+                  : null,
+              property_status:
+                typeof next.property_status === "string"
+                  ? next.property_status
+                  : null,
+              ownership_status:
+                typeof next.ownership_status === "string"
+                  ? next.ownership_status
+                  : null,
+            },
+          },
+        };
+
+        // Append a new snapshot row (append-only)
+        await fetch(`/api/deals/${dealId}/snapshot`, {
+          method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(next),
+          body: JSON.stringify({
+            contract_version: latest.contract_version,
+            schema_version: latest.schema_version,
+            snapshot_json: mergedSnap,
+            input_hash: latest.input_hash ?? null,
+            output_hash: latest.output_hash ?? null,
+          }),
         });
       } catch {
         // best-effort
@@ -132,6 +183,7 @@ export function DealHeader({
       ownership_status:
         propertyMeta?.ownership_status ?? property?.ownership_status ?? null,
     };
+
     persistLocal(payload);
     persistServer(payload);
     setSavedAt(Date.now());
@@ -261,6 +313,8 @@ export function DealHeader({
             property_status: r.property_status ?? null,
             ownership_status: r.ownership_status ?? null,
           };
+
+          // Persist immediately so refresh keeps gating state
           persistLocal(payload);
           persistServer(payload);
         }}

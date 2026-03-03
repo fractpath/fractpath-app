@@ -231,124 +231,124 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     if (s?.deal_id && s.snapshot_json && !latestSnapByDeal.has(s.deal_id)) {
       latestSnapByDeal.set(s.deal_id, s.snapshot_json);
     }
-
-    // Deal header is stored inside the latest snapshot_json (meta.header) so it travels with shares.
-    function getHeaderFromSnapshot(snap: any): {
-      title: string | null;
-      display_address: string | null;
-      property_id: string | null;
-      property_status: string | null;
-      ownership_status: string | null;
-    } {
-      const h = snap?.meta?.header ?? null;
-      return {
-        title: typeof h?.title === "string" ? h.title : null,
-        display_address:
-          typeof h?.display_address === "string" ? h.display_address : null,
-        property_id: typeof h?.property_id === "string" ? h.property_id : null,
-        property_status:
-          typeof h?.property_status === "string" ? h.property_status : null,
-        ownership_status:
-          typeof h?.ownership_status === "string" ? h.ownership_status : null,
-      };
+    if (s?.deal_id && s.created_at && !snapDateByDeal.has(s.deal_id)) {
+      snapDateByDeal.set(s.deal_id, s.created_at);
     }
+  }
 
-    function buildCardVm(dealId: string, grantRole: string): CardVm {
-      const deal = byId.get(dealId);
-      const snap = latestSnapByDeal.get(dealId);
-      const meta = extractDealCardMeta(snap);
+  function getHeaderFromSnapshot(snap: any): {
+    title: string | null;
+    display_address: string | null;
+    property_id: string | null;
+    property_status: string | null;
+    ownership_status: string | null;
+  } {
+    const h = snap?.meta?.header ?? null;
+    return {
+      title: typeof h?.title === "string" ? h.title : null,
+      display_address:
+        typeof h?.display_address === "string" ? h.display_address : null,
+      property_id: typeof h?.property_id === "string" ? h.property_id : null,
+      property_status:
+        typeof h?.property_status === "string" ? h.property_status : null,
+      ownership_status:
+        typeof h?.ownership_status === "string" ? h.ownership_status : null,
+    };
+  }
 
-      const header = getHeaderFromSnapshot(snap);
+  function buildCardVm(dealId: string, grantRole: string): CardVm {
+    const deal = byId.get(dealId);
+    const snap = latestSnapByDeal.get(dealId);
+    const meta = extractDealCardMeta(snap);
 
-      const rawStatus = ((deal?.status as string) || "IMPORTED").toUpperCase();
-      const statusLabel = formatStatusLabel(rawStatus);
-      const tone = STATUS_TONE[rawStatus] ?? "gray";
+    const header = getHeaderFromSnapshot(snap);
 
-      const href =
-        grantRole === "OWNER"
-          ? `/deal/${dealId}`
-          : `/deal/${dealId}?mode=shared`;
+    const rawStatus = ((deal?.status as string) || "IMPORTED").toUpperCase();
+    const statusLabel = formatStatusLabel(rawStatus);
+    const tone = STATUS_TONE[rawStatus] ?? "gray";
 
-      // Primary label: deal title (never show dealId)
-      const title = (header.title ?? "").trim() || "Untitled deal";
+    const href =
+      grantRole === "OWNER"
+        ? `/deal/${dealId}`
+        : `/deal/${dealId}?mode=shared`;
 
-      // Secondary label: canonical address (header) > snapshot-derived > placeholder
-      const propertyLabel =
-        (header.display_address ?? "").trim() ||
-        (meta.addressTitle ?? "").trim() ||
-        "No property selected";
+    const title = (header.title ?? "").trim() || "Untitled deal";
 
-      const secondaryFmvLabel = propertyLabel;
+    const propertyLabel =
+      (header.display_address ?? "").trim() ||
+      (meta.addressTitle ?? "").trim() ||
+      "No property selected";
 
-      // KPIs: include FMV + other KPIs; no dealId anywhere
-      const fmvStr = meta.fmv != null ? fmtMoneyAbbrev(meta.fmv) : null;
+    const secondaryFmvLabel = propertyLabel;
 
-      const upfrontMonthly = fmtUpfrontPlusMonthly(meta.upfront, meta.monthly);
-      const vestedStr =
-        meta.vested.totalPct != null
-          ? fmtVestedProgress(meta.vested.currentPct, meta.vested.totalPct)
-          : null;
+    const fmvStr = meta.fmv != null ? fmtMoneyAbbrev(meta.fmv) : null;
 
-      const kpiParts: string[] = [];
-      if (upfrontMonthly !== "\u2014") kpiParts.push(upfrontMonthly);
-      if (fmvStr) kpiParts.push(`FMV ${fmvStr}`);
-      if (vestedStr) kpiParts.push(vestedStr);
+    const upfrontMonthly = fmtUpfrontPlusMonthly(meta.upfront, meta.monthly);
+    const vestedStr =
+      meta.vested.totalPct != null
+        ? fmtVestedProgress(meta.vested.currentPct, meta.vested.totalPct)
+        : null;
 
-      const kpiLine = kpiParts.length > 0 ? kpiParts.join("  \u00B7  ") : null;
+    const kpiParts: string[] = [];
+    if (upfrontMonthly !== "\u2014") kpiParts.push(upfrontMonthly);
+    if (fmvStr) kpiParts.push(`FMV ${fmvStr}`);
+    if (vestedStr) kpiParts.push(vestedStr);
 
-      const exitStr =
-        meta.exitYear != null ? `Exit ${NOW_YEAR + meta.exitYear}` : null;
+    const kpiLine = kpiParts.length > 0 ? kpiParts.join("  \u00B7  ") : null;
 
-      const metaParts: string[] = [];
-      if (exitStr) metaParts.push(exitStr);
+    const exitStr =
+      meta.exitYear != null ? `Exit ${NOW_YEAR + meta.exitYear}` : null;
 
-      const updated = relativeAge(snapDateByDeal.get(dealId) ?? null, NOW_MS);
-      if (updated) metaParts.push(updated);
+    const metaParts: string[] = [];
+    if (exitStr) metaParts.push(exitStr);
 
-      const metaLine =
-        metaParts.length > 0 ? metaParts.join("  \u00B7  ") : null;
+    const updated = relativeAge(snapDateByDeal.get(dealId) ?? null, NOW_MS);
+    if (updated) metaParts.push(updated);
 
-      return {
-        dealId,
-        href,
-        title,
-        secondaryFmvLabel,
-        kpiLine,
-        metaLine,
-        statusLabel,
-        statusTone: tone,
-        rawStatus,
-        roleChipLabel: grantRole === "VIEWER" ? "Shared" : null,
-        fmvRaw: meta.fmv,
-      };
-    }
+    const metaLine =
+      metaParts.length > 0 ? metaParts.join("  \u00B7  ") : null;
 
-    const ownerCards = grants
-      .filter((g) => g.role === "OWNER")
-      .map((g) => buildCardVm(g.deal_id, g.role));
+    return {
+      dealId,
+      href,
+      title,
+      secondaryFmvLabel,
+      kpiLine,
+      metaLine,
+      statusLabel,
+      statusTone: tone,
+      rawStatus,
+      roleChipLabel: grantRole === "VIEWER" ? "Shared" : null,
+      fmvRaw: meta.fmv,
+    };
+  }
 
-    const viewerCards = grants
-      .filter((g) => g.role === "VIEWER")
-      .map((g) => buildCardVm(g.deal_id, g.role));
+  const ownerCards = grants
+    .filter((g) => g.role === "OWNER")
+    .map((g) => buildCardVm(g.deal_id, g.role));
 
-    const allCards = [...ownerCards, ...viewerCards];
+  const viewerCards = grants
+    .filter((g) => g.role === "VIEWER")
+    .map((g) => buildCardVm(g.deal_id, g.role));
 
-    const totalDeals = allCards.length;
-    const inProgress = allCards.filter((c) =>
-      IN_PROGRESS_STATUSES.has(c.rawStatus),
-    ).length;
-    const sharedCount = viewerCards.length;
-    const followUpsDue = 0;
+  const allCards = [...ownerCards, ...viewerCards];
 
-    const totalPotentialValue = ownerCards.reduce(
-      (sum, c) => sum + (c.fmvRaw ?? 0),
-      0,
-    );
-    const totalActiveValue = ownerCards
-      .filter((c) => ACTIVE_VALUE_STATUSES.has(c.rawStatus))
-      .reduce((sum, c) => sum + (c.fmvRaw ?? 0), 0);
+  const totalDeals = allCards.length;
+  const inProgress = allCards.filter((c) =>
+    IN_PROGRESS_STATUSES.has(c.rawStatus),
+  ).length;
+  const sharedCount = viewerCards.length;
+  const followUpsDue = 0;
 
-    return (
+  const totalPotentialValue = ownerCards.reduce(
+    (sum, c) => sum + (c.fmvRaw ?? 0),
+    0,
+  );
+  const totalActiveValue = ownerCards
+    .filter((c) => ACTIVE_VALUE_STATUSES.has(c.rawStatus))
+    .reduce((sum, c) => sum + (c.fmvRaw ?? 0), 0);
+
+  return (
       <div>
         <AppHeader />
         <OnboardingGate />
@@ -535,6 +535,5 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           </footer>
         </main>
       </div>
-    );
-  }
+  );
 }
