@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -9,7 +9,7 @@ function json(status: number, body: any) {
 }
 
 export async function POST(
-  _req: Request,
+  req: NextRequest,
   ctx: { params: Promise<{ threadId: string }> },
 ) {
   const supabase = await createClient();
@@ -34,7 +34,9 @@ export async function POST(
   }
 
   if (thread.status !== "pending_owner") {
-    return json(400, { error: "Can only withdraw threads in pending_owner status" });
+    return json(400, {
+      error: "Can only withdraw threads in pending_owner status",
+    });
   }
 
   const { error: updErr } = await (svc.from("deal_threads") as any)

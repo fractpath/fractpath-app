@@ -40,9 +40,9 @@ export async function GET() {
 
   const { data, error } = await (supabase.from("properties") as any)
     .select(
-      "id, status, ownership_status, claimed_by_user_id, created_by_user_id, created_at, updated_at",
+      "id, address_line1, address_line2, city, state, postal_code, status, ownership_status, is_private, owner_user_id, claimed_by_user_id, created_by_user_id, created_at, updated_at",
     )
-    .or(`created_by_user_id.eq.${user.id},claimed_by_user_id.eq.${user.id}`)
+    .or(`owner_user_id.eq.${user.id},created_by_user_id.eq.${user.id},claimed_by_user_id.eq.${user.id}`)
     .order("updated_at", { ascending: false });
 
   if (error) return jsonError(error.message, 500);
@@ -100,6 +100,7 @@ export async function POST(req: Request) {
   const { data: prop, error: insertErr } = await (svc.from("properties") as any)
     .insert({
       owner_user_id: user.id,
+      created_by_user_id: user.id,
       address_line1,
       address_line2: address_line2 || null,
       city: city || null,

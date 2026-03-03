@@ -185,11 +185,15 @@ export function PropertyForm(props: {
   };
 
   const [submitting, setSubmitting] = useState(false);
+  const [isResolving, setIsResolving] = useState(false);
+  const [resolveError, setResolveError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!props.open) return;
     setMode(defaultMode);
     setResolved(null);
+    setResolveError(null);
+    setIsResolving(false);
     if (!isEdit) {
       setLine1("");
       setLine2("");
@@ -242,6 +246,8 @@ export function PropertyForm(props: {
 
   function handleAddressResolved(r: ResolvedProperty) {
     (async () => {
+      setIsResolving(true);
+      setResolveError(null);
       try {
         const res = await fetch("/api/properties/resolve", {
           method: "POST",
@@ -275,9 +281,13 @@ export function PropertyForm(props: {
           }
         } else {
           setResolved(r as ResolvedFull);
+          setResolveError("Couldn\u2019t normalize address yet \u2014 you can still save and fix later.");
         }
       } catch {
         setResolved(r as ResolvedFull);
+        setResolveError("Couldn\u2019t normalize address yet \u2014 you can still save and fix later.");
+      } finally {
+        setIsResolving(false);
       }
     })();
   }
@@ -287,9 +297,9 @@ export function PropertyForm(props: {
     isEdit || !isOwnerMode || Object.values(files).every((f) => f !== null);
   const addressValid = !!resolved?.property_id || (isEdit && !!address_line1.trim());
   const canSubmitOwner =
-    isOwnerMode && addressValid && allFilesPresent && !submitting;
+    isOwnerMode && addressValid && allFilesPresent && !submitting && !isResolving;
   const canSubmitInvestor =
-    !isOwnerMode && !!resolved?.property_id && !resolved?.has_blocking_deal;
+    !isOwnerMode && !!resolved?.property_id && !resolved?.has_blocking_deal && !isResolving;
 
   async function handleSubmitOwner() {
     if (!canSubmitOwner) return;
@@ -428,16 +438,28 @@ export function PropertyForm(props: {
             </div>
           </div>
         ) : (
-          <AddressTypeahead
-            onResolved={handleAddressResolved}
-            inputTestId={
-              props.context === "deal"
-                ? "deal-address-input"
-                : "profile-address-input"
-            }
-            placeholder="Search street address..."
-            showLabel={false}
-          />
+          <div>
+            <AddressTypeahead
+              onResolved={handleAddressResolved}
+              inputTestId={
+                props.context === "deal"
+                  ? "deal-address-input"
+                  : "profile-address-input"
+              }
+              placeholder="Search street address..."
+              showLabel={false}
+            />
+            {isResolving && (
+              <p className="mt-1 text-xs text-muted-foreground animate-pulse">
+                Looking up normalized address…
+              </p>
+            )}
+            {resolveError && !isResolving && (
+              <p className="mt-1 text-xs text-amber-600">
+                {resolveError}
+              </p>
+            )}
+          </div>
         )}
 
         {!isEdit && (

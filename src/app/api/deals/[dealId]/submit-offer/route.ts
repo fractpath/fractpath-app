@@ -100,7 +100,9 @@ export async function POST(
     ownerUserId = prop.owner_user_id;
   }
 
-  const { data: thread, error: threadErr } = await (svc.from("deal_threads") as any)
+  const { data: thread, error: threadErr } = await (
+    svc.from("deal_threads") as any
+  )
     .insert({
       deal_id: dealId,
       property_id: propertyId,
