@@ -18,12 +18,17 @@ export async function POST(
   const supabase = await createClient();
   const { dealId } = await ctx.params;
 
-  if (!UUID_RE.test(dealId)) return json(400, { error: "Invalid dealId" });
+  if (!UUID_RE.test(dealId)) {
+    return json(400, { error: "Invalid dealId" });
+  }
 
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return json(401, { error: "Unauthorized" });
+
+  if (!user) {
+    return json(401, { error: "Unauthorized" });
+  }
 
   let body: any;
   try {
@@ -34,7 +39,9 @@ export async function POST(
 
   const mode = body?.mode;
   if (!["verified_owner", "known_email", "outreach"].includes(mode)) {
-    return json(422, { error: "mode must be verified_owner, known_email, or outreach" });
+    return json(422, {
+      error: "mode must be verified_owner, known_email, or outreach",
+    });
   }
 
   const svc = createServiceClient();
@@ -56,8 +63,7 @@ export async function POST(
     .maybeSingle();
 
   const isOwner =
-    (deal as any).owner_user_id === user.id ||
-    grant?.role === "OWNER";
+    (deal as any).owner_user_id === user.id || grant?.role === "OWNER";
 
   if (!isOwner) {
     return json(403, { error: "Only the deal owner can submit an offer" });
@@ -72,7 +78,8 @@ export async function POST(
     return json(409, { error: "An active offer already exists for this deal" });
   }
 
-  const propertyId = typeof body?.property_id === "string" ? body.property_id.trim() : "";
+  const propertyId =
+    typeof body?.property_id === "string" ? body.property_id.trim() : "";
   if (!UUID_RE.test(propertyId)) {
     return json(422, { error: "property_id must be a valid UUID" });
   }
@@ -86,7 +93,9 @@ export async function POST(
       .maybeSingle();
 
     if (!prop || prop.status !== "verified" || !prop.owner_user_id) {
-      return json(422, { error: "Property must be verified with a known owner" });
+      return json(422, {
+        error: "Property must be verified with a known owner",
+      });
     }
     ownerUserId = prop.owner_user_id;
   }
@@ -97,10 +106,10 @@ export async function POST(
       property_id: propertyId,
       created_by_user_id: user.id,
       buyer_user_id: user.id,
-      owner_user_id: ownerUserId,
+      owner_user_id: ownerUserId ?? null,
       status: "pending_owner",
     })
-    .select("id")
+    .select()
     .single();
 
   if (threadErr) {
@@ -108,14 +117,15 @@ export async function POST(
     return json(500, { error: threadErr.message });
   }
 
-  const { error: partErr } = await (svc.from("deal_thread_participants") as any)
-    .insert({
-      thread_id: thread.id,
-      user_id: user.id,
-      role: "buyer",
-      permission: "propose",
-      status: "active",
-    });
+  const { error: partErr } = await (
+    svc.from("deal_thread_participants") as any
+  ).insert({
+    thread_id: thread.id,
+    user_id: user.id,
+    role: "buyer",
+    permission: "propose",
+    status: "active",
+  });
 
   if (partErr) {
     console.error("submit_offer_participant_error", partErr);
@@ -123,7 +133,9 @@ export async function POST(
     return json(500, { error: partErr.message });
   }
 
-  const { data: proposal, error: propErr } = await (svc.from("deal_proposals") as any)
+  const { data: proposal, error: propErr } = await (
+    svc.from("deal_proposals") as any
+  )
     .insert({
       thread_id: thread.id,
       created_by_user_id: user.id,
@@ -135,7 +147,9 @@ export async function POST(
 
   if (propErr) {
     console.error("submit_offer_proposal_error", propErr);
-    await (svc.from("deal_thread_participants") as any).delete().eq("thread_id", thread.id);
+    await (svc.from("deal_thread_participants") as any)
+      .delete()
+      .eq("thread_id", thread.id);
     await (svc.from("deal_threads") as any).delete().eq("id", thread.id);
     return json(500, { error: propErr.message });
   }
@@ -145,7 +159,10 @@ export async function POST(
     .eq("id", thread.id);
 
   if (mode === "known_email") {
-    const email = typeof body?.invitee_email === "string" ? body.invitee_email.trim().toLowerCase() : "";
+    const email =
+      typeof body?.invitee_email === "string"
+        ? body.invitee_email.trim().toLowerCase()
+        : "";
     if (email && email.includes("@")) {
       const crypto = await import("crypto");
       const token = crypto.randomBytes(32).toString("hex");
@@ -156,7 +173,9 @@ export async function POST(
         intended_role: "owner",
         invitee_email: email,
         token_hash: tokenHash,
-        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        expires_at: new Date(
+          Date.now() + 7 * 24 * 60 * 60 * 1000,
+        ).toISOString(),
         created_by_user_id: user.id,
       });
     }
@@ -176,6 +195,13 @@ export async function POST(
       created_by_user_id: user.id,
     });
   }
+
+  await (svc.from("deal_events") as any).insert({
+    deal_id: dealId,
+    event_type: "offer_submitted",
+    payload: { thread_id: thread.id, proposal_id: proposal.id, mode },
+    created_by: user.id,
+  });
 
   return json(200, {
     ok: true,

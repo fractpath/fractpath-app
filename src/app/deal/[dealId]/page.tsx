@@ -18,6 +18,7 @@ import { DealDetailWidgetPanel } from "@/components/deal/DealDetailWidgetPanel";
 import { RecomputeSnapshotButton } from "@/components/deal/RecomputeSnapshotButton";
 import { VersionTimelineCard } from "@/components/deal/VersionTimelineCard";
 import { ManageAccessPanel } from "@/components/deal/ManageAccessPanel";
+import { DealActivityFeed } from "@/components/deal/DealActivityFeed";
 import { getDealSnapshots } from "@/lib/dealSnapshotDb";
 import { getDealVersions } from "@/lib/dealVersionDb";
 import { getDealEvents, buildDealTimeline } from "@/lib/dealTimeline";
@@ -228,17 +229,23 @@ export default async function DealPage({ params, searchParams }: PageProps) {
     );
   }
 
-  const [versionsResult, eventsResult, headerEventResult] = await Promise.all([
-    getDealVersions(supabase, dealId, 50),
-    getDealEvents(supabase, dealId, 50),
-    (supabase.from("deal_events") as any)
-      .select("payload")
-      .eq("deal_id", dealId)
-      .eq("event_type", "DEAL_HEADER_UPDATED")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-  ]);
+  const [versionsResult, eventsResult, headerEventResult, activityResult] =
+    await Promise.all([
+      getDealVersions(supabase, dealId, 50),
+      getDealEvents(supabase, dealId, 50),
+      (supabase.from("deal_events") as any)
+        .select("payload")
+        .eq("deal_id", dealId)
+        .eq("event_type", "DEAL_HEADER_UPDATED")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      (svc.from("deal_events") as any)
+        .select("id, event_type, payload, created_at, created_by")
+        .eq("deal_id", dealId)
+        .order("created_at", { ascending: false })
+        .limit(50),
+    ]);
 
   const snapshotHeader = (initialSnapshot as any)?.meta?.header ?? null;
   const headerPayload = headerEventResult?.data?.payload ?? null;
@@ -434,6 +441,26 @@ export default async function DealPage({ params, searchParams }: PageProps) {
             </div>
           </section>
         ) : null}
+
+        <section className="mt-6 rounded-md border p-4">
+          <div className="flex items-baseline justify-between gap-4">
+            <h2 className="text-base font-semibold">Activity</h2>
+            <div className="text-xs text-muted-foreground">
+              {(activityResult?.data ?? []).length} event{(activityResult?.data ?? []).length !== 1 ? "s" : ""}
+            </div>
+          </div>
+          <div className="mt-3">
+            <DealActivityFeed
+              items={(activityResult?.data ?? []).map((e: any) => ({
+                id: e.id,
+                event_type: e.event_type,
+                payload: e.payload,
+                created_at: e.created_at,
+                created_by_user_id: e.created_by ?? null,
+              }))}
+            />
+          </div>
+        </section>
 
         <section className="mt-6 rounded-md border p-4">
           <div className="flex items-baseline justify-between gap-4">
