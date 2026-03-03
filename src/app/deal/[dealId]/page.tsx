@@ -211,10 +211,30 @@ export default async function DealPage({ params, searchParams }: PageProps) {
     );
   }
 
-  const [versionsResult, eventsResult] = await Promise.all([
+  const [versionsResult, eventsResult, headerEventResult] = await Promise.all([
     getDealVersions(supabase, dealId, 50),
     getDealEvents(supabase, dealId, 50),
+    (supabase.from("deal_events") as any)
+      .select("payload")
+      .eq("deal_id", dealId)
+      .eq("event_type", "DEAL_HEADER_UPDATED")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
+
+  const headerPayload = headerEventResult?.data?.payload ?? null;
+  const persistedTitle =
+    typeof headerPayload?.title === "string" ? headerPayload.title : null;
+  const persistedProperty =
+    headerPayload?.property_id && headerPayload?.display_address
+      ? {
+          property_id: headerPayload.property_id as string,
+          display_address: headerPayload.display_address as string,
+          property_status: (headerPayload.property_status as string) ?? null,
+          ownership_status: (headerPayload.ownership_status as string) ?? null,
+        }
+      : null;
   const versions = versionsResult.ok ? versionsResult.versions : [];
   const eventRows = eventsResult.ok ? eventsResult.events : [];
 
@@ -248,7 +268,12 @@ export default async function DealPage({ params, searchParams }: PageProps) {
     <div>
       <AppHeader />
       <main className="mx-auto max-w-3xl p-6">
-        <DealHeader dealId={dealId} readOnly={readOnly} />
+        <DealHeader
+          dealId={dealId}
+          readOnly={readOnly}
+          initialTitle={persistedTitle}
+          initialProperty={persistedProperty}
+        />
 
         {readOnly ? (
           <div className="mb-4 rounded-md border p-3">

@@ -1,12 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { PropertyCaptureModal } from "@/components/properties/PropertyCaptureModal";
+import { useEffect, useMemo, useState, useCallback } from "react";
+import { PropertyForm } from "@/components/properties/PropertyForm";
 import type { ResolvedProperty } from "@/components/threads/AddressTypeahead";
 
 type Props = {
   dealId: string;
   readOnly: boolean;
+  initialTitle?: string | null;
+  initialProperty?: {
+    property_id: string;
+    display_address: string;
+    property_status?: string | null;
+    ownership_status?: string | null;
+  } | null;
 };
 
 function lsKey(dealId: string) {
@@ -21,13 +28,34 @@ type Stored = {
   ownership_status?: string | null;
 };
 
-export function DealHeader({ dealId, readOnly }: Props) {
-  const [title, setTitle] = useState("");
-  const [property, setProperty] = useState<ResolvedProperty | null>(null);
+export function DealHeader({
+  dealId,
+  readOnly,
+  initialTitle,
+  initialProperty,
+}: Props) {
+  const [title, setTitle] = useState(initialTitle ?? "");
+  const [property, setProperty] = useState<ResolvedProperty | null>(
+    initialProperty
+      ? {
+          property_id: initialProperty.property_id,
+          display_address: initialProperty.display_address,
+          property_status: initialProperty.property_status ?? null,
+          ownership_status: initialProperty.ownership_status ?? null,
+        }
+      : null,
+  );
   const [propertyMeta, setPropertyMeta] = useState<{
     property_status?: string | null;
     ownership_status?: string | null;
-  } | null>(null);
+  } | null>(
+    initialProperty
+      ? {
+          property_status: initialProperty.property_status ?? null,
+          ownership_status: initialProperty.ownership_status ?? null,
+        }
+      : null,
+  );
 
   const [openAddProperty, setOpenAddProperty] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -35,6 +63,7 @@ export function DealHeader({ dealId, readOnly }: Props) {
   const key = useMemo(() => lsKey(dealId), [dealId]);
 
   useEffect(() => {
+    if (initialTitle || initialProperty) return;
     try {
       const raw = localStorage.getItem(key);
       if (!raw) return;
@@ -57,18 +86,44 @@ export function DealHeader({ dealId, readOnly }: Props) {
     } catch {
       // ignore
     }
-  }, [key]);
+  }, [key, initialTitle, initialProperty]);
 
-  function persist(next: Stored) {
-    try {
-      localStorage.setItem(key, JSON.stringify(next));
-    } catch {
-      // ignore
-    }
-  }
+  const persistLocal = useCallback(
+    (next: Stored) => {
+      try {
+        localStorage.setItem(key, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+    },
+    [key],
+  );
+
+  const isRealDeal =
+    dealId !== "new" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      dealId,
+    );
+
+  const persistServer = useCallback(
+    async (next: Stored) => {
+      if (!isRealDeal) return;
+      try {
+        await fetch(`/api/deals/${dealId}/header`, {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(next),
+        });
+      } catch {
+        // best-effort
+      }
+    },
+    [dealId, isRealDeal],
+  );
 
   function onSave() {
-    persist({
+    const payload: Stored = {
       title,
       property_id: property?.property_id,
       display_address: property?.display_address,
@@ -76,7 +131,9 @@ export function DealHeader({ dealId, readOnly }: Props) {
         propertyMeta?.property_status ?? property?.property_status ?? null,
       ownership_status:
         propertyMeta?.ownership_status ?? property?.ownership_status ?? null,
-    });
+    };
+    persistLocal(payload);
+    persistServer(payload);
     setSavedAt(Date.now());
   }
 
@@ -106,7 +163,7 @@ export function DealHeader({ dealId, readOnly }: Props) {
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Name this deal…"
+              placeholder="Name this deal..."
               className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1"
               data-testid="deal-title-input"
               disabled={readOnly}
@@ -181,7 +238,7 @@ export function DealHeader({ dealId, readOnly }: Props) {
         </div>
       </div>
 
-      <PropertyCaptureModal
+      <PropertyForm
         open={openAddProperty}
         onClose={() => setOpenAddProperty(false)}
         context="deal"
@@ -197,14 +254,15 @@ export function DealHeader({ dealId, readOnly }: Props) {
             ownership_status: r.ownership_status ?? null,
           });
 
-          // persist immediately so refresh keeps gating state
-          persist({
+          const payload: Stored = {
             title,
             property_id: r.property_id,
             display_address: r.display_address,
             property_status: r.property_status ?? null,
             ownership_status: r.ownership_status ?? null,
-          });
+          };
+          persistLocal(payload);
+          persistServer(payload);
         }}
       />
     </section>

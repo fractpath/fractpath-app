@@ -29,6 +29,31 @@ async function resolveAddressFromPlaceId(placeId: string): Promise<string | null
   }
 }
 
+async function checkBlockingDeal(
+  svc: any,
+  propertyId: string,
+): Promise<{ has_blocking_deal: boolean; blocking_reason: string | null }> {
+  try {
+    const { data: threads } = await (svc.from("deal_threads") as any)
+      .select("id, status")
+      .eq("property_id", propertyId)
+      .in("status", ["active", "pending", "negotiating"])
+      .limit(1);
+
+    if (threads && threads.length > 0) {
+      return {
+        has_blocking_deal: true,
+        blocking_reason:
+          "There is already an active or pending opportunity on this property. A new offer cannot be started until the existing agreement is resolved.",
+      };
+    }
+  } catch {
+    // deal_threads table may not exist yet; treat as no blocking deal
+  }
+
+  return { has_blocking_deal: false, blocking_reason: null };
+}
+
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
   const {
@@ -67,6 +92,8 @@ export async function POST(request: NextRequest) {
       .eq("id", result.property_id)
       .maybeSingle();
 
+    const blocking = await checkBlockingDeal(svc, result.property_id);
+
     return NextResponse.json({
       ok: true,
       property_id: result.property_id,
@@ -75,6 +102,9 @@ export async function POST(request: NextRequest) {
       property_status: prop?.status ?? null,
       ownership_status: prop?.ownership_status ?? null,
       claimed_by_user_id: prop?.claimed_by_user_id ?? null,
+      property_exists: !result.created,
+      has_blocking_deal: blocking.has_blocking_deal,
+      blocking_reason: blocking.blocking_reason,
     });
   } catch (err: any) {
     const msg = err?.message ?? String(err);

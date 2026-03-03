@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { DealHeader } from "@/components/deals/DealHeader";
 import { DealWidgetShell } from "@/components/deal/DealWidgetShell";
 
 type AnyRecord = Record<string, unknown>;
@@ -14,6 +15,7 @@ export function NewDealClient({ persona }: NewDealClientProps) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [dealId, setDealId] = useState<string | null>(null);
 
   const defaultSeed = useMemo<AnyRecord>(
     () => ({
@@ -45,6 +47,7 @@ export function NewDealClient({ persona }: NewDealClientProps) {
           throw new Error(body.error ?? `Create failed (${res.status})`);
         }
 
+        if (body.deal_id) setDealId(body.deal_id);
         router.push(body.redirect_url ?? "/dashboard");
       } catch (err: any) {
         setError(err?.message ?? "Failed to create deal");
@@ -54,9 +57,16 @@ export function NewDealClient({ persona }: NewDealClientProps) {
     [router],
   );
 
+  const tempDealId = dealId ?? "new";
+
   return (
     <>
-      <h1 className="text-2xl font-semibold">Create a new deal</h1>
+      <DealHeader dealId={tempDealId} readOnly={false} />
+
+      <div className="flex items-baseline justify-between gap-4">
+        <h1 className="text-xl font-semibold">New Deal</h1>
+      </div>
+
       <p className="mt-1 text-sm text-muted-foreground">
         Configure your deal terms and scenario, then save to create.
       </p>

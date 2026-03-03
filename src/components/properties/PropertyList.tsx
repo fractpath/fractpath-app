@@ -160,6 +160,7 @@ export function PropertyList() {
           open={true}
           onClose={() => setShowAdd(false)}
           onSuccess={() => load()}
+          context="profile"
         />
       )}
 
@@ -171,6 +172,7 @@ export function PropertyList() {
             setEditTarget(null);
             load();
           }}
+          context="profile"
           editPrefill={{
             propertyId: editTarget.id,
             address_line1: editTarget.address_line1,
