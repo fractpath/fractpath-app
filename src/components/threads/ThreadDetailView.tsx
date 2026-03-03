@@ -38,41 +38,50 @@ export function ThreadDetailView({ threadId }: { threadId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const refreshMe = useCallback(async () => {
+    const meRes = await fetch("/api/me", { credentials: "include" });
+    if (!meRes.ok) return;
+    const meData = await meRes.json().catch(() => ({}));
+    setCurrentUserId(meData?.user?.id ?? meData?.id ?? null);
+  }, []);
+
+  const refreshThread = useCallback(async () => {
+    const viewRes = await fetch(`/api/threads/${threadId}/view`, {
+      credentials: "include",
+    });
+    if (!viewRes.ok) {
+      const body = await viewRes.json().catch(() => ({}));
+      throw new Error(body?.error ?? `HTTP ${viewRes.status}`);
+    }
+    const viewData = await viewRes.json();
+    setThread(viewData.thread);
+    setParticipants(viewData.participants ?? []);
+  }, [threadId]);
+
+  const refreshProposals = useCallback(async () => {
+    const propRes = await fetch(`/api/threads/${threadId}/proposals`, {
+      credentials: "include",
+    });
+    if (!propRes.ok) {
+      // proposals are optional; don’t fail the whole page
+      setProposals([]);
+      return;
+    }
+    const propData = await propRes.json().catch(() => ({}));
+    setProposals(propData.proposals ?? []);
+  }, [threadId]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const viewRes = await fetch(`/api/threads/${threadId}/view`, {
-        credentials: "include",
-      });
-      if (!viewRes.ok) {
-        const body = await viewRes.json().catch(() => ({}));
-        setError(body?.error ?? `HTTP ${viewRes.status}`);
-        return;
-      }
-      const viewData = await viewRes.json();
-      setThread(viewData.thread);
-      setParticipants(viewData.participants ?? []);
-
-      const meRes = await fetch("/api/me", { credentials: "include" });
-      if (meRes.ok) {
-        const meData = await meRes.json();
-        setCurrentUserId(meData?.user?.id ?? meData?.id ?? null);
-      }
-
-      const propRes = await fetch(`/api/threads/${threadId}/proposals`, {
-        credentials: "include",
-      });
-      if (propRes.ok) {
-        const propData = await propRes.json();
-        setProposals(propData.proposals ?? []);
-      }
+      await Promise.all([refreshThread(), refreshMe(), refreshProposals()]);
     } catch (err: any) {
       setError(err?.message ?? "Network error");
     } finally {
       setLoading(false);
     }
-  }, [threadId]);
+  }, [refreshMe, refreshProposals, refreshThread]);
 
   useEffect(() => {
     load();
@@ -146,7 +155,9 @@ export function ThreadDetailView({ threadId }: { threadId: string }) {
           <ul className="space-y-1 text-sm">
             {participants.map((p) => (
               <li key={p.user_id} className="flex items-center gap-2">
-                <span className="font-mono text-xs">{p.user_id.slice(0, 8)}...</span>
+                <span className="font-mono text-xs">
+                  {p.user_id.slice(0, 8)}...
+                </span>
                 <span className="rounded bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-700">
                   {p.role}
                 </span>
@@ -166,7 +177,9 @@ export function ThreadDetailView({ threadId }: { threadId: string }) {
           <ul className="space-y-1 text-sm">
             {proposals.map((pr) => (
               <li key={pr.id} className="flex items-center gap-2">
-                <span className="font-mono text-xs">{pr.id.slice(0, 8)}...</span>
+                <span className="font-mono text-xs">
+                  {pr.id.slice(0, 8)}...
+                </span>
                 <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs font-semibold">
                   {pr.status}
                 </span>
@@ -187,6 +200,10 @@ export function ThreadDetailView({ threadId }: { threadId: string }) {
         isOwner={!!isOwner}
         proposalId={latestSubmitted?.id ?? null}
         proposalStatus={latestSubmitted?.status ?? null}
+        onDecisionComplete={async () => {
+          // Refresh thread + proposals after accept/decline/reject
+          await Promise.all([refreshThread(), refreshProposals()]);
+        }}
       />
     </div>
   );

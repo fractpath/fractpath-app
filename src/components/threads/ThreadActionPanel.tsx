@@ -10,6 +10,7 @@ type Props = {
   isOwner: boolean;
   proposalId?: string | null;
   proposalStatus?: string | null;
+  onDecisionComplete?: () => void | Promise<void>;
 };
 
 export function ThreadActionPanel({
@@ -18,6 +19,7 @@ export function ThreadActionPanel({
   isOwner,
   proposalId,
   proposalStatus,
+  onDecisionComplete,
 }: Props) {
   const { data: verStatus, loading: verLoading } =
     useThreadVerificationStatus(threadId);
@@ -33,21 +35,24 @@ export function ThreadActionPanel({
     setBusy(true);
     setResult(null);
     try {
-      const res = await fetch(
-        `/api/threads/${threadId}/owner-decision`,
-        {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ decision }),
-        },
-      );
+      const res = await fetch(`/api/threads/${threadId}/owner-decision`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision }),
+      });
+
       const body = await res.json();
+
       setResult(
         res.ok
-          ? `Thread ${body.status ?? decision}d`
-          : body.error ?? `Error ${res.status}`,
+          ? `Thread ${body.status ?? "updated"}`
+          : (body.error ?? `Error ${res.status}`),
       );
+
+      if (res.ok) {
+        await onDecisionComplete?.();
+      }
     } catch (err: any) {
       setResult(err?.message ?? "Network error");
     } finally {
@@ -60,20 +65,17 @@ export function ThreadActionPanel({
     setBusy(true);
     setResult(null);
     try {
-      const res = await fetch(
-        `/api/proposals/${proposalId}/owner-decision`,
-        {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ decision }),
-        },
-      );
+      const res = await fetch(`/api/proposals/${proposalId}/owner-decision`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision }),
+      });
       const body = await res.json();
       setResult(
         res.ok
           ? `Proposal ${body.status ?? decision}ed`
-          : body.error ?? `Error ${res.status}`,
+          : (body.error ?? `Error ${res.status}`),
       );
     } catch (err: any) {
       setResult(err?.message ?? "Network error");
@@ -109,28 +111,26 @@ export function ThreadActionPanel({
         </div>
       )}
 
-      {proposalId &&
-        proposalStatus === "submitted" &&
-        !finalized && (
-          <div className="flex flex-wrap gap-3">
-            <button
-              data-testid="proposal-accept-btn"
-              disabled={busy || verLoading || !acceptAllowed}
-              onClick={() => handleProposalDecision("accept")}
-              className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Accept Proposal
-            </button>
-            <button
-              data-testid="proposal-reject-btn"
-              disabled={busy}
-              onClick={() => handleProposalDecision("reject")}
-              className="rounded-md bg-red-100 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-200 disabled:opacity-50"
-            >
-              Reject Proposal
-            </button>
-          </div>
-        )}
+      {proposalId && proposalStatus === "submitted" && !finalized && (
+        <div className="flex flex-wrap gap-3">
+          <button
+            data-testid="proposal-accept-btn"
+            disabled={busy || verLoading || !acceptAllowed}
+            onClick={() => handleProposalDecision("accept")}
+            className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Accept Proposal
+          </button>
+          <button
+            data-testid="proposal-reject-btn"
+            disabled={busy}
+            onClick={() => handleProposalDecision("reject")}
+            className="rounded-md bg-red-100 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-200 disabled:opacity-50"
+          >
+            Reject Proposal
+          </button>
+        </div>
+      )}
 
       {result && (
         <p className="text-sm text-gray-700" data-testid="action-result">
