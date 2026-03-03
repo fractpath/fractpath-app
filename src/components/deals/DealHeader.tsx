@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { PropertyForm } from "@/components/properties/PropertyForm";
 import type { ResolvedProperty } from "@/components/threads/AddressTypeahead";
 
@@ -59,6 +60,9 @@ export function DealHeader({
 
   const [openAddProperty, setOpenAddProperty] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const router = useRouter();
+  const [makeOfferBusy, setMakeOfferBusy] = useState(false);
+  const [makeOfferError, setMakeOfferError] = useState<string | null>(null);
 
   const key = useMemo(() => lsKey(dealId), [dealId]);
 
@@ -189,6 +193,38 @@ export function DealHeader({
     setSavedAt(Date.now());
   }
 
+  const handleMakeOffer = useCallback(async () => {
+    if (readOnly) return;
+    const propertyId = property?.property_id;
+    if (!propertyId) return;
+
+    setMakeOfferBusy(true);
+    setMakeOfferError(null);
+
+    try {
+      const res = await fetch("/api/threads", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ property_id: propertyId }),
+      });
+
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || body?.ok === false) {
+        throw new Error(body?.error ?? `Make Offer failed (${res.status})`);
+      }
+
+      const threadId = String(body?.thread_id ?? "");
+      if (!threadId) throw new Error("Make Offer failed: missing thread_id");
+
+      router.push(`/threads/${threadId}`);
+    } catch (err: any) {
+      setMakeOfferError(err?.message ?? "Network error");
+    } finally {
+      setMakeOfferBusy(false);
+    }
+  }, [readOnly, property?.property_id, router]);
+
   const canMakeOffer = !!property?.property_id && !readOnly;
 
   const statusLabel = (() => {
@@ -245,20 +281,28 @@ export function DealHeader({
 
             <button
               type="button"
-              disabled={!canMakeOffer}
+              disabled={!canMakeOffer || makeOfferBusy}
               className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50"
               data-testid="deal-propose-btn"
               title={
-                !property?.property_id ? "Add a property first" : undefined
+                makeOfferBusy
+                  ? "Creating offer..."
+                  : !property?.property_id
+                    ? "Add a property first"
+                    : undefined
               }
-              onClick={() => {
-                // Next phase: Path A (owner email -> Opportunity + Offer)
-              }}
+              onClick={handleMakeOffer}
             >
-              Make Offer
+              {makeOfferBusy ? "Creating..." : "Make Offer"}
             </button>
           </div>
         </div>
+
+        {makeOfferError ? (
+          <div className="text-xs text-red-600" data-testid="deal-make-offer-error">
+            {makeOfferError}
+          </div>
+        ) : null}
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
