@@ -77,6 +77,9 @@ export function ThreadActionPanel({
           ? `Proposal ${body.status ?? decision}ed`
           : (body.error ?? `Error ${res.status}`),
       );
+      if (res.ok) {
+        await onDecisionComplete?.();
+      }
     } catch (err: any) {
       setResult(err?.message ?? "Network error");
     } finally {
@@ -84,52 +87,119 @@ export function ThreadActionPanel({
     }
   }
 
-  if (!isOwner) return null;
+  async function handleProposalSubmit() {
+    if (!proposalId) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      const res = await fetch(`/api/proposals/${proposalId}/submit`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+      const body = await res.json();
+      setResult(
+        res.ok
+          ? `Proposal submitted`
+          : (body.error ?? `Error ${res.status}`),
+      );
+      if (res.ok) {
+        await onDecisionComplete?.();
+      }
+    } catch (err: any) {
+      setResult(err?.message ?? "Network error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (isOwner) {
+    return (
+      <div className="space-y-4">
+        <VerificationGateBanner threadId={threadId} />
+
+        {!finalized && (
+          <div className="flex flex-wrap gap-3">
+            <button
+              data-testid="thread-accept-btn"
+              disabled={busy || verLoading || !acceptAllowed}
+              onClick={() => handleThreadDecision("accept")}
+              className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Accept Thread
+            </button>
+            <button
+              data-testid="thread-decline-btn"
+              disabled={busy}
+              onClick={() => handleThreadDecision("decline")}
+              className="rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-300 disabled:opacity-50"
+            >
+              Decline Thread
+            </button>
+          </div>
+        )}
+
+        {proposalId && proposalStatus === "submitted" && !finalized && (
+          <div className="flex flex-wrap gap-3">
+            <button
+              data-testid="proposal-accept-btn"
+              disabled={busy || verLoading || !acceptAllowed}
+              onClick={() => handleProposalDecision("accept")}
+              className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Accept Proposal
+            </button>
+            <button
+              data-testid="proposal-reject-btn"
+              disabled={busy}
+              onClick={() => handleProposalDecision("reject")}
+              className="rounded-md bg-red-100 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-200 disabled:opacity-50"
+            >
+              Reject Proposal
+            </button>
+          </div>
+        )}
+
+        {result && (
+          <p className="text-sm text-gray-700" data-testid="action-result">
+            {result}
+          </p>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
-      <VerificationGateBanner threadId={threadId} />
-
-      {!finalized && (
+      {proposalId && proposalStatus === "draft" && !finalized && (
         <div className="flex flex-wrap gap-3">
           <button
-            data-testid="thread-accept-btn"
-            disabled={busy || verLoading || !acceptAllowed}
-            onClick={() => handleThreadDecision("accept")}
-            className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Accept Thread
-          </button>
-          <button
-            data-testid="thread-decline-btn"
+            data-testid="proposal-submit-btn"
             disabled={busy}
-            onClick={() => handleThreadDecision("decline")}
-            className="rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-300 disabled:opacity-50"
+            onClick={handleProposalSubmit}
+            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
           >
-            Decline Thread
+            Submit Proposal
           </button>
         </div>
       )}
 
-      {proposalId && proposalStatus === "submitted" && !finalized && (
-        <div className="flex flex-wrap gap-3">
-          <button
-            data-testid="proposal-accept-btn"
-            disabled={busy || verLoading || !acceptAllowed}
-            onClick={() => handleProposalDecision("accept")}
-            className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Accept Proposal
-          </button>
-          <button
-            data-testid="proposal-reject-btn"
-            disabled={busy}
-            onClick={() => handleProposalDecision("reject")}
-            className="rounded-md bg-red-100 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-200 disabled:opacity-50"
-          >
-            Reject Proposal
-          </button>
-        </div>
+      {proposalId && proposalStatus === "submitted" && (
+        <p className="text-sm text-gray-600">
+          Your proposal has been submitted and is awaiting the owner's review.
+        </p>
+      )}
+
+      {!proposalId && !finalized && (
+        <p className="text-sm text-gray-500">
+          Create a proposal in the deal editor to submit an offer on this thread.
+        </p>
+      )}
+
+      {finalized && (
+        <p className="text-sm text-gray-500">
+          This thread has been {threadStatus}.
+        </p>
       )}
 
       {result && (

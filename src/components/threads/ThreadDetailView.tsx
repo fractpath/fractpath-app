@@ -113,6 +113,10 @@ export function ThreadDetailView({ threadId }: { threadId: string }) {
     );
 
   const latestSubmitted = proposals.find((p) => p.status === "submitted");
+  const myLatestDraft = proposals.find(
+    (p) => p.status === "draft" && p.created_by_user_id === currentUserId,
+  );
+  const actionableProposal = latestSubmitted ?? myLatestDraft ?? null;
 
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-6">
@@ -198,10 +202,9 @@ export function ThreadDetailView({ threadId }: { threadId: string }) {
         threadId={thread.id}
         threadStatus={thread.status}
         isOwner={!!isOwner}
-        proposalId={latestSubmitted?.id ?? null}
-        proposalStatus={latestSubmitted?.status ?? null}
+        proposalId={actionableProposal?.id ?? null}
+        proposalStatus={actionableProposal?.status ?? null}
         onDecisionComplete={async () => {
-          // Refresh thread + proposals after accept/decline/reject
           await Promise.all([refreshThread(), refreshProposals()]);
         }}
       />
