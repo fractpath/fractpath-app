@@ -4,6 +4,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+import { DealHeader } from "@/components/deals/DealHeader";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
@@ -169,7 +170,8 @@ export default async function DealPage({ params, searchParams }: PageProps) {
   const effectiveSnapshotRow =
     selectedSnapshotId != null
       ? (snapshots.find((s) => s.id === selectedSnapshotId) ?? null)
-      : (latestComputedSnapshot ?? (snapshots.length > 0 ? snapshots[0] : null));
+      : (latestComputedSnapshot ??
+        (snapshots.length > 0 ? snapshots[0] : null));
 
   // "Latest" in UI/gating should mean latest computed snapshot (not merely latest row).
   const latestSnapshotId =
@@ -244,211 +246,223 @@ export default async function DealPage({ params, searchParams }: PageProps) {
 
   return (
     <div>
-    <AppHeader />
-    <main className="mx-auto max-w-3xl p-6">
-      {readOnly ? (
-        <div className="mb-4 rounded-md border p-3">
-          <div className="text-sm font-medium">Read-only shared deal</div>
-          <div className="mt-1 text-sm text-muted-foreground">
-            You can view this deal, but you can’t make changes.
-          </div>
-        </div>
-      ) : null}
+      <AppHeader />
+      <main className="mx-auto max-w-3xl p-6">
+        <DealHeader dealId={dealId} readOnly={readOnly} />
 
-      <div className="flex items-baseline justify-between gap-4">
-        <h1 className="text-xl font-semibold">Deal</h1>
-        <div className="text-sm text-muted-foreground">
-          Role: <span className="font-medium text-foreground">{role}</span>
-        </div>
-      </div>
-
-      <div className="mt-4 rounded-md border p-4 text-sm">
-        <div className="grid gap-2">
-          <div>
-            <span className="font-medium">Deal ID:</span>{" "}
-            <span className="break-words">{dealId}</span>
-          </div>
-          <div>
-            <span className="font-medium">Mode:</span> {deal.mode ?? "(none)"}
-          </div>
-          <div>
-            <span className="font-medium">Editable:</span>{" "}
-            {readOnly ? "No" : "Yes"}
-          </div>
-        </div>
-      </div>
-
-      <section className="mt-6 rounded-md border p-4">
-        <div className="flex items-baseline justify-between gap-4">
-          <h2 className="text-base font-semibold">Scenario snapshot</h2>
-          <div className="text-xs text-muted-foreground">
-            {isLatest
-              ? "Latest computed snapshot (read-only; no recompute)"
-              : "Viewing older snapshot"}
-          </div>
-        </div>
-
-        {!isLatest && effectiveSnapshotRow ? (
-          <div className="mt-2 flex items-center justify-between rounded-md bg-muted/50 px-3 py-2">
-            <span className="text-xs text-muted-foreground">
-              You are viewing a previous snapshot from{" "}
-              {new Date((effectiveSnapshotRow as any).created_at).toLocaleString()}
-            </span>
-            <Link
-              className="text-xs font-medium underline"
-              href={`/deal/${dealId}${isSharedMode ? "?mode=shared" : ""}`}
-            >
-              Back to latest
-            </Link>
+        {readOnly ? (
+          <div className="mb-4 rounded-md border p-3">
+            <div className="text-sm font-medium">Read-only shared deal</div>
+            <div className="mt-1 text-sm text-muted-foreground">
+              You can view this deal, but you can’t make changes.
+            </div>
           </div>
         ) : null}
 
-        <div className="mt-4">
-          <DealSummary vm={summaryVm} />
+        <div className="flex items-baseline justify-between gap-4">
+          <h1 className="text-xl font-semibold">Deal</h1>
+          <div className="text-sm text-muted-foreground">
+            Role: <span className="font-medium text-foreground">{role}</span>
+          </div>
         </div>
-      </section>
 
-      <DealDetailWidgetPanel
-        dealId={dealId}
-        initialSnapshot={initialSnapshot}
-        inputs={snapshotInputs}
-        results={snapshotResults}
-        computeVersion={snapshotComputeVersion}
-        canEdit={canEdit}
-        persona={userPersona}
-/>
+        <div className="mt-4 rounded-md border p-4 text-sm">
+          <div className="grid gap-2">
+            <div>
+              <span className="font-medium">Deal ID:</span>{" "}
+              <span className="break-words">{dealId}</span>
+            </div>
+            <div>
+              <span className="font-medium">Mode:</span> {deal.mode ?? "(none)"}
+            </div>
+            <div>
+              <span className="font-medium">Editable:</span>{" "}
+              {readOnly ? "No" : "Yes"}
+            </div>
+          </div>
+        </div>
 
-      {role === "OWNER" && isLatest && !readOnly && userPersona !== "realtor" ? (
-        <RecomputeSnapshotButton
-          dealId={dealId}
-          initialInputs={(initialSnapshot as any)?.inputs ?? null}
-        />
-      ) : null}
-
-      {snapshots.length > 1 ? (
         <section className="mt-6 rounded-md border p-4">
           <div className="flex items-baseline justify-between gap-4">
-            <h2 className="text-base font-semibold">Snapshot history</h2>
+            <h2 className="text-base font-semibold">Scenario snapshot</h2>
             <div className="text-xs text-muted-foreground">
-              {snapshots.length} snapshot{snapshots.length !== 1 ? "s" : ""}
+              {isLatest
+                ? "Latest computed snapshot (read-only; no recompute)"
+                : "Viewing older snapshot"}
             </div>
           </div>
 
-          <div className="mt-3 space-y-1">
-            {snapshots.map((s) => {
-              const isCurrent = effectiveSnapshotRow?.id === s.id;
-              const modeParam = isSharedMode ? "&mode=shared" : "";
-              const href =
-                s.id === latestSnapshotId
-                  ? `/deal/${dealId}${isSharedMode ? "?mode=shared" : ""}`
-                  : `/deal/${dealId}?snapshot=${s.id}${modeParam}`;
+          {!isLatest && effectiveSnapshotRow ? (
+            <div className="mt-2 flex items-center justify-between rounded-md bg-muted/50 px-3 py-2">
+              <span className="text-xs text-muted-foreground">
+                You are viewing a previous snapshot from{" "}
+                {new Date(
+                  (effectiveSnapshotRow as any).created_at,
+                ).toLocaleString()}
+              </span>
+              <Link
+                className="text-xs font-medium underline"
+                href={`/deal/${dealId}${isSharedMode ? "?mode=shared" : ""}`}
+              >
+                Back to latest
+              </Link>
+            </div>
+          ) : null}
 
-              return (
-                <Link
-                  key={s.id}
-                  href={href}
-                  className={`flex items-center justify-between gap-3 rounded-md px-3 py-2 text-xs transition-colors ${
-                    isCurrent ? "bg-primary/10 font-medium" : "hover:bg-muted/50"
-                  }`}
-                >
-                  <span className="flex items-center gap-2">
-                    {s.id === latestSnapshotId ? (
-                      <span className="rounded bg-primary/20 px-1.5 py-0.5 text-[10px] font-medium">
-                        Latest
-                      </span>
-                    ) : null}
-                    <span className="text-muted-foreground">
-                      v{s.contract_version} / s{s.schema_version}
-                    </span>
-                  </span>
-                  <span className="text-muted-foreground">
-                    {new Date(s.created_at).toLocaleString()}
-                  </span>
-                </Link>
-              );
-            })}
+          <div className="mt-4">
+            <DealSummary vm={summaryVm} />
           </div>
         </section>
-      ) : null}
 
-      <section className="mt-6 rounded-md border p-4">
-        <div className="flex items-baseline justify-between gap-4">
-          <h2 className="text-base font-semibold">Timeline</h2>
-          <div className="text-xs text-muted-foreground">
-            {timeline.length} entr{timeline.length !== 1 ? "ies" : "y"}
-          </div>
-        </div>
+        <DealDetailWidgetPanel
+          dealId={dealId}
+          initialSnapshot={initialSnapshot}
+          inputs={snapshotInputs}
+          results={snapshotResults}
+          computeVersion={snapshotComputeVersion}
+          canEdit={canEdit}
+          persona={userPersona}
+        />
 
-        {timeline.length === 0 ? (
-          <p className="mt-3 text-sm text-muted-foreground">
-            No activity recorded for this deal.
-          </p>
-        ) : (
-          <div className="mt-4 space-y-2">
-            {timeline.map((entry) =>
-              entry.type === "VERSION" ? (
-                <VersionTimelineCard
-                  key={`${entry.type}-${entry.id}`}
-                  entry={entry}
-                />
-              ) : (
-                <div
-                  key={`${entry.type}-${entry.id}`}
-                  className="flex items-start gap-3 rounded-md px-3 py-2 text-xs hover:bg-muted/50"
-                >
-                  <span
-                    className={`mt-0.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                      entry.type === "SNAPSHOT"
-                        ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                        : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+        {role === "OWNER" &&
+        isLatest &&
+        !readOnly &&
+        userPersona !== "realtor" ? (
+          <RecomputeSnapshotButton
+            dealId={dealId}
+            initialInputs={(initialSnapshot as any)?.inputs ?? null}
+          />
+        ) : null}
+
+        {snapshots.length > 1 ? (
+          <section className="mt-6 rounded-md border p-4">
+            <div className="flex items-baseline justify-between gap-4">
+              <h2 className="text-base font-semibold">Snapshot history</h2>
+              <div className="text-xs text-muted-foreground">
+                {snapshots.length} snapshot{snapshots.length !== 1 ? "s" : ""}
+              </div>
+            </div>
+
+            <div className="mt-3 space-y-1">
+              {snapshots.map((s) => {
+                const isCurrent = effectiveSnapshotRow?.id === s.id;
+                const modeParam = isSharedMode ? "&mode=shared" : "";
+                const href =
+                  s.id === latestSnapshotId
+                    ? `/deal/${dealId}${isSharedMode ? "?mode=shared" : ""}`
+                    : `/deal/${dealId}?snapshot=${s.id}${modeParam}`;
+
+                return (
+                  <Link
+                    key={s.id}
+                    href={href}
+                    className={`flex items-center justify-between gap-3 rounded-md px-3 py-2 text-xs transition-colors ${
+                      isCurrent
+                        ? "bg-primary/10 font-medium"
+                        : "hover:bg-muted/50"
                     }`}
                   >
-                    {entry.type === "SNAPSHOT" ? "SNAP" : "EVT"}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-baseline justify-between gap-2">
-                      {entry.href ? (
-                        <Link href={entry.href} className="font-medium underline">
-                          {entry.title}
-                        </Link>
-                      ) : (
-                        <span className="font-medium">{entry.title}</span>
-                      )}
-                      <span className="shrink-0 text-muted-foreground">
-                        {entry.created_at
-                          ? new Date(entry.created_at).toLocaleString()
-                          : "—"}
+                    <span className="flex items-center gap-2">
+                      {s.id === latestSnapshotId ? (
+                        <span className="rounded bg-primary/20 px-1.5 py-0.5 text-[10px] font-medium">
+                          Latest
+                        </span>
+                      ) : null}
+                      <span className="text-muted-foreground">
+                        v{s.contract_version} / s{s.schema_version}
                       </span>
-                    </div>
-                    {entry.subtitle ? (
-                      <div className="mt-0.5 text-muted-foreground">
-                        {entry.subtitle}
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              ),
-            )}
+                    </span>
+                    <span className="text-muted-foreground">
+                      {new Date(s.created_at).toLocaleString()}
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
+
+        <section className="mt-6 rounded-md border p-4">
+          <div className="flex items-baseline justify-between gap-4">
+            <h2 className="text-base font-semibold">Timeline</h2>
+            <div className="text-xs text-muted-foreground">
+              {timeline.length} entr{timeline.length !== 1 ? "ies" : "y"}
+            </div>
           </div>
-        )}
-      </section>
 
-      {role === "OWNER" && !readOnly && userPersona !== "realtor" ? (
-        <div className="mt-6 space-y-4">
-          <ShareDealCard dealId={dealId} />
-          <ManageAccessPanel dealId={dealId} />
+          {timeline.length === 0 ? (
+            <p className="mt-3 text-sm text-muted-foreground">
+              No activity recorded for this deal.
+            </p>
+          ) : (
+            <div className="mt-4 space-y-2">
+              {timeline.map((entry) =>
+                entry.type === "VERSION" ? (
+                  <VersionTimelineCard
+                    key={`${entry.type}-${entry.id}`}
+                    entry={entry}
+                  />
+                ) : (
+                  <div
+                    key={`${entry.type}-${entry.id}`}
+                    className="flex items-start gap-3 rounded-md px-3 py-2 text-xs hover:bg-muted/50"
+                  >
+                    <span
+                      className={`mt-0.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                        entry.type === "SNAPSHOT"
+                          ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                          : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                      }`}
+                    >
+                      {entry.type === "SNAPSHOT" ? "SNAP" : "EVT"}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-baseline justify-between gap-2">
+                        {entry.href ? (
+                          <Link
+                            href={entry.href}
+                            className="font-medium underline"
+                          >
+                            {entry.title}
+                          </Link>
+                        ) : (
+                          <span className="font-medium">{entry.title}</span>
+                        )}
+                        <span className="shrink-0 text-muted-foreground">
+                          {entry.created_at
+                            ? new Date(entry.created_at).toLocaleString()
+                            : "—"}
+                        </span>
+                      </div>
+                      {entry.subtitle ? (
+                        <div className="mt-0.5 text-muted-foreground">
+                          {entry.subtitle}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                ),
+              )}
+            </div>
+          )}
+        </section>
+
+        {role === "OWNER" && !readOnly && userPersona !== "realtor" ? (
+          <div className="mt-6 space-y-4">
+            <ShareDealCard dealId={dealId} />
+            <ManageAccessPanel dealId={dealId} />
+          </div>
+        ) : null}
+
+        <div className="mt-6 flex gap-4">
+          <Link className="text-sm underline" href="/dashboard">
+            Back to Dashboard
+          </Link>
+          <Link className="text-sm underline" href="/me">
+            Back to my account
+          </Link>
         </div>
-      ) : null}
-
-      <div className="mt-6 flex gap-4">
-        <Link className="text-sm underline" href="/dashboard">
-          Back to Dashboard
-        </Link>
-        <Link className="text-sm underline" href="/me">
-          Back to my account
-        </Link>
-      </div>
-    </main>
+      </main>
     </div>
   );
 }

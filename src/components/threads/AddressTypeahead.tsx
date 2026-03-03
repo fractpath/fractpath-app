@@ -7,7 +7,7 @@ type Suggestion = {
   place_id: string;
 };
 
-type ResolvedProperty = {
+export type ResolvedProperty = {
   property_id: string;
   display_address: string;
   property_status: string | null;
@@ -17,9 +17,22 @@ type ResolvedProperty = {
 type Props = {
   onResolved: (result: ResolvedProperty) => void;
   initialValue?: string;
+
+  /** Sprint 13 integration controls */
+  inputTestId?: string;
+  placeholder?: string;
+  showLabel?: boolean;
+  label?: string;
 };
 
-export function AddressTypeahead({ onResolved, initialValue = "" }: Props) {
+export function AddressTypeahead({
+  onResolved,
+  initialValue = "",
+  inputTestId = "address-typeahead-input",
+  placeholder = "Start typing an address...",
+  showLabel = true,
+  label = "Property Address",
+}: Props) {
   const [query, setQuery] = useState(initialValue);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -46,8 +59,9 @@ export function AddressTypeahead({ onResolved, initialValue = "" }: Props) {
       if (!res.ok) return;
       const data = await res.json();
       if (!controller.signal.aborted) {
-        setSuggestions(data.suggestions ?? []);
-        setShowDropdown((data.suggestions ?? []).length > 0);
+        const next = (data.suggestions ?? []) as Suggestion[];
+        setSuggestions(next);
+        setShowDropdown(next.length > 0);
       }
     } catch {
       // aborted or network error — ignore
@@ -94,7 +108,7 @@ export function AddressTypeahead({ onResolved, initialValue = "" }: Props) {
         });
       }
     } catch {
-      // network error
+      // network error — ignore
     } finally {
       setResolving(false);
     }
@@ -110,21 +124,26 @@ export function AddressTypeahead({ onResolved, initialValue = "" }: Props) {
 
   return (
     <div className="relative">
-      <label className="mb-1 block text-sm font-medium text-gray-700">
-        Property Address
-      </label>
+      {showLabel ? (
+        <label className="mb-1 block text-sm font-medium text-gray-700">
+          {label}
+        </label>
+      ) : null}
+
       <input
         type="text"
         value={query}
         onChange={(e) => handleInputChange(e.target.value)}
-        placeholder="Start typing an address..."
+        placeholder={placeholder}
         className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        data-testid="address-typeahead-input"
+        data-testid={inputTestId}
       />
-      {resolving && (
+
+      {resolving ? (
         <p className="mt-1 text-xs text-gray-500">Resolving property...</p>
-      )}
-      {showDropdown && suggestions.length > 0 && (
+      ) : null}
+
+      {showDropdown && suggestions.length > 0 ? (
         <ul
           className="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded-md border border-gray-200 bg-white shadow-lg"
           data-testid="address-suggestions"
@@ -141,7 +160,7 @@ export function AddressTypeahead({ onResolved, initialValue = "" }: Props) {
             </li>
           ))}
         </ul>
-      )}
+      ) : null}
     </div>
   );
 }
