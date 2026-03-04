@@ -29,9 +29,9 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 export async function POST(
   _request: NextRequest,
-  context: { params: Promise<{ dealId: string }> },
+  ctx: { params: Promise<{ dealId: string }> },
 ) {
-  const { dealId } = await context.params;
+  const { dealId } = await ctx.params;
 
   if (!isUuid(dealId)) return jsonError("Invalid deal ID", 400);
 

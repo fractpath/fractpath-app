@@ -52,7 +52,7 @@ async function requireActiveOwner(
 
 export async function POST(
   _request: NextRequest,
-  context: { params: Promise<{ dealId: string }> },
+  ctx: { params: Promise<{ dealId: string }> },
 ) {
   try {
     const supabase = await createClient();
@@ -65,7 +65,7 @@ export async function POST(
       return jsonError("Auth error", 401, { detail: userErr.message });
     if (!user) return jsonError("Unauthorized", 401);
 
-    const { dealId } = await context.params;
+    const { dealId } = await ctx.params;
 
     const ownerCheck = await requireActiveOwner(supabase, dealId, user.id);
     if (!ownerCheck.ok)

@@ -9,7 +9,7 @@ function jsonError(message: string, status = 400) {
 
 export async function GET(
   _request: NextRequest,
-  context: { params: Promise<{ dealId: string }> },
+  ctx: { params: Promise<{ dealId: string }> },
 ) {
   const supabase = await createClient();
   const {
@@ -20,7 +20,7 @@ export async function GET(
   if (userErr) return jsonError("Auth error", 401);
   if (!user) return jsonError("Unauthorized", 401);
 
-  const { dealId } = await context.params;
+  const { dealId } = await ctx.params;
 
   const { data: deal, error: fetchError } = await supabase
     .from("deals")

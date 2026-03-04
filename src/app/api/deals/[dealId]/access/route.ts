@@ -10,7 +10,7 @@ function jsonError(message: string, status = 400, extra?: any) {
 
 export async function GET(
   _request: NextRequest,
-  context: { params: Promise<{ dealId: string }> },
+  ctx: { params: Promise<{ dealId: string }> },
 ) {
   try {
     const supabase = await createClient();
@@ -23,7 +23,7 @@ export async function GET(
       return jsonError("Auth error", 401, { detail: userErr.message });
     if (!user) return jsonError("Unauthorized", 401);
 
-    const { dealId } = await context.params;
+    const { dealId } = await ctx.params;
 
     const { data: ownerGrant, error: ownerErr } = await (
       supabase.from("deal_access_grants") as any

@@ -13,7 +13,7 @@ function jsonError(message: string, status = 400, extra?: any) {
 
 export async function POST(
   _request: NextRequest,
-  context: { params: Promise<{ dealId: string }> },
+  ctx: { params: Promise<{ dealId: string }> },
 ) {
   try {
     const supabase = await createClient();
@@ -26,7 +26,7 @@ export async function POST(
       return jsonError("Auth error", 401, { detail: userErr.message });
     if (!user) return jsonError("Unauthorized", 401);
 
-    const { dealId } = await context.params;
+    const { dealId } = await ctx.params;
 
     // Verify active OWNER grant (belt-and-suspenders; DB/RLS also enforces)
     const { data: ownerGrant, error: ownerErr } = await (

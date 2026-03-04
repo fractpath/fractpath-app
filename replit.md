@@ -63,3 +63,6 @@ FractPath is built with Next.js, leveraging API routes for backend logic and Sup
 - **@fractpath/compute:** Canonical compute engine package.
 - **fractpath-calculator-widget:** UI components and compute utilities package.
 - **sharp:** Server-side image processing for document upload hardening (EXIF rotation, resize, JPEG transcode, metadata stripping).
+
+## Coding Conventions
+- **Route Handler Params (Next.js 16):** All API route handlers in `src/app/api/**/route.ts` MUST use the Promise params pattern: `ctx: { params: Promise<{ key: string }> }` with `const { key } = await ctx.params;`. Do NOT use the non-Promise `{ params }: { params: { key: string } }` pattern — it does not compile in Next.js 16. Run `npm run lint:route-params` to verify compliance.

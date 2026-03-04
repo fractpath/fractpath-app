@@ -7,10 +7,11 @@ function jsonError(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
 }
 
-type RouteContext = { params: { dealId: string } | Promise<{ dealId: string }> };
-
-export async function PATCH(request: NextRequest, ctx: RouteContext) {
-  const { dealId } = await Promise.resolve(ctx.params);
+export async function PATCH(
+  request: NextRequest,
+  ctx: { params: Promise<{ dealId: string }> },
+) {
+  const { dealId } = await ctx.params;
 
   if (!dealId) return jsonError("Missing dealId", 400);
 
@@ -70,8 +71,11 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
   return NextResponse.json({ ok: true });
 }
 
-export async function GET(_request: NextRequest, ctx: RouteContext) {
-  const { dealId } = await Promise.resolve(ctx.params);
+export async function GET(
+  _request: NextRequest,
+  ctx: { params: Promise<{ dealId: string }> },
+) {
+  const { dealId } = await ctx.params;
 
   if (!dealId) return jsonError("Missing dealId", 400);
 

@@ -15,7 +15,7 @@ export const runtime = "nodejs";
 
 export async function POST(
   request: NextRequest,
-  context: { params: Promise<{ dealId: string }> },
+  ctx: { params: Promise<{ dealId: string }> },
 ) {
   const supabase = await createClient();
 
@@ -38,7 +38,7 @@ export async function POST(
     );
   }
 
-  const { dealId } = await context.params;
+  const { dealId } = await ctx.params;
 
   let body: any = null;
   try {
