@@ -8,8 +8,10 @@ function json(status: number, body: any) {
   return NextResponse.json(body, { status });
 }
 
+// NOTE: DB constraint only allows deal_threads.status = pending_owner|accepted.
+// So "withdraw" is implemented as DELETE of the pending_owner thread + children.
 export async function POST(
-  req: NextRequest,
+  _req: NextRequest,
   ctx: { params: Promise<{ threadId: string }> },
 ) {
   const supabase = await createClient();
@@ -39,11 +41,20 @@ export async function POST(
     });
   }
 
-  const { error: updErr } = await (svc.from("deal_threads") as any)
-    .update({ status: "withdrawn" })
+  // Best-effort cascade cleanup (ignore errors; final delete is the key)
+  await (svc.from("deal_thread_participants") as any)
+    .delete()
+    .eq("thread_id", threadId);
+
+  await (svc.from("thread_invites") as any).delete().eq("thread_id", threadId);
+
+  await (svc.from("deal_proposals") as any).delete().eq("thread_id", threadId);
+
+  const { error: delErr } = await (svc.from("deal_threads") as any)
+    .delete()
     .eq("id", threadId);
 
-  if (updErr) return json(500, { error: updErr.message });
+  if (delErr) return json(500, { error: delErr.message });
 
   if (thread.deal_id) {
     await (svc.from("deal_events") as any).insert({
@@ -54,5 +65,6 @@ export async function POST(
     });
   }
 
-  return json(200, { ok: true, status: "withdrawn" });
+  // Logical status "withdrawn" even though the row is deleted.
+  return json(200, { ok: true, status: "withdrawn", deleted: true });
 }

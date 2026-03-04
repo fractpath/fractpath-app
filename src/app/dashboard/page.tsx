@@ -125,6 +125,18 @@ type CardVm = {
   fmvRaw: number | null;
 };
 
+type NextStepVm = {
+  key: string;
+  title: string;
+  description?: string | null;
+  href: string;
+  cta: string;
+};
+
+function pickFirst<T>(arr: T[] | null | undefined): T | null {
+  return arr && arr.length ? arr[0] : null;
+}
+
 export default async function DashboardPage({ searchParams }: PageProps) {
   const resolvedSearchParams = (await Promise.resolve(searchParams as any)) as
     | SearchParams
@@ -166,7 +178,12 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       : "homeowner";
 
   const welcome = PERSONA_WELCOME[persona];
-  const steps = NEXT_STEPS[persona];
+
+  const pickFirst = <T,>(arr: T[] | null | undefined): T | null =>
+    arr && arr.length ? arr[0] : null;
+
+  // default fallback (will be overridden by dynamic steps if we find a match)
+  let steps: any[] = NEXT_STEPS[persona] as any[];
 
   const grantsRes = await supabase
     .from("deal_access_grants")
@@ -196,6 +213,135 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       </div>
     );
   }
+
+  // ------------------------------
+  // Sprint 13 Phase 5: Dynamic Next Steps (minimal drift)
+  // ------------------------------
+
+  // 1) property needs verification
+  const [{ data: myProperties }, { data: myThreads }] = await Promise.all([
+    supabase
+      .from("properties")
+      .select("id,status,created_at")
+      .eq("owner_user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(25),
+
+    supabase
+      .from("deal_threads")
+      .select(
+        "id,status,deal_id,property_id,owner_user_id,buyer_user_id,created_at",
+      )
+      .or(`owner_user_id.eq.${user.id},buyer_user_id.eq.${user.id}`)
+      .order("created_at", { ascending: false })
+      .limit(50),
+  ]);
+
+  const threads = myThreads ?? [];
+  const props = myProperties ?? [];
+
+  const dealIdsWithThreads = new Set(
+    threads.map((t: any) => t.deal_id).filter(Boolean) as string[],
+  );
+
+  // deals I own (for "ready to submit" check)
+  const myDealsRes = await supabase
+    .from("deals")
+    .select("id,created_at,created_by_user_id,user_id")
+    .or(`created_by_user_id.eq.${user.id},user_id.eq.${user.id}`)
+    .order("created_at", { ascending: false })
+    .limit(50);
+
+  const myDeals = myDealsRes.data ?? [];
+  const myDealIds = myDeals.map((d: any) => d.id).filter(Boolean) as string[];
+
+  // snapshots for my deals (presence indicates "ready")
+  const mySnapshotsRes =
+    myDealIds.length > 0
+      ? await supabase
+          .from("deal_snapshots")
+          .select("deal_id,created_at")
+          .in("deal_id", myDealIds)
+          .order("created_at", { ascending: false })
+      : { data: [] as any[] };
+
+  const mySnapshots = (mySnapshotsRes as any).data ?? [];
+  const hasSnapshot = (dealId: string) =>
+    mySnapshots.some((s: any) => s.deal_id === dealId);
+
+  // Priority 1: needs verification
+  const needsVerification = pickFirst(
+    props.filter((p: any) => p.status && p.status !== "verified"),
+  );
+
+  // Priority 2: owner has offer to review
+  const ownerPendingThread = pickFirst(
+    threads.filter(
+      (t: any) => t.status === "pending_owner" && t.owner_user_id === user.id,
+    ),
+  );
+
+  // Priority 3: buyer deal ready to submit (owned by me + has snapshot + no active thread)
+  const buyerReadyDeal = pickFirst(
+    myDeals.filter((d: any) => {
+      const dealId = d.id as string;
+      const ownedByMe =
+        d.created_by_user_id === user.id || d.user_id === user.id;
+      return (
+        ownedByMe && hasSnapshot(dealId) && !dealIdsWithThreads.has(dealId)
+      );
+    }),
+  );
+
+  // Priority 4: buyer waiting for owner
+  const buyerWaitingThread = pickFirst(
+    threads.filter(
+      (t: any) => t.status === "pending_owner" && t.buyer_user_id === user.id,
+    ),
+  );
+
+  const dynamicSteps: any[] = [];
+
+  if (needsVerification) {
+    dynamicSteps.push({
+      key: "verify-property",
+      title: "Verify your property",
+      description: "Complete verification to unlock offers and deal workflows.",
+      href: "/me",
+      cta: "Go to verification",
+    });
+  } else if (ownerPendingThread?.deal_id) {
+    dynamicSteps.push({
+      key: "owner-review-offer",
+      title: "Review an offer",
+      description: "You have a deal waiting for your review.",
+      href: `/deal/${ownerPendingThread.deal_id}#offer`,
+      cta: "Review offer",
+    });
+  } else if (buyerReadyDeal?.id) {
+    dynamicSteps.push({
+      key: "buyer-submit-offer",
+      title: "Submit your offer",
+      description:
+        "Your deal has a snapshot and is ready to send to the owner.",
+      href: `/deal/${buyerReadyDeal.id}#offer`,
+      cta: "Submit offer",
+    });
+  } else if (buyerWaitingThread?.deal_id) {
+    dynamicSteps.push({
+      key: "buyer-waiting",
+      title: "Waiting on the owner",
+      description: "Your offer is pending the owner’s review.",
+      href: `/deal/${buyerWaitingThread.deal_id}#offer`,
+      cta: "View offer",
+    });
+  }
+
+  if (dynamicSteps.length) {
+    steps = dynamicSteps;
+  }
+
+  // (rest of your DashboardPage continues unchanged…)
 
   const grants = grantsRes.data ?? [];
 
@@ -268,9 +414,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     const tone = STATUS_TONE[rawStatus] ?? "gray";
 
     const href =
-      grantRole === "OWNER"
-        ? `/deal/${dealId}`
-        : `/deal/${dealId}?mode=shared`;
+      grantRole === "OWNER" ? `/deal/${dealId}` : `/deal/${dealId}?mode=shared`;
 
     const title = (header.title ?? "").trim() || "Untitled deal";
 
@@ -305,8 +449,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     const updated = relativeAge(snapDateByDeal.get(dealId) ?? null, NOW_MS);
     if (updated) metaParts.push(updated);
 
-    const metaLine =
-      metaParts.length > 0 ? metaParts.join("  \u00B7  ") : null;
+    const metaLine = metaParts.length > 0 ? metaParts.join("  \u00B7  ") : null;
 
     return {
       dealId,
@@ -349,113 +492,196 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     .reduce((sum, c) => sum + (c.fmvRaw ?? 0), 0);
 
   return (
-      <div>
-        <AppHeader />
-        <OnboardingGate />
-        <main className="mx-auto max-w-3xl p-6 space-y-8">
-          <header>
-            <h1 className="text-2xl font-semibold">{welcome.tagline}</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {welcome.description}
+    <div>
+      <AppHeader />
+      <OnboardingGate />
+      <main className="mx-auto max-w-3xl p-6 space-y-8">
+        <header>
+          <h1 className="text-2xl font-semibold">{welcome.tagline}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {welcome.description}
+          </p>
+        </header>
+
+        {createFailed ? (
+          <div className="rounded-lg border p-4">
+            <div className="text-sm font-medium">Deal creation failed</div>
+            <div className="mt-1 text-sm text-muted-foreground">
+              Please try again.{" "}
+              {createCode ? (
+                <span className="break-words">Error code: {createCode}</span>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="rounded-lg border bg-background p-4">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Total Deals
+            </div>
+            <div className="mt-1 text-lg font-semibold">{totalDeals}</div>
+          </div>
+          <div className="rounded-lg border bg-background p-4">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              In Progress
+            </div>
+            <div className="mt-1 text-lg font-semibold">{inProgress}</div>
+          </div>
+          <div className="rounded-lg border bg-background p-4">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Shared With Me
+            </div>
+            <div className="mt-1 text-lg font-semibold">{sharedCount}</div>
+          </div>
+          <div className="rounded-lg border bg-background p-4">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Follow-ups Due
+            </div>
+            <div className="mt-1 text-lg font-semibold">{followUpsDue}</div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div className="rounded-lg border bg-background p-4">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Total Potential Value
+            </div>
+            <div className="mt-1 text-lg font-semibold">
+              {totalPotentialValue > 0
+                ? fmtMoneyAbbrev(totalPotentialValue)
+                : "\u2014"}
+            </div>
+          </div>
+          <div className="rounded-lg border bg-background p-4">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Total Active Value
+            </div>
+            <div className="mt-1 text-lg font-semibold">
+              {totalActiveValue > 0
+                ? fmtMoneyAbbrev(totalActiveValue)
+                : "\u2014"}
+            </div>
+          </div>
+        </div>
+
+        <section className="space-y-6">
+          <div>
+            <h2 className="text-lg font-semibold">Next steps</h2>
+            <p className="text-sm text-muted-foreground">
+              Your personalized action items
             </p>
-          </header>
-
-          {createFailed ? (
-            <div className="rounded-lg border p-4">
-              <div className="text-sm font-medium">Deal creation failed</div>
-              <div className="mt-1 text-sm text-muted-foreground">
-                Please try again.{" "}
-                {createCode ? (
-                  <span className="break-words">Error code: {createCode}</span>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="rounded-lg border bg-background p-4">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                Total Deals
-              </div>
-              <div className="mt-1 text-lg font-semibold">{totalDeals}</div>
-            </div>
-            <div className="rounded-lg border bg-background p-4">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                In Progress
-              </div>
-              <div className="mt-1 text-lg font-semibold">{inProgress}</div>
-            </div>
-            <div className="rounded-lg border bg-background p-4">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                Shared With Me
-              </div>
-              <div className="mt-1 text-lg font-semibold">{sharedCount}</div>
-            </div>
-            <div className="rounded-lg border bg-background p-4">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                Follow-ups Due
-              </div>
-              <div className="mt-1 text-lg font-semibold">{followUpsDue}</div>
-            </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="rounded-lg border bg-background p-4">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                Total Potential Value
-              </div>
-              <div className="mt-1 text-lg font-semibold">
-                {totalPotentialValue > 0
-                  ? fmtMoneyAbbrev(totalPotentialValue)
-                  : "\u2014"}
-              </div>
-            </div>
-            <div className="rounded-lg border bg-background p-4">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                Total Active Value
-              </div>
-              <div className="mt-1 text-lg font-semibold">
-                {totalActiveValue > 0
-                  ? fmtMoneyAbbrev(totalActiveValue)
-                  : "\u2014"}
-              </div>
-            </div>
-          </div>
+          <div className="rounded-lg border p-5">
+            <ol className="list-decimal pl-5 text-sm text-muted-foreground space-y-1.5">
+              {steps.map((step: any, i: number) => {
+                const title =
+                  typeof step === "string"
+                    ? step
+                    : typeof step?.title === "string"
+                      ? step.title
+                      : typeof step?.label === "string"
+                        ? step.label
+                        : "Next step";
 
-          <section className="space-y-6">
+                const href =
+                  typeof step?.href === "string"
+                    ? step.href
+                    : typeof step?.to === "string"
+                      ? step.to
+                      : null;
+
+                const cta =
+                  typeof step?.cta === "string"
+                    ? step.cta
+                    : typeof step?.actionLabel === "string"
+                      ? step.actionLabel
+                      : null;
+
+                return (
+                  <li key={i}>
+                    {href ? (
+                      <Link
+                        href={href}
+                        className="underline hover:text-foreground"
+                      >
+                        {title}
+                        {cta ? ` — ${cta}` : ""}
+                      </Link>
+                    ) : (
+                      title
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+          </div>
+        </section>
+
+        <section className="space-y-6">
+          <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-semibold">Next steps</h2>
+              <h2 className="text-lg font-semibold">My deals</h2>
               <p className="text-sm text-muted-foreground">
-                Your personalized action items
+                Deals you own and manage
               </p>
             </div>
-            <div className="rounded-lg border p-5">
-              <ol className="list-decimal pl-5 text-sm text-muted-foreground space-y-1.5">
-                {steps.map((step, i) => (
-                  <li key={i}>{step}</li>
-                ))}
-              </ol>
-            </div>
-          </section>
+            <Link
+              href="/deal/new"
+              className="inline-flex items-center rounded-md bg-foreground px-3 py-1.5 text-sm font-medium text-background"
+            >
+              + Create Deal
+            </Link>
+          </div>
 
-          <section className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-semibold">My deals</h2>
-                <p className="text-sm text-muted-foreground">
-                  Deals you own and manage
-                </p>
-              </div>
+          <div className="space-y-2">
+            {ownerCards.map((vm) => (
+              <DealCard
+                key={vm.dealId}
+                href={vm.href}
+                title={vm.title}
+                secondaryFmvLabel={vm.secondaryFmvLabel}
+                kpiLine={vm.kpiLine}
+                metaLine={vm.metaLine}
+                statusLabel={vm.statusLabel}
+                statusTone={vm.statusTone}
+                roleChipLabel={vm.roleChipLabel}
+              />
+            ))}
+
+            {ownerCards.length === 0 ? (
               <Link
                 href="/deal/new"
-                className="inline-flex items-center rounded-md bg-foreground px-3 py-1.5 text-sm font-medium text-background"
+                className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed p-6 transition-colors hover:bg-muted/40 cursor-pointer"
               >
-                + Create Deal
+                <span className="text-2xl text-muted-foreground">+</span>
+                <span className="text-sm font-medium">Create Deal</span>
+                <span className="text-xs text-muted-foreground">
+                  Start a new scenario
+                </span>
               </Link>
-            </div>
+            ) : null}
+          </div>
+        </section>
 
+        <section className="space-y-6">
+          <div>
+            <h2 className="text-lg font-semibold">Shared with me</h2>
+            <p className="text-sm text-muted-foreground">
+              Deals others have shared with you
+            </p>
+          </div>
+
+          {viewerCards.length === 0 ? (
+            <div className="rounded-lg border p-4">
+              <p className="text-sm text-muted-foreground">
+                Nothing has been shared with you yet.
+              </p>
+            </div>
+          ) : (
             <div className="space-y-2">
-              {ownerCards.map((vm) => (
+              {viewerCards.map((vm) => (
                 <DealCard
                   key={vm.dealId}
                   href={vm.href}
@@ -468,72 +694,27 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                   roleChipLabel={vm.roleChipLabel}
                 />
               ))}
-
-              {ownerCards.length === 0 ? (
-                <Link
-                  href="/deal/new"
-                  className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed p-6 transition-colors hover:bg-muted/40 cursor-pointer"
-                >
-                  <span className="text-2xl text-muted-foreground">+</span>
-                  <span className="text-sm font-medium">Create Deal</span>
-                  <span className="text-xs text-muted-foreground">
-                    Start a new scenario
-                  </span>
-                </Link>
-              ) : null}
             </div>
-          </section>
+          )}
+        </section>
 
-          <section className="space-y-6">
-            <div>
-              <h2 className="text-lg font-semibold">Shared with me</h2>
-              <p className="text-sm text-muted-foreground">
-                Deals others have shared with you
-              </p>
-            </div>
+        <section className="rounded-lg border p-5">
+          <h2 className="text-lg font-semibold">Need help?</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Our team is here to guide you through every step.
+          </p>
+          <a
+            href="mailto:support@fractpath.com"
+            className="mt-3 inline-block rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background"
+          >
+            Contact FractPath
+          </a>
+        </section>
 
-            {viewerCards.length === 0 ? (
-              <div className="rounded-lg border p-4">
-                <p className="text-sm text-muted-foreground">
-                  Nothing has been shared with you yet.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {viewerCards.map((vm) => (
-                  <DealCard
-                    key={vm.dealId}
-                    href={vm.href}
-                    title={vm.title}
-                    secondaryFmvLabel={vm.secondaryFmvLabel}
-                    kpiLine={vm.kpiLine}
-                    metaLine={vm.metaLine}
-                    statusLabel={vm.statusLabel}
-                    statusTone={vm.statusTone}
-                    roleChipLabel={vm.roleChipLabel}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
-
-          <section className="rounded-lg border p-5">
-            <h2 className="text-lg font-semibold">Need help?</h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Our team is here to guide you through every step.
-            </p>
-            <a
-              href="mailto:support@fractpath.com"
-              className="mt-3 inline-block rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background"
-            >
-              Contact FractPath
-            </a>
-          </section>
-
-          <footer className="pt-4 border-t text-xs text-muted-foreground text-center">
-            Signed in as {user.email}
-          </footer>
-        </main>
-      </div>
+        <footer className="pt-4 border-t text-xs text-muted-foreground text-center">
+          Signed in as {user.email}
+        </footer>
+      </main>
+    </div>
   );
 }

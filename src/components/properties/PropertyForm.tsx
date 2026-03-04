@@ -7,7 +7,6 @@ import {
   AddressTypeahead,
   type ResolvedProperty,
 } from "@/components/threads/AddressTypeahead";
-import heic2any from "heic2any";
 
 async function normalizeUploadToJpeg(file: File): Promise<File> {
   const name = file.name || "upload";
@@ -21,6 +20,8 @@ async function normalizeUploadToJpeg(file: File): Promise<File> {
     lower.endsWith(".heif");
 
   if (!isHeic) return file;
+
+  const { default: heic2any } = await import("heic2any");
 
   const blob = (await heic2any({
     blob: file,
@@ -281,11 +282,15 @@ export function PropertyForm(props: {
           }
         } else {
           setResolved(r as ResolvedFull);
-          setResolveError("Couldn\u2019t normalize address yet \u2014 you can still save and fix later.");
+          setResolveError(
+            "Couldn\u2019t normalize address yet \u2014 you can still save and fix later.",
+          );
         }
       } catch {
         setResolved(r as ResolvedFull);
-        setResolveError("Couldn\u2019t normalize address yet \u2014 you can still save and fix later.");
+        setResolveError(
+          "Couldn\u2019t normalize address yet \u2014 you can still save and fix later.",
+        );
       } finally {
         setIsResolving(false);
       }
@@ -295,11 +300,19 @@ export function PropertyForm(props: {
   const isOwnerMode = mode === "owner";
   const allFilesPresent =
     isEdit || !isOwnerMode || Object.values(files).every((f) => f !== null);
-  const addressValid = !!resolved?.property_id || (isEdit && !!address_line1.trim());
+  const addressValid =
+    !!resolved?.property_id || (isEdit && !!address_line1.trim());
   const canSubmitOwner =
-    isOwnerMode && addressValid && allFilesPresent && !submitting && !isResolving;
+    isOwnerMode &&
+    addressValid &&
+    allFilesPresent &&
+    !submitting &&
+    !isResolving;
   const canSubmitInvestor =
-    !isOwnerMode && !!resolved?.property_id && !resolved?.has_blocking_deal && !isResolving;
+    !isOwnerMode &&
+    !!resolved?.property_id &&
+    !resolved?.has_blocking_deal &&
+    !isResolving;
 
   async function handleSubmitOwner() {
     if (!canSubmitOwner) return;
@@ -455,9 +468,7 @@ export function PropertyForm(props: {
               </p>
             )}
             {resolveError && !isResolving && (
-              <p className="mt-1 text-xs text-amber-600">
-                {resolveError}
-              </p>
+              <p className="mt-1 text-xs text-amber-600">{resolveError}</p>
             )}
           </div>
         )}
@@ -484,8 +495,9 @@ export function PropertyForm(props: {
 
         {!isEdit && mode === "owner" && !resolved && (
           <div className="text-sm text-muted-foreground">
-            You&apos;re adding a home you own. To unlock full features, you&apos;ll
-            complete a quick verification step after saving the address.
+            You&apos;re adding a home you own. To unlock full features,
+            you&apos;ll complete a quick verification step after saving the
+            address.
           </div>
         )}
 

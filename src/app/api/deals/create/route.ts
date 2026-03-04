@@ -65,23 +65,49 @@ export async function POST(request: NextRequest) {
 
     const { data: dealId, error: rpcErr } = await supabase.rpc(
       "create_deal_with_owner_grant_v2",
-      { p_user_id: user.id },
+      {
+        p_user_id: user.id,
+      },
     );
 
     if (rpcErr || !dealId) {
-      console.error("CREATE_DEAL_RPC_FAILED", rpcErr?.message);
-      return jsonError("Failed to create deal", 500);
+      console.error("CREATE_DEAL_RPC_FAILED", {
+        rpcErr,
+        userId: user?.id,
+      });
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "CREATE_DEAL_RPC_FAILED",
+          details: rpcErr,
+        },
+        { status: 500 },
+      );
     }
 
     const rawHeader = (body as any)?.header;
     const headerObj =
       rawHeader && typeof rawHeader === "object" && !Array.isArray(rawHeader)
         ? {
-            title: typeof rawHeader.title === "string" ? rawHeader.title : undefined,
-            display_address: typeof rawHeader.display_address === "string" ? rawHeader.display_address : undefined,
-            property_id: typeof rawHeader.property_id === "string" ? rawHeader.property_id : undefined,
-            property_status: typeof rawHeader.property_status === "string" ? rawHeader.property_status : undefined,
-            ownership_status: typeof rawHeader.ownership_status === "string" ? rawHeader.ownership_status : undefined,
+            title:
+              typeof rawHeader.title === "string" ? rawHeader.title : undefined,
+            display_address:
+              typeof rawHeader.display_address === "string"
+                ? rawHeader.display_address
+                : undefined,
+            property_id:
+              typeof rawHeader.property_id === "string"
+                ? rawHeader.property_id
+                : undefined,
+            property_status:
+              typeof rawHeader.property_status === "string"
+                ? rawHeader.property_status
+                : undefined,
+            ownership_status:
+              typeof rawHeader.ownership_status === "string"
+                ? rawHeader.ownership_status
+                : undefined,
           }
         : undefined;
 
