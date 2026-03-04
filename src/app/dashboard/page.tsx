@@ -190,13 +190,15 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   const pendingOwnerThreadsRes = await supabase
     .from("deal_threads")
-    .select(`
+    .select(
+      `
       id,
       deal_id,
       status,
       property_id,
       properties!inner(owner_user_id)
-    `)
+    `,
+    )
     .eq("status", "pending_owner")
     .eq("properties.owner_user_id", user.id)
     .order("created_at", { ascending: false });
@@ -656,10 +658,10 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                 {pendingOwnerThreads.map((thread: any) => (
                   <li key={thread.id}>
                     <Link
-                      href={`/deal/${thread.deal_id}`}
+                      href={`/thread/${thread.id}`}
                       className="text-sm underline"
                     >
-                      Review offer for deal {String(thread.deal_id).slice(0, 8)}
+                      Review offer {thread.id.slice(0, 8)}
                     </Link>
                   </li>
                 ))}

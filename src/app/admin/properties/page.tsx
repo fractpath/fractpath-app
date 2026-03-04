@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { createServiceClient } from "@/lib/supabase/service";
+import { PropertyStatusButton } from "@/components/admin/PropertyStatusButton";
 
 type Status = "unverified" | "under_review" | "verified" | "archived";
 type Filter = "queue" | Status;
@@ -163,12 +164,26 @@ export default async function AdminPropertiesPage({
                     </td>
 
                     <td className="p-3">
-                      <a
-                        className="text-xs px-3 py-1 rounded border hover:bg-muted inline-block"
-                        href={`/admin/properties/${p.id}`}
-                      >
-                        Review
-                      </a>
+                      <div className="flex gap-1 flex-wrap">
+                        <PropertyStatusButton
+                          propertyId={p.id}
+                          currentStatus={p.status}
+                          targetStatus="verified"
+                          label="Verify"
+                        />
+                        <PropertyStatusButton
+                          propertyId={p.id}
+                          currentStatus={p.status}
+                          targetStatus="unverified"
+                          label="Unverify"
+                        />
+                        <a
+                          className="text-xs px-2 py-1 rounded border hover:bg-muted inline-block"
+                          href={`/admin/properties/${p.id}`}
+                        >
+                          Detail
+                        </a>
+                      </div>
                     </td>
                   </tr>
                 );
