@@ -5,6 +5,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { AdminPropertyActions } from "@/components/admin/AdminPropertyActions";
 import { PropertyDocumentsPreview } from "@/components/admin/PropertyDocumentsPreview";
 import { AdminPropertyStatusControls } from "@/components/admin/AdminPropertyStatusControls";
+import { AppHeader } from "@/components/layout/AppHeader";
 
 type DocType = "selfie" | "drivers_license" | "utility_bill";
 
@@ -46,9 +47,34 @@ export default async function AdminPropertyAuditPage({
   const { propertyId } = await params;
 
   const admin = await requireAdmin();
+
   if (!admin.ok) {
-    redirect(
-      `/login?returnTo=${encodeURIComponent(`/admin/properties/${propertyId}`)}`,
+    // If user is logged in but not an admin, do NOT send them to login.
+    // Only redirect to login when explicitly unauthorized (not authenticated).
+    if (admin.status === 401) {
+      redirect(`/login?returnTo=${encodeURIComponent("/admin/properties")}`);
+    }
+
+    return (
+      <div>
+        <AppHeader />
+        <main className="mx-auto max-w-3xl p-6 space-y-6">
+          <h1 className="text-2xl font-semibold">Admin</h1>
+          <div className="rounded-lg border p-4">
+            <div className="text-sm font-medium">Access denied</div>
+            <div className="mt-2 text-sm text-muted-foreground">
+              You are signed in as{" "}
+              <span className="font-mono">{admin.email ?? "unknown"}</span> but
+              do not have admin access.
+            </div>
+            <div className="mt-4">
+              <a className="text-sm underline" href="/dashboard">
+                Back to Dashboard
+              </a>
+            </div>
+          </div>
+        </main>
+      </div>
     );
   }
 

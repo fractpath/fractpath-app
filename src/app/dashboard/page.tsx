@@ -658,7 +658,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                 {pendingOwnerThreads.map((thread: any) => (
                   <li key={thread.id}>
                     <Link
-                      href={`/thread/${thread.id}`}
+                      href={`/threads/${thread.id}`}
                       className="text-sm underline"
                     >
                       Review offer {thread.id.slice(0, 8)}

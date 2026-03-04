@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { createServiceClient } from "@/lib/supabase/service";
 import { PropertyStatusButton } from "@/components/admin/PropertyStatusButton";
+import { AppHeader } from "@/components/layout/AppHeader";
 
 type Status = "unverified" | "under_review" | "verified" | "archived";
 type Filter = "queue" | Status;
@@ -32,11 +33,40 @@ export default async function AdminPropertiesPage({
   searchParams?: SearchParams | Promise<SearchParams>;
 }) {
   const admin = await requireAdmin();
+
   if (!admin.ok) {
-    redirect(`/login?returnTo=${encodeURIComponent("/admin/properties")}`);
+    // If user is logged in but not an admin, do NOT send them to login.
+    // Only redirect to login when explicitly unauthorized (not authenticated).
+    if (admin.status === 401) {
+      redirect(`/login?returnTo=${encodeURIComponent("/admin/properties")}`);
+    }
+
+    return (
+      <div>
+        <AppHeader />
+        <main className="mx-auto max-w-3xl p-6 space-y-6">
+          <h1 className="text-2xl font-semibold">Admin</h1>
+          <div className="rounded-lg border p-4">
+            <div className="text-sm font-medium">Access denied</div>
+            <div className="mt-2 text-sm text-muted-foreground">
+              You are signed in as{" "}
+              <span className="font-mono">{admin.email ?? "unknown"}</span> but
+              do not have admin access.
+            </div>
+            <div className="mt-4">
+              <a className="text-sm underline" href="/dashboard">
+                Back to Dashboard
+              </a>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
   }
 
-  const resolved = (await Promise.resolve(searchParams)) as SearchParams | undefined;
+  const resolved = (await Promise.resolve(searchParams)) as
+    | SearchParams
+    | undefined;
   const raw = resolved?.status;
   const filterRaw = Array.isArray(raw) ? raw[0] : raw;
   const filter: Filter = isFilter(filterRaw) ? filterRaw : "queue";

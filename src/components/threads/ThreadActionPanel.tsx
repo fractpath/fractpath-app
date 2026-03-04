@@ -23,6 +23,7 @@ export function ThreadActionPanel({
 }: Props) {
   const { data: verStatus, loading: verLoading } =
     useThreadVerificationStatus(threadId);
+
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
 
@@ -30,35 +31,6 @@ export function ThreadActionPanel({
   const finalized = ["accepted", "active", "declined", "closed"].includes(
     threadStatus,
   );
-
-  async function handleThreadDecision(decision: "accept" | "decline") {
-    setBusy(true);
-    setResult(null);
-    try {
-      const res = await fetch(`/api/threads/${threadId}/owner-decision`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decision }),
-      });
-
-      const body = await res.json();
-
-      setResult(
-        res.ok
-          ? `Thread ${body.status ?? "updated"}`
-          : (body.error ?? `Error ${res.status}`),
-      );
-
-      if (res.ok) {
-        await onDecisionComplete?.();
-      }
-    } catch (err: any) {
-      setResult(err?.message ?? "Network error");
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function handleProposalDecision(decision: "accept" | "reject") {
     if (!proposalId) return;
@@ -71,14 +43,19 @@ export function ThreadActionPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ decision }),
       });
+
       const body = await res.json();
+
       setResult(
         res.ok
-          ? `Proposal ${body.status ?? decision}ed`
+          ? `Proposal ${body.status ?? decision + "ed"}`
           : (body.error ?? `Error ${res.status}`),
       );
+
       if (res.ok) {
         await onDecisionComplete?.();
+        // Sprint 13: return owner to dashboard queue after a decision
+        window.location.href = "/dashboard";
       }
     } catch (err: any) {
       setResult(err?.message ?? "Network error");
@@ -99,9 +76,7 @@ export function ThreadActionPanel({
       });
       const body = await res.json();
       setResult(
-        res.ok
-          ? `Proposal submitted`
-          : (body.error ?? `Error ${res.status}`),
+        res.ok ? `Proposal submitted` : (body.error ?? `Error ${res.status}`),
       );
       if (res.ok) {
         await onDecisionComplete?.();
@@ -113,33 +88,32 @@ export function ThreadActionPanel({
     }
   }
 
+  // OWNER VIEW (Sprint 13): decisions happen at proposal level
   if (isOwner) {
+    const canDecideProposal =
+      !!proposalId &&
+      proposalStatus === "submitted" &&
+      threadStatus === "pending_owner" &&
+      !finalized;
+
     return (
       <div className="space-y-4">
         <VerificationGateBanner threadId={threadId} />
 
-        {!finalized && (
-          <div className="flex flex-wrap gap-3">
-            <button
-              data-testid="thread-accept-btn"
-              disabled={busy || verLoading || !acceptAllowed}
-              onClick={() => handleThreadDecision("accept")}
-              className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Accept Thread
-            </button>
-            <button
-              data-testid="thread-decline-btn"
-              disabled={busy}
-              onClick={() => handleThreadDecision("decline")}
-              className="rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-300 disabled:opacity-50"
-            >
-              Decline Thread
-            </button>
-          </div>
+        {!proposalId && !finalized && (
+          <p className="text-sm text-gray-500">
+            No proposal found for this thread yet.
+          </p>
         )}
 
-        {proposalId && proposalStatus === "submitted" && !finalized && (
+        {proposalId && proposalStatus !== "submitted" && !finalized && (
+          <p className="text-sm text-gray-600">
+            Latest proposal is{" "}
+            <span className="font-medium">{proposalStatus}</span>.
+          </p>
+        )}
+
+        {canDecideProposal && (
           <div className="flex flex-wrap gap-3">
             <button
               data-testid="proposal-accept-btn"
@@ -147,18 +121,32 @@ export function ThreadActionPanel({
               onClick={() => handleProposalDecision("accept")}
               className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Accept Proposal
+              Accept Offer
             </button>
+
             <button
               data-testid="proposal-reject-btn"
               disabled={busy}
               onClick={() => handleProposalDecision("reject")}
               className="rounded-md bg-red-100 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-200 disabled:opacity-50"
             >
-              Reject Proposal
+              Reject Offer
             </button>
           </div>
         )}
+
+        {!canDecideProposal &&
+          !finalized &&
+          proposalId &&
+          proposalStatus === "submitted" && (
+            <p className="text-sm text-gray-600">
+              This thread is <span className="font-medium">{threadStatus}</span>
+              . Owner decisions are available only when the thread is{" "}
+              <span className="font-medium">pending_owner</span>.
+            </p>
+          )}
+
+       
 
         {result && (
           <p className="text-sm text-gray-700" data-testid="action-result">
@@ -169,6 +157,7 @@ export function ThreadActionPanel({
     );
   }
 
+  // NON-OWNER VIEW
   return (
     <div className="space-y-4">
       {proposalId && proposalStatus === "draft" && !finalized && (
@@ -192,15 +181,12 @@ export function ThreadActionPanel({
 
       {!proposalId && !finalized && (
         <p className="text-sm text-gray-500">
-          Create a proposal in the deal editor to submit an offer on this thread.
+          Create a proposal in the deal editor to submit an offer on this
+          thread.
         </p>
       )}
 
-      {finalized && (
-        <p className="text-sm text-gray-500">
-          This thread has been {threadStatus}.
-        </p>
-      )}
+      {finalized ? null : null}
 
       {result && (
         <p className="text-sm text-gray-700" data-testid="action-result">

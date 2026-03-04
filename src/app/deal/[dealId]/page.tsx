@@ -1,96 +1,26 @@
-// src/app/deal/[dealId]/page.tsx
-
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
-import { DealHeader } from "@/components/deals/DealHeader";
-import { ActiveThreadBanner } from "@/components/deal/ActiveThreadBanner";
-import Link from "next/link";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { AppHeader } from "@/components/layout/AppHeader";
-import { ShareDealCard } from "@/components/ShareDealCard";
-import { DealSummary } from "@/components/deal/DealSummary";
-import { buildDealSummaryViewModel } from "@/lib/dealSummaryViewModel";
+import { DealHeader } from "@/components/deals/DealHeader";
 import { DealDetailWidgetPanel } from "@/components/deal/DealDetailWidgetPanel";
-import { RecomputeSnapshotButton } from "@/components/deal/RecomputeSnapshotButton";
-import { VersionTimelineCard } from "@/components/deal/VersionTimelineCard";
-import { ManageAccessPanel } from "@/components/deal/ManageAccessPanel";
 import { DealActivityFeed } from "@/components/deal/DealActivityFeed";
-import { getDealSnapshots } from "@/lib/dealSnapshotDb";
-import { getDealVersions } from "@/lib/dealVersionDb";
-import { getDealEvents, buildDealTimeline } from "@/lib/dealTimeline";
-import { extractSnapshotDisplay } from "@/lib/dealSnapshotDisplay";
-
-type SearchParams = Record<string, string | string[] | undefined>;
 
 type PageProps = {
-  params: { dealId?: string } | Promise<{ dealId?: string }>;
-  searchParams?: SearchParams | Promise<SearchParams>;
+  params: Promise<{ dealId: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
-function getParam(
-  searchParams: SearchParams | undefined,
-  key: string,
-): string | null {
-  const v = searchParams?.[key];
-  if (!v) return null;
-  return Array.isArray(v) ? (v[0] ?? null) : v;
-}
-
-function isUuid(v: string | undefined): v is string {
-  return (
-    typeof v === "string" &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-      v,
-    )
-  );
-}
-
-function isFiniteNumber(v: unknown): v is number {
-  return typeof v === "number" && Number.isFinite(v);
-}
-
-/**
- * A snapshot counts as "computed" if it has canonical outputs.results AND at least
- * one anchor KPI is a finite number. This avoids treating "present but garbage" rows
- * as the default snapshot.
- */
-function hasValidComputedResults(
-  results: Record<string, unknown> | null | undefined,
-): boolean {
-  if (!results) return false;
-
-  const invested = (results as any).invested_capital_total;
-  const settlement = (results as any).isa_settlement;
-  const fmv = (results as any).projected_fmv;
-  const multiple = (results as any).investor_multiple;
-  const irr = (results as any).investor_irr_annual;
-
-  // any one anchor KPI is sufficient to consider it computed
-  if (isFiniteNumber(invested)) return true;
-  if (isFiniteNumber(settlement)) return true;
-  if (isFiniteNumber(fmv)) return true;
-  if (isFiniteNumber(multiple)) return true;
-  if (isFiniteNumber(irr)) return true;
-
-  return false;
-}
-
-export default async function DealPage({ params, searchParams }: PageProps) {
-  const resolvedParams = await Promise.resolve(params as any);
-  const resolvedSearchParams = await Promise.resolve(searchParams as any);
-
-  const dealId = resolvedParams?.dealId as string | undefined;
-
-  if (!isUuid(dealId)) {
-    redirect("/me");
-  }
+export default async function DealPage(ctx: PageProps) {
+  const { dealId } = await ctx.params;
+  const searchParams = (await Promise.resolve(ctx.searchParams)) ?? {};
+  const debug =
+    (typeof searchParams.debug === "string"
+      ? searchParams.debug
+      : undefined) === "1";
 
   const supabase = await createClient();
-
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -99,39 +29,15 @@ export default async function DealPage({ params, searchParams }: PageProps) {
     redirect(`/login?returnTo=${encodeURIComponent(`/deal/${dealId}`)}`);
   }
 
-  const viewMode = getParam(resolvedSearchParams, "mode");
-  const isSharedMode = viewMode === "shared";
-
-  const dealRes = await supabase
+  // --- Primary path: load deal via RLS (buyer/participant with grants) ---
+  const { data: deal } = await supabase
     .from("deals")
-    .select("id, owner_user_id, mode")
+    .select("id, owner_user_id, status, created_at")
     .eq("id", dealId)
     .maybeSingle();
 
-  if (dealRes.error || !dealRes.data) {
-    return (
-      <main className="mx-auto max-w-3xl p-6">
-        <h1 className="text-xl font-semibold">Access denied</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          You don’t have access to this deal (or it may no longer exist).
-        </p>
-
-        <div className="mt-4">
-          <Link className="text-sm underline" href="/me">
-            Go to my account
-          </Link>
-        </div>
-      </main>
-    );
-  }
-
-  const deal = dealRes.data as Record<string, any>;
-
-  let role: "OWNER" | "VIEWER" | "COUNTERPARTY" =
-    deal.owner_user_id === user.id ? "OWNER" : "VIEWER";
-
-  if (role !== "OWNER") {
-    const grantRes = await supabase
+  if (deal) {
+    const { data: grant } = await supabase
       .from("deal_access_grants")
       .select("role")
       .eq("deal_id", dealId)
@@ -139,409 +45,312 @@ export default async function DealPage({ params, searchParams }: PageProps) {
       .is("revoked_at", null)
       .maybeSingle();
 
-    const grantRole = grantRes.data?.role;
-    if (
-      grantRole === "OWNER" ||
-      grantRole === "VIEWER" ||
-      grantRole === "COUNTERPARTY"
-    ) {
-      role = grantRole;
+    const userRole = grant?.role ?? null;
+    const isOwner =
+      userRole === "OWNER" || (deal as any).owner_user_id === user.id;
+
+    const svc = createServiceClient();
+
+    const { data: headerEv } = await (svc.from("deal_events") as any)
+      .select("payload")
+      .eq("deal_id", dealId)
+      .eq("event_type", "DEAL_HEADER_UPDATED")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const headerPayload = headerEv?.payload ?? {};
+
+    const { data: latestSnap } = await supabase
+      .from("deal_snapshots")
+      .select("id, snapshot_json, contract_version, schema_version")
+      .eq("deal_id", dealId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const snapJson = (latestSnap as any)?.snapshot_json ?? {};
+    const snapHeader = snapJson?.meta?.header ?? {};
+    const headerTitle = headerPayload.title ?? snapHeader.title ?? null;
+    const headerProperty =
+      (headerPayload.property_id ?? snapHeader.property_id)
+        ? {
+            property_id: headerPayload.property_id ?? snapHeader.property_id,
+            display_address:
+              headerPayload.display_address ?? snapHeader.display_address ?? "",
+            property_status:
+              headerPayload.property_status ??
+              snapHeader.property_status ??
+              null,
+            ownership_status:
+              headerPayload.ownership_status ??
+              snapHeader.ownership_status ??
+              null,
+          }
+        : null;
+
+    const { data: activeThreads } = await (svc.from("deal_threads") as any)
+      .select("id, status")
+      .eq("deal_id", dealId)
+      .in("status", ["pending_owner"])
+      .limit(1);
+
+    const activeThread =
+      activeThreads && activeThreads.length > 0 ? activeThreads[0] : null;
+
+    const inputs = snapJson?.inputs ?? null;
+    const results = snapJson?.outputs?.results ?? null;
+
+    const { data: events } = await (svc.from("deal_events") as any)
+      .select("id, deal_id, event_type, payload, created_by, created_at")
+      .eq("deal_id", dealId)
+      .order("created_at", { ascending: false })
+      .limit(50);
+
+    return (
+      <div className="min-h-screen">
+        <AppHeader />
+        <main className="mx-auto max-w-5xl p-6 space-y-6">
+          <DealHeader
+            dealId={dealId}
+            readOnly={!isOwner}
+            activeThread={activeThread}
+            initialTitle={headerTitle}
+            initialProperty={headerProperty}
+          />
+
+          <DealDetailWidgetPanel
+            dealId={dealId}
+            initialSnapshot={snapJson}
+            inputs={inputs}
+            results={results}
+            computeVersion={snapJson?.compute_version ?? null}
+            canEdit={isOwner}
+            persona="homeowner"
+          />
+
+          {events && events.length > 0 && (
+            <section>
+              <h2 className="text-base font-semibold mb-3">Activity</h2>
+              <DealActivityFeed
+                items={events.map((e: any) => ({
+                  id: e.id,
+                  event_type: e.event_type,
+                  payload: e.payload,
+                  created_at: e.created_at,
+                  created_by_user_id: e.created_by ?? null,
+                }))}
+              />
+            </section>
+          )}
+
+          {debug && (
+            <section className="rounded-lg border p-4 bg-muted/30 space-y-2">
+              <h2 className="font-medium">Debug</h2>
+              <pre className="text-xs overflow-auto">
+                {JSON.stringify(
+                  {
+                    dealId,
+                    auth: { userId: user.id, email: user.email },
+                    deal,
+                    userRole,
+                    headerPayload,
+                    snapHeader,
+                    activeThread,
+                  },
+                  null,
+                  2,
+                )}
+              </pre>
+            </section>
+          )}
+        </main>
+      </div>
+    );
+  }
+
+  // --- Owner fallback path (bypass RLS, prove entitlement via thread+property) ---
+  const svc = createServiceClient();
+
+  // 1) Find offer_submitted event for this deal -> get thread_id
+  const { data: offerEv, error: offerEvErr } = await svc
+    .from("deal_events")
+    .select("id,deal_id,event_type,payload,created_at")
+    .eq("deal_id", dealId)
+    .eq("event_type", "offer_submitted")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const threadId =
+    (offerEv as any)?.payload?.thread_id &&
+    typeof (offerEv as any).payload.thread_id === "string"
+      ? (offerEv as any).payload.thread_id
+      : null;
+
+  // 2) Load thread + property and confirm owner
+  let ownerMatches = false;
+  let thread: any = null;
+  let property: any = null;
+
+  if (threadId) {
+    const { data: t } = await svc
+      .from("deal_threads")
+      .select("id,status,property_id")
+      .eq("id", threadId)
+      .maybeSingle();
+    thread = t ?? null;
+
+    if (thread?.property_id) {
+      const { data: p } = await (svc.from("properties") as any)
+        .select("id,status,owner_user_id,normalized_address")
+        .eq("id", thread.property_id)
+        .maybeSingle();
+      property = p ?? null;
+      ownerMatches = !!p?.owner_user_id && p.owner_user_id === user.id;
     }
   }
 
-  const readOnly = role === "VIEWER" || isSharedMode;
+  // If owner matches, allow viewing deal even if RLS/participant grants deny it.
+  if (ownerMatches) {
+    // Sprint 13: owners should review/decide on offers via the thread surface.
+    // This avoids duplicating offer UI inside /deal while we finish accept/reject wiring.
+    if (!threadId) {
+      return (
+        <div className="min-h-screen">
+          <AppHeader />
+          <main className="mx-auto max-w-3xl p-6 space-y-6">
+            <h1 className="text-xl font-semibold">
+              Deal linked thread not found
+            </h1>
+            {debug ? (
+              <section className="rounded-lg border p-4 bg-muted/30 space-y-2">
+                <h2 className="font-medium">Debug (owner fallback)</h2>
+                <pre className="text-xs overflow-auto">
+                  {JSON.stringify(
+                    {
+                      dealId,
+                      auth: { userId: user.id, email: user.email },
+                      offerEv: offerEv ?? null,
+                      threadId,
+                      thread,
+                      property,
+                      ownerMatches,
+                    },
+                    null,
+                    2,
+                  )}
+                </pre>
+              </section>
+            ) : null}
+            <Link className="underline text-sm" href="/dashboard">
+              Back to dashboard
+            </Link>
+          </main>
+        </div>
+      );
+    }
 
-  const userPersona =
-    (user.user_metadata?.role as string | undefined) ?? "homeowner";
+    // If not debugging, route owners to the thread surface (Sprint 13).
+    if (!debug) {
+      redirect(`/threads/${threadId}?from=deal`);
+    }
 
-  const svc = createServiceClient();
-  const { data: activeThreadRows } = await (svc.from("deal_threads") as any)
-    .select("id, status")
-    .eq("deal_id", dealId)
-    .in("status", ["pending_owner"])
-    .order("created_at", { ascending: false })
-    .limit(1);
+    // Debug mode: stay on /deal and show deal status so we can verify lifecycle.
+    const { data: deal, error: dealErr } = await svc
+      .from("deals")
+      .select(
+        "id, owner_user_id, status, created_from, source_ref, created_at, mode, accepted_at, executed_at, funded_at, closed_at",
+      )
+      .eq("id", dealId)
+      .maybeSingle();
 
-  const activeThread =
-    activeThreadRows && activeThreadRows.length > 0
-      ? { id: activeThreadRows[0].id as string, status: activeThreadRows[0].status as string }
-      : null;
+    const { data: events, error: eventsErr } = await svc
+      .from("deal_events")
+      .select("id,deal_id,event_type,created_at,payload")
+      .eq("deal_id", dealId)
+      .order("created_at", { ascending: false })
+      .limit(10);
 
-  const hasActiveThread = !!activeThread;
-  const canEdit = role === "OWNER" && !readOnly && userPersona !== "realtor" && !hasActiveThread;
+    return (
+      <div className="min-h-screen">
+        <AppHeader />
+        <main className="mx-auto max-w-5xl p-6 space-y-6">
+          <h1 className="text-xl font-semibold">Deal debug</h1>
 
-  const snapshotsResult = await getDealSnapshots(supabase, dealId, 20);
-  const snapshots = snapshotsResult.ok ? snapshotsResult.snapshots : [];
+          <div className="rounded-lg border p-4 space-y-2">
+            <div className="text-sm">
+              Back to thread:{" "}
+              <Link
+                className="underline"
+                href={`/threads/${threadId}?from=deal`}
+              >
+                /threads/{threadId}
+              </Link>
+            </div>
+          </div>
 
-  const selectedSnapshotId = getParam(resolvedSearchParams, "snapshot");
-
-  // Find the newest snapshot that looks like a valid computed canonical snapshot.
-  const latestComputedSnapshot =
-    snapshots.find((s) => {
-      const d = extractSnapshotDisplay(s as any);
-      return hasValidComputedResults(d?.outputs ?? null);
-    }) ?? null;
-
-  // Default selection behavior:
-  // - If user explicitly selected a snapshot via query param, honor it.
-  // - Otherwise, default to latest *computed* snapshot (fallback to newest row).
-  const effectiveSnapshotRow =
-    selectedSnapshotId != null
-      ? (snapshots.find((s) => s.id === selectedSnapshotId) ?? null)
-      : (latestComputedSnapshot ??
-        (snapshots.length > 0 ? snapshots[0] : null));
-
-  // "Latest" in UI/gating should mean latest computed snapshot (not merely latest row).
-  const latestSnapshotId =
-    (latestComputedSnapshot ?? (snapshots.length > 0 ? snapshots[0] : null))
-      ?.id ?? null;
-
-  const isLatest = effectiveSnapshotRow
-    ? effectiveSnapshotRow.id === latestSnapshotId
-    : true;
-
-  const display = extractSnapshotDisplay(effectiveSnapshotRow as any);
-
-  // Full canonical snapshot payload as stored in DB (seed for the interactive widget)
-  const initialSnapshot = (effectiveSnapshotRow as any)?.snapshot_json ?? null;
-
-  const summaryVm = buildDealSummaryViewModel(display ?? {});
-
-  const snapshotInputs = display?.inputs ?? null;
-  const snapshotResults = display?.outputs ?? null;
-  const snapshotComputeVersion = display?.computeVersion ?? null;
-
-  if (process.env.NODE_ENV !== "production") {
-    const r: any = snapshotResults ?? {};
-    console.log("[deal] snapshotResults keys:", Object.keys(r).slice(0, 40));
-    console.log("[deal] invested_capital_total:", r.invested_capital_total);
-    console.log("[deal] isa_settlement:", r.isa_settlement);
-    console.log("[deal] projected_fmv:", r.projected_fmv);
-    console.log("[deal] homeowner_equity_value:", r.homeowner_equity_value);
-    console.log("[deal] investor_equity_value:", r.investor_equity_value);
-    console.log(
-      "[deal] upfront_payment:",
-      (snapshotInputs as any)?.deal_terms?.upfront_payment,
-    );
-    console.log(
-      "[deal] property_value:",
-      (snapshotInputs as any)?.deal_terms?.property_value,
+          <section className="rounded-lg border p-4 bg-muted/30 space-y-2">
+            <h2 className="font-medium">Debug (deal page)</h2>
+            <pre className="text-xs overflow-auto">
+              {JSON.stringify(
+                {
+                  dealId,
+                  auth: { userId: user.id, email: user.email },
+                  offerEv: offerEv ?? null,
+                  threadId,
+                  thread,
+                  property,
+                  ownerMatches,
+                  dealErr: dealErr?.message ?? null,
+                  deal: deal ?? null,
+                  eventsErr: eventsErr?.message ?? null,
+                  events: events ?? null,
+                },
+                null,
+                2,
+              )}
+            </pre>
+          </section>
+        </main>
+      </div>
     );
   }
 
-  const [versionsResult, eventsResult, headerEventResult, activityResult] =
-    await Promise.all([
-      getDealVersions(supabase, dealId, 50),
-      getDealEvents(supabase, dealId, 50),
-      (supabase.from("deal_events") as any)
-        .select("payload")
-        .eq("deal_id", dealId)
-        .eq("event_type", "DEAL_HEADER_UPDATED")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      (svc.from("deal_events") as any)
-        .select("id, event_type, payload, created_at, created_by")
-        .eq("deal_id", dealId)
-        .order("created_at", { ascending: false })
-        .limit(50),
-    ]);
-
-  const snapshotHeader = (initialSnapshot as any)?.meta?.header ?? null;
-  const headerPayload = headerEventResult?.data?.payload ?? null;
-
-  const resolvedHeader = snapshotHeader ?? headerPayload ?? {};
-  const persistedTitle =
-    typeof resolvedHeader?.title === "string" ? resolvedHeader.title : null;
-  const persistedProperty =
-    resolvedHeader?.property_id && resolvedHeader?.display_address
-      ? {
-          property_id: resolvedHeader.property_id as string,
-          display_address: resolvedHeader.display_address as string,
-          property_status: (resolvedHeader.property_status as string) ?? null,
-          ownership_status: (resolvedHeader.ownership_status as string) ?? null,
-        }
-      : null;
-  const versions = versionsResult.ok ? versionsResult.versions : [];
-  const eventRows = eventsResult.ok ? eventsResult.events : [];
-
-  const timeline = buildDealTimeline({
-    dealId,
-    snapshots: snapshots.map((s) => ({
-      id: s.id,
-      created_at: s.created_at,
-      contract_version: s.contract_version,
-      schema_version: s.schema_version,
-    })),
-    versions: versions.map((v) => ({
-      id: v.id,
-      created_at: v.created_at,
-      version_number: v.version_number,
-      version_type: v.version_type,
-      proposed_snapshot_id: v.proposed_snapshot_id,
-      base_snapshot_id: v.base_snapshot_id,
-      note: v.note,
-      meta: v.meta,
-    })),
-    events: eventRows.map((e) => ({
-      id: e.id,
-      event_type: e.event_type,
-      created_at: e.created_at,
-      payload: null,
-    })),
-  });
-
+  // If not owner, fall back to your existing Access Denied UI
   return (
-    <div>
+    <div className="min-h-screen">
       <AppHeader />
-      <main className="mx-auto max-w-3xl p-6">
-        <DealHeader
-          dealId={dealId}
-          readOnly={readOnly}
-          activeThread={activeThread}
-          initialTitle={persistedTitle}
-          initialProperty={persistedProperty}
-        />
+      <main className="mx-auto max-w-3xl p-6 space-y-6">
+        <h1 className="text-xl font-semibold">Access denied</h1>
+        <p className="text-sm text-muted-foreground">
+          You don’t have access to this deal (or it may no longer exist).
+        </p>
+        <Link className="underline text-sm" href="/account">
+          Go to my account
+        </Link>
 
-        {activeThread ? (
-          <ActiveThreadBanner
-            threadId={activeThread.id}
-            threadStatus={activeThread.status}
-          />
-        ) : null}
-
-        {readOnly ? (
-          <div className="mb-4 rounded-md border p-3">
-            <div className="text-sm font-medium">Read-only shared deal</div>
-            <div className="mt-1 text-sm text-muted-foreground">
-              You can view this deal, but you can’t make changes.
-            </div>
-          </div>
-        ) : null}
-
-        <div className="flex items-baseline justify-between gap-4">
-          <h1 className="text-xl font-semibold">Deal</h1>
-          <div className="text-sm text-muted-foreground">
-            Role: <span className="font-medium text-foreground">{role}</span>
-          </div>
-        </div>
-
-        <div className="mt-4 rounded-md border p-4 text-sm">
-          <div className="grid gap-2">
-            <div>
-              <span className="font-medium">Deal ID:</span>{" "}
-              <span className="break-words">{dealId}</span>
-            </div>
-            <div>
-              <span className="font-medium">Mode:</span> {deal.mode ?? "(none)"}
-            </div>
-            <div>
-              <span className="font-medium">Editable:</span>{" "}
-              {readOnly ? "No" : "Yes"}
-            </div>
-          </div>
-        </div>
-
-        <section className="mt-6 rounded-md border p-4">
-          <div className="flex items-baseline justify-between gap-4">
-            <h2 className="text-base font-semibold">Scenario snapshot</h2>
-            <div className="text-xs text-muted-foreground">
-              {isLatest
-                ? "Latest computed snapshot (read-only; no recompute)"
-                : "Viewing older snapshot"}
-            </div>
-          </div>
-
-          {!isLatest && effectiveSnapshotRow ? (
-            <div className="mt-2 flex items-center justify-between rounded-md bg-muted/50 px-3 py-2">
-              <span className="text-xs text-muted-foreground">
-                You are viewing a previous snapshot from{" "}
-                {new Date(
-                  (effectiveSnapshotRow as any).created_at,
-                ).toLocaleString()}
-              </span>
-              <Link
-                className="text-xs font-medium underline"
-                href={`/deal/${dealId}${isSharedMode ? "?mode=shared" : ""}`}
-              >
-                Back to latest
-              </Link>
-            </div>
-          ) : null}
-
-          <div className="mt-4">
-            <DealSummary vm={summaryVm} />
-          </div>
-        </section>
-
-        <DealDetailWidgetPanel
-          dealId={dealId}
-          initialSnapshot={initialSnapshot}
-          inputs={snapshotInputs}
-          results={snapshotResults}
-          computeVersion={snapshotComputeVersion}
-          canEdit={canEdit}
-          persona={userPersona}
-        />
-
-        {role === "OWNER" &&
-        isLatest &&
-        !readOnly &&
-        userPersona !== "realtor" ? (
-          <RecomputeSnapshotButton
-            dealId={dealId}
-            initialInputs={(initialSnapshot as any)?.inputs ?? null}
-          />
-        ) : null}
-
-        {snapshots.length > 1 ? (
-          <section className="mt-6 rounded-md border p-4">
-            <div className="flex items-baseline justify-between gap-4">
-              <h2 className="text-base font-semibold">Snapshot history</h2>
-              <div className="text-xs text-muted-foreground">
-                {snapshots.length} snapshot{snapshots.length !== 1 ? "s" : ""}
-              </div>
-            </div>
-
-            <div className="mt-3 space-y-1">
-              {snapshots.map((s) => {
-                const isCurrent = effectiveSnapshotRow?.id === s.id;
-                const modeParam = isSharedMode ? "&mode=shared" : "";
-                const href =
-                  s.id === latestSnapshotId
-                    ? `/deal/${dealId}${isSharedMode ? "?mode=shared" : ""}`
-                    : `/deal/${dealId}?snapshot=${s.id}${modeParam}`;
-
-                return (
-                  <Link
-                    key={s.id}
-                    href={href}
-                    className={`flex items-center justify-between gap-3 rounded-md px-3 py-2 text-xs transition-colors ${
-                      isCurrent
-                        ? "bg-primary/10 font-medium"
-                        : "hover:bg-muted/50"
-                    }`}
-                  >
-                    <span className="flex items-center gap-2">
-                      {s.id === latestSnapshotId ? (
-                        <span className="rounded bg-primary/20 px-1.5 py-0.5 text-[10px] font-medium">
-                          Latest
-                        </span>
-                      ) : null}
-                      <span className="text-muted-foreground">
-                        v{s.contract_version} / s{s.schema_version}
-                      </span>
-                    </span>
-                    <span className="text-muted-foreground">
-                      {new Date(s.created_at).toLocaleString()}
-                    </span>
-                  </Link>
-                );
-              })}
-            </div>
+        {debug ? (
+          <section className="rounded-lg border p-4 bg-muted/30 space-y-2">
+            <h2 className="font-medium">Debug</h2>
+            <pre className="text-xs overflow-auto">
+              {JSON.stringify(
+                {
+                  dealId,
+                  auth: { userId: user.id, email: user.email },
+                  offerEvErr: offerEvErr?.message ?? null,
+                  offerEv: offerEv ?? null,
+                  threadId,
+                  thread,
+                  property,
+                  ownerMatches,
+                },
+                null,
+                2,
+              )}
+            </pre>
           </section>
         ) : null}
-
-        <section className="mt-6 rounded-md border p-4">
-          <div className="flex items-baseline justify-between gap-4">
-            <h2 className="text-base font-semibold">Activity</h2>
-            <div className="text-xs text-muted-foreground">
-              {(activityResult?.data ?? []).length} event{(activityResult?.data ?? []).length !== 1 ? "s" : ""}
-            </div>
-          </div>
-          <div className="mt-3">
-            <DealActivityFeed
-              items={(activityResult?.data ?? []).map((e: any) => ({
-                id: e.id,
-                event_type: e.event_type,
-                payload: e.payload,
-                created_at: e.created_at,
-                created_by_user_id: e.created_by ?? null,
-              }))}
-            />
-          </div>
-        </section>
-
-        <section className="mt-6 rounded-md border p-4">
-          <div className="flex items-baseline justify-between gap-4">
-            <h2 className="text-base font-semibold">Timeline</h2>
-            <div className="text-xs text-muted-foreground">
-              {timeline.length} entr{timeline.length !== 1 ? "ies" : "y"}
-            </div>
-          </div>
-
-          {timeline.length === 0 ? (
-            <p className="mt-3 text-sm text-muted-foreground">
-              No activity recorded for this deal.
-            </p>
-          ) : (
-            <div className="mt-4 space-y-2">
-              {timeline.map((entry) =>
-                entry.type === "VERSION" ? (
-                  <VersionTimelineCard
-                    key={`${entry.type}-${entry.id}`}
-                    entry={entry}
-                  />
-                ) : (
-                  <div
-                    key={`${entry.type}-${entry.id}`}
-                    className="flex items-start gap-3 rounded-md px-3 py-2 text-xs hover:bg-muted/50"
-                  >
-                    <span
-                      className={`mt-0.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                        entry.type === "SNAPSHOT"
-                          ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                          : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
-                      }`}
-                    >
-                      {entry.type === "SNAPSHOT" ? "SNAP" : "EVT"}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-baseline justify-between gap-2">
-                        {entry.href ? (
-                          <Link
-                            href={entry.href}
-                            className="font-medium underline"
-                          >
-                            {entry.title}
-                          </Link>
-                        ) : (
-                          <span className="font-medium">{entry.title}</span>
-                        )}
-                        <span className="shrink-0 text-muted-foreground">
-                          {entry.created_at
-                            ? new Date(entry.created_at).toLocaleString()
-                            : "—"}
-                        </span>
-                      </div>
-                      {entry.subtitle ? (
-                        <div className="mt-0.5 text-muted-foreground">
-                          {entry.subtitle}
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                ),
-              )}
-            </div>
-          )}
-        </section>
-
-        {role === "OWNER" && !readOnly && userPersona !== "realtor" ? (
-          <div className="mt-6 space-y-4">
-            <ShareDealCard dealId={dealId} />
-            <ManageAccessPanel dealId={dealId} />
-          </div>
-        ) : null}
-
-        <div className="mt-6 flex gap-4">
-          <Link className="text-sm underline" href="/dashboard">
-            Back to Dashboard
-          </Link>
-          <Link className="text-sm underline" href="/me">
-            Back to my account
-          </Link>
-        </div>
       </main>
     </div>
   );

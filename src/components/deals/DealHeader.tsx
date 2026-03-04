@@ -118,73 +118,43 @@ export function DealHeader({
       dealId,
     );
 
-  // IMPORTANT: we cannot rely on non-existent DB tables (e.g., deal_events).
-  // Persist header into the latest deal snapshot so it "travels" to shared viewers.
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   const persistServer = useCallback(
-    async (next: Stored) => {
-      if (!isRealDeal) return;
+    async (next: Stored): Promise<boolean> => {
+      if (!isRealDeal) return true;
 
       try {
-        // Read latest snapshot
-        const latestRes = await fetch(`/api/deals/${dealId}/snapshot`, {
-          method: "GET",
-          credentials: "include",
-          headers: { Accept: "application/json" },
-        });
-        if (!latestRes.ok) return;
-
-        const latestJson = await latestRes.json().catch(() => null);
-        const latest = latestJson?.snapshot ?? null;
-        if (!latest?.snapshot_json) return;
-
-        const prevSnap = latest.snapshot_json as any;
-
-        // Merge header into snapshot_json.meta.header
-        const mergedSnap = {
-          ...prevSnap,
-          meta: {
-            ...(prevSnap?.meta ?? {}),
-            header: {
-              title: typeof next.title === "string" ? next.title : null,
-              property_id:
-                typeof next.property_id === "string" ? next.property_id : null,
-              display_address:
-                typeof next.display_address === "string"
-                  ? next.display_address
-                  : null,
-              property_status:
-                typeof next.property_status === "string"
-                  ? next.property_status
-                  : null,
-              ownership_status:
-                typeof next.ownership_status === "string"
-                  ? next.ownership_status
-                  : null,
-            },
-          },
-        };
-
-        // Append a new snapshot row (append-only)
-        await fetch(`/api/deals/${dealId}/snapshot`, {
-          method: "POST",
+        const res = await fetch(`/api/deals/${dealId}/header`, {
+          method: "PATCH",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            contract_version: latest.contract_version,
-            schema_version: latest.schema_version,
-            snapshot_json: mergedSnap,
-            input_hash: latest.input_hash ?? null,
-            output_hash: latest.output_hash ?? null,
+            title: next.title ?? null,
+            property_id: next.property_id ?? null,
+            display_address: next.display_address ?? null,
+            property_status: next.property_status ?? null,
+            ownership_status: next.ownership_status ?? null,
           }),
         });
+
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          setSaveError(body?.error ?? `Save failed (${res.status})`);
+          return false;
+        }
+
+        setSaveError(null);
+        return true;
       } catch {
-        // best-effort
+        setSaveError("Network error — changes saved locally only");
+        return false;
       }
     },
     [dealId, isRealDeal],
   );
 
-  function onSave() {
+  async function onSave() {
     const payload: Stored = {
       title,
       property_id: property?.property_id,
@@ -196,8 +166,8 @@ export function DealHeader({
     };
 
     persistLocal(payload);
-    persistServer(payload);
-    setSavedAt(Date.now());
+    const ok = await persistServer(payload);
+    if (ok) setSavedAt(Date.now());
   }
 
   const hasActiveThread = activeThread?.status === "pending_owner";
@@ -296,7 +266,9 @@ export function DealHeader({
             )}
           </div>
 
-          {savedAt ? (
+          {saveError ? (
+            <div className="text-xs text-red-600">{saveError}</div>
+          ) : savedAt ? (
             <div className="text-xs text-muted-foreground">
               Saved {new Date(savedAt).toLocaleTimeString()}
             </div>

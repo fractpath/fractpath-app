@@ -24,12 +24,24 @@ export async function PATCH(
 
   const { data: deal } = await supabase
     .from("deals")
-    .select("owner_user_id")
+    .select("id, owner_user_id")
     .eq("id", dealId)
     .maybeSingle();
 
   if (!deal) return jsonError("Deal not found", 404);
-  if (deal.owner_user_id !== user.id) return jsonError("Forbidden", 403);
+
+  const isOwnerByField = (deal as any).owner_user_id === user.id;
+
+  const { data: grant } = await supabase
+    .from("deal_access_grants")
+    .select("role")
+    .eq("deal_id", dealId)
+    .eq("user_id", user.id)
+    .is("revoked_at", null)
+    .eq("role", "OWNER")
+    .maybeSingle();
+
+  if (!grant && !isOwnerByField) return jsonError("Forbidden", 403);
 
   let body: any;
   try {

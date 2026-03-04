@@ -197,6 +197,35 @@ export async function POST(
       created_by_user_id: user.id,
     });
   }
+  // Option A (Sprint 13): deterministically set deals.owner_user_id from the thread's property owner.
+  // This keeps legacy owner-based deal access consistent for verified owners.
+  const { data: propRow, error: propOwnerErr } = await (
+    svc.from("properties") as any
+  )
+    .select("owner_user_id")
+    .eq("id", thread.property_id)
+    .single();
+
+  if (propOwnerErr) {
+    console.error("submit_offer_load_property_owner_error", propOwnerErr);
+    return json(500, { error: propOwnerErr.message });
+  }
+
+  const { error: dealOwnerUpdErr } = await (svc.from("deals") as any)
+    .update({ owner_user_id: propRow.owner_user_id })
+    .eq("id", dealId)
+    .eq("status", "DRAFT"); // guard: don't mutate after acceptance/execution
+
+  if (dealOwnerUpdErr) {
+    console.error("submit_offer_set_deal_owner_error", dealOwnerUpdErr);
+    return json(500, { error: dealOwnerUpdErr.message });
+  }
+
+  // IMPORTANT: move the deal out of DRAFT into the review state expected by the DB transition guard.
+  // This prevents invalid transition DRAFT -> ACTIVE on owner accept.
+  // Sprint 13: do NOT update deals.status here.
+  // The DB transition guard does not allow DRAFT -> UNDER_REVIEW (or DRAFT -> ACTIVE).
+  // Deal lifecycle alignment will be handled in a future sprint.
 
   await (svc.from("deal_events") as any).insert({
     deal_id: dealId,

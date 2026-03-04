@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ThreadActionPanel } from "./ThreadActionPanel";
 
 type ThreadData = {
@@ -30,6 +30,29 @@ type Proposal = {
   updated_at: string;
 };
 
+function formatStatusLabel(status: string) {
+  return status.replace(/_/g, " ");
+}
+
+function StatusPill({ status }: { status: string }) {
+  const label = formatStatusLabel(status);
+  const isPositive = status === "accepted" || status === "active";
+  const isNegative = status === "declined" || status === "closed";
+  const tone = isPositive
+    ? "bg-emerald-50 text-emerald-700"
+    : isNegative
+      ? "bg-red-50 text-red-700"
+      : "bg-gray-100 text-gray-700";
+
+  return (
+    <span
+      className={`inline-block rounded px-2 py-0.5 text-xs font-semibold ${tone}`}
+    >
+      {label}
+    </span>
+  );
+}
+
 export function ThreadDetailView({ threadId }: { threadId: string }) {
   const [thread, setThread] = useState<ThreadData | null>(null);
   const [participants, setParticipants] = useState<Participant[]>([]);
@@ -37,6 +60,11 @@ export function ThreadDetailView({ threadId }: { threadId: string }) {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const debug = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    return new URLSearchParams(window.location.search).get("debug") === "1";
+  }, []);
 
   const refreshMe = useCallback(async () => {
     const meRes = await fetch("/api/me", { credentials: "include" });
@@ -63,7 +91,6 @@ export function ThreadDetailView({ threadId }: { threadId: string }) {
       credentials: "include",
     });
     if (!propRes.ok) {
-      // proposals are optional; don’t fail the whole page
       setProposals([]);
       return;
     }
@@ -118,86 +145,31 @@ export function ThreadDetailView({ threadId }: { threadId: string }) {
   );
   const actionableProposal = latestSubmitted ?? myLatestDraft ?? null;
 
+  const finalized = ["accepted", "active", "declined", "closed"].includes(
+    thread.status,
+  );
+
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-6">
-      <h1 className="text-2xl font-bold">Thread Detail</h1>
-
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-        <dt className="font-medium text-gray-500">Thread ID</dt>
-        <dd className="font-mono text-xs break-all">{thread.id}</dd>
-
-        <dt className="font-medium text-gray-500">Status</dt>
-        <dd>
-          <span className="inline-block rounded bg-gray-100 px-2 py-0.5 text-xs font-semibold">
-            {thread.status}
-          </span>
-        </dd>
-
-        <dt className="font-medium text-gray-500">Property</dt>
-        <dd className="font-mono text-xs break-all">
-          {thread.property_id ?? "—"}
-        </dd>
-
-        <dt className="font-medium text-gray-500">Buyer</dt>
-        <dd className="font-mono text-xs break-all">{thread.buyer_user_id}</dd>
-
-        <dt className="font-medium text-gray-500">Owner</dt>
-        <dd className="font-mono text-xs break-all">
-          {thread.owner_user_id ?? "not set"}
-        </dd>
-
-        <dt className="font-medium text-gray-500">Created</dt>
-        <dd>{new Date(thread.created_at).toLocaleString()}</dd>
-
-        <dt className="font-medium text-gray-500">Updated</dt>
-        <dd>{new Date(thread.updated_at).toLocaleString()}</dd>
-      </dl>
-
-      {participants.length > 0 && (
-        <div>
-          <h2 className="mb-2 text-lg font-semibold">Participants</h2>
-          <ul className="space-y-1 text-sm">
-            {participants.map((p) => (
-              <li key={p.user_id} className="flex items-center gap-2">
-                <span className="font-mono text-xs">
-                  {p.user_id.slice(0, 8)}...
-                </span>
-                <span className="rounded bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-700">
-                  {p.role}
-                </span>
-                <span className="text-xs text-gray-500">{p.permission}</span>
-                {p.status !== "active" && (
-                  <span className="text-xs text-red-500">({p.status})</span>
-                )}
-              </li>
-            ))}
-          </ul>
+      {/* Owner-facing header */}
+      <div className="space-y-1">
+        <h2 className="text-lg font-semibold">Offer review</h2>
+        <div className="flex items-center gap-2 text-sm text-gray-600">
+          <span>Status:</span>
+          <StatusPill status={thread.status} />
         </div>
-      )}
+        {finalized ? (
+          <p className="text-sm text-gray-600">
+            This thread has been {formatStatusLabel(thread.status)}.
+          </p>
+        ) : (
+          <p className="text-sm text-gray-600">
+            Review the submitted offer and choose accept or reject.
+          </p>
+        )}
+      </div>
 
-      {proposals.length > 0 && (
-        <div>
-          <h2 className="mb-2 text-lg font-semibold">Proposals</h2>
-          <ul className="space-y-1 text-sm">
-            {proposals.map((pr) => (
-              <li key={pr.id} className="flex items-center gap-2">
-                <span className="font-mono text-xs">
-                  {pr.id.slice(0, 8)}...
-                </span>
-                <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs font-semibold">
-                  {pr.status}
-                </span>
-                <span className="text-xs text-gray-400">
-                  {new Date(pr.created_at).toLocaleDateString()}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <hr className="border-gray-200" />
-
+      {/* Actions first (primary owner task) */}
       <ThreadActionPanel
         threadId={thread.id}
         threadStatus={thread.status}
@@ -208,6 +180,110 @@ export function ThreadDetailView({ threadId }: { threadId: string }) {
           await Promise.all([refreshThread(), refreshProposals()]);
         }}
       />
+
+      {/* Minimal context (no machine IDs) */}
+      <div className="rounded-lg border p-4 space-y-3">
+        <div className="text-sm text-gray-700">
+          <div className="font-medium">Summary</div>
+          <div className="text-gray-600">
+            {finalized
+              ? "Decision recorded."
+              : actionableProposal?.status === "submitted"
+                ? "A proposal has been submitted and is awaiting your decision."
+                : actionableProposal?.status === "draft"
+                  ? "A draft proposal exists (not yet submitted)."
+                  : "No proposal found yet."}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+          <div className="text-gray-500">Created</div>
+          <div>{new Date(thread.created_at).toLocaleString()}</div>
+
+          <div className="text-gray-500">Updated</div>
+          <div>{new Date(thread.updated_at).toLocaleString()}</div>
+        </div>
+      </div>
+
+      {/* Debug-only technical details */}
+      {debug ? (
+        <section className="rounded-lg border p-4 bg-muted/30 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold">Debug</h3>
+            <span className="text-xs text-gray-500">?debug=1</span>
+          </div>
+
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+            <dt className="font-medium text-gray-500">Thread ID</dt>
+            <dd className="font-mono break-all">{thread.id}</dd>
+
+            <dt className="font-medium text-gray-500">Property ID</dt>
+            <dd className="font-mono break-all">{thread.property_id ?? "—"}</dd>
+
+            <dt className="font-medium text-gray-500">Buyer user_id</dt>
+            <dd className="font-mono break-all">{thread.buyer_user_id}</dd>
+
+            <dt className="font-medium text-gray-500">Owner user_id</dt>
+            <dd className="font-mono break-all">
+              {thread.owner_user_id ?? "—"}
+            </dd>
+
+            <dt className="font-medium text-gray-500">Created by</dt>
+            <dd className="font-mono break-all">{thread.created_by_user_id}</dd>
+
+            <dt className="font-medium text-gray-500">Me</dt>
+            <dd className="font-mono break-all">{currentUserId ?? "—"}</dd>
+          </dl>
+
+          {participants.length > 0 ? (
+            <div>
+              <div className="mb-2 text-sm font-semibold">Participants</div>
+              <ul className="space-y-1 text-xs">
+                {participants.map((p) => (
+                  <li
+                    key={`${p.user_id}:${p.role}`}
+                    className="flex items-center gap-2"
+                  >
+                    <span className="font-mono">
+                      {p.user_id.slice(0, 8)}...
+                    </span>
+                    <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700">
+                      {p.role}
+                    </span>
+                    <span className="text-[11px] text-gray-500">
+                      {p.permission}
+                    </span>
+                    {p.status !== "active" ? (
+                      <span className="text-[11px] text-red-500">
+                        ({p.status})
+                      </span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {proposals.length > 0 ? (
+            <div>
+              <div className="mb-2 text-sm font-semibold">Proposals</div>
+              <ul className="space-y-1 text-xs">
+                {proposals.map((pr) => (
+                  <li key={pr.id} className="flex items-center gap-2">
+                    <span className="font-mono">{pr.id.slice(0, 8)}...</span>
+                    <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] font-semibold">
+                      {pr.status}
+                    </span>
+                    <span className="text-[11px] text-gray-400">
+                      {new Date(pr.created_at).toLocaleDateString()}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
     </div>
   );
 }
