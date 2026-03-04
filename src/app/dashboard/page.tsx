@@ -179,10 +179,6 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   const welcome = PERSONA_WELCOME[persona];
 
-  const pickFirst = <T,>(arr: T[] | null | undefined): T | null =>
-    arr && arr.length ? arr[0] : null;
-
-  // default fallback (will be overridden by dynamic steps if we find a match)
   let steps: any[] = NEXT_STEPS[persona] as any[];
 
   const grantsRes = await supabase
@@ -191,6 +187,21 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     .eq("user_id", user.id)
     .is("revoked_at", null)
     .order("created_at", { ascending: false });
+
+  const pendingOwnerThreadsRes = await supabase
+    .from("deal_threads")
+    .select(`
+      id,
+      deal_id,
+      status,
+      property_id,
+      properties!inner(owner_user_id)
+    `)
+    .eq("status", "pending_owner")
+    .eq("properties.owner_user_id", user.id)
+    .order("created_at", { ascending: false });
+
+  const pendingOwnerThreads = pendingOwnerThreadsRes.data ?? [];
 
   if (grantsRes.error) {
     return (
@@ -635,34 +646,50 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             </Link>
           </div>
 
-          <div className="space-y-2">
-            {ownerCards.map((vm) => (
-              <DealCard
-                key={vm.dealId}
-                href={vm.href}
-                title={vm.title}
-                secondaryFmvLabel={vm.secondaryFmvLabel}
-                kpiLine={vm.kpiLine}
-                metaLine={vm.metaLine}
-                statusLabel={vm.statusLabel}
-                statusTone={vm.statusTone}
-                roleChipLabel={vm.roleChipLabel}
-              />
-            ))}
+          {pendingOwnerThreads.length > 0 && (
+            <div className="rounded-lg border p-5 mb-6">
+              <h3 className="text-lg font-semibold mb-3">
+                Offers waiting for your decision
+              </h3>
 
-            {ownerCards.length === 0 ? (
-              <Link
-                href="/deal/new"
-                className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed p-6 transition-colors hover:bg-muted/40 cursor-pointer"
-              >
-                <span className="text-2xl text-muted-foreground">+</span>
-                <span className="text-sm font-medium">Create Deal</span>
-                <span className="text-xs text-muted-foreground">
-                  Start a new scenario
-                </span>
-              </Link>
-            ) : null}
-          </div>
+              <ul className="space-y-2">
+                {pendingOwnerThreads.map((thread: any) => (
+                  <li key={thread.id}>
+                    <Link
+                      href={`/deal/${thread.deal_id}`}
+                      className="text-sm underline"
+                    >
+                      Review offer for deal {String(thread.deal_id).slice(0, 8)}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {ownerCards.length === 0 ? (
+            <div className="rounded-lg border p-4">
+              <p className="text-sm text-muted-foreground">
+                You don't have any deals yet. Create one to get started.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {ownerCards.map((vm) => (
+                <DealCard
+                  key={vm.dealId}
+                  href={vm.href}
+                  title={vm.title}
+                  secondaryFmvLabel={vm.secondaryFmvLabel}
+                  kpiLine={vm.kpiLine}
+                  metaLine={vm.metaLine}
+                  statusLabel={vm.statusLabel}
+                  statusTone={vm.statusTone}
+                  roleChipLabel={vm.roleChipLabel}
+                />
+              ))}
+            </div>
+          )}
         </section>
 
         <section className="space-y-6">
