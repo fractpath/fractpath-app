@@ -19,8 +19,6 @@ async function normalizeUploadToJpeg(file: File): Promise<File> {
 
   const { default: heic2any } = await import("heic2any");
 
-  const { default: heic2any } = await import("heic2any");
-
   const blob = (await heic2any({
     blob: file,
     toType: "image/jpeg",

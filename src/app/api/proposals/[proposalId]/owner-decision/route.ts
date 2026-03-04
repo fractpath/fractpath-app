@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -9,19 +9,17 @@ function json(status: number, body: any) {
 }
 
 export async function POST(
-  req: Request,
+  req: NextRequest,
   ctx: { params: Promise<{ proposalId: string }> },
 ) {
-  const supabase = await createClient();
   const { proposalId } = await ctx.params;
 
-  // Auth
-  const { data: auth, error: authErr } = await supabase.auth.getUser();
-  if (authErr) return json(401, { error: "Unauthorized" });
-  const userId = auth?.user?.id;
-  if (!userId) return json(401, { error: "Unauthorized" });
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return json(401, { error: "Unauthorized" });
 
-  // Parse body
   let body: any;
   try {
     body = await req.json();
@@ -36,89 +34,88 @@ export async function POST(
     });
   }
 
-  // Load proposal (need thread_id + status)
-  const { data: proposal, error: propErr } = await supabase
-    .from("deal_proposals")
-    .select("id, thread_id, status")
+  const svc = createServiceClient();
+
+  const { data: proposal, error: propErr } = await (svc.from("deal_proposals") as any)
+    .select("id, thread_id, deal_id")
     .eq("id", proposalId)
     .maybeSingle();
 
   if (propErr) return json(500, { error: propErr.message });
   if (!proposal) return json(404, { error: "Proposal not found" });
 
-  const threadId = (proposal as any).thread_id as string;
-  const currentStatus = String((proposal as any).status);
-
-  // Load thread owner + property_id for verification gate
-  const { data: thread, error: tErr } = await supabase
-    .from("deal_threads")
-    .select("id, owner_user_id, status, property_id")
-    .eq("id", threadId)
+  const { data: thread, error: tErr } = await (svc.from("deal_threads") as any)
+    .select("id, property_id, status")
+    .eq("id", proposal.thread_id)
     .maybeSingle();
 
   if (tErr) return json(500, { error: tErr.message });
   if (!thread) return json(404, { error: "Thread not found" });
 
-  const isOwner = (thread as any).owner_user_id === userId;
-  if (!isOwner) return json(403, { error: "Forbidden" });
-
-  // Idempotency: if already finalized, return 200 with current status
-  if (currentStatus === "accepted" || currentStatus === "rejected") {
-    return json(200, {
-      ok: true,
-      proposal_id: proposalId,
-      status: currentStatus,
+  if (thread.status !== "pending_owner") {
+    return json(409, {
+      ok: false,
+      error: `Thread is not pending owner decision (current: ${thread.status})`,
     });
   }
 
-  // Only submitted proposals are decidable
-  if (currentStatus !== "submitted") {
-    return json(400, {
-      error: "Only submitted proposals may be accepted/rejected",
+  const { data: property, error: pErr } = await (svc.from("properties") as any)
+    .select("owner_user_id, status")
+    .eq("id", thread.property_id)
+    .maybeSingle();
+
+  if (pErr) return json(500, { error: pErr.message });
+  if (!property) return json(404, { error: "Property not found" });
+
+  if (property.owner_user_id !== user.id) {
+    return json(403, { error: "Forbidden — you are not the property owner" });
+  }
+
+  if (property.status !== "verified") {
+    return json(403, {
+      error: "Property must be verified before you can accept or reject offers",
     });
   }
 
-  // Verification gate: block accept if property is not verified
   if (decision === "accept") {
-    const svc = createServiceClient();
-    const { data: prop } = await (svc.from("properties") as any)
-      .select("status")
-      .eq("id", (thread as any).property_id)
-      .maybeSingle();
-
-    if (!prop || prop.status !== "verified") {
-      return json(409, {
-        ok: false,
-        error: "Property verification required to accept",
-      });
-    }
-  }
-
-  const targetStatus = decision === "accept" ? "accepted" : "rejected";
-
-  // Update proposal status
-  const { data: updated, error: updErr } = await supabase
-    .from("deal_proposals")
-    .update({ status: targetStatus })
-    .eq("id", proposalId)
-    .select("id, thread_id, status")
-    .single();
-
-  if (updErr) return json(500, { error: updErr.message });
-
-  // Minimal: if accepted, mark thread accepted as well (canonical status already used)
-  if (targetStatus === "accepted") {
-    const { error: threadUpdErr } = await supabase
-      .from("deal_threads")
+    const { error: threadUpd } = await (svc.from("deal_threads") as any)
       .update({ status: "accepted" })
-      .eq("id", threadId);
+      .eq("id", thread.id);
 
-    if (threadUpdErr) return json(500, { error: threadUpdErr.message });
+    if (threadUpd) return json(500, { error: threadUpd.message });
+
+    if (proposal.deal_id) {
+      const { error: dealUpd } = await (svc.from("deals") as any)
+        .update({ status: "ACTIVE" })
+        .eq("id", proposal.deal_id);
+
+      if (dealUpd) {
+        console.error("DEAL_STATUS_UPDATE_FAILED", dealUpd);
+      }
+    }
+
+    await (svc.from("deal_events") as any).insert({
+      deal_id: proposal.deal_id,
+      event_type: "OFFER_ACCEPTED",
+      payload: { proposal_id: proposalId },
+      created_by: user.id,
+    });
+
+    return json(200, { ok: true, status: "accepted" });
   }
 
-  return json(200, {
-    ok: true,
-    proposal_id: proposalId,
-    status: (updated as any).status,
+  const { error: threadUpd } = await (svc.from("deal_threads") as any)
+    .update({ status: "declined" })
+    .eq("id", thread.id);
+
+  if (threadUpd) return json(500, { error: threadUpd.message });
+
+  await (svc.from("deal_events") as any).insert({
+    deal_id: proposal.deal_id,
+    event_type: "OFFER_REJECTED",
+    payload: { proposal_id: proposalId },
+    created_by: user.id,
   });
+
+  return json(200, { ok: true, status: "declined" });
 }
