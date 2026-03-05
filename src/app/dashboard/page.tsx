@@ -525,8 +525,11 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const BUYER_SUBMITTED_STATUS = { label: "Offer submitted", tone: "blue", raw: "OFFER_SUBMITTED" };
   const OWNER_AWAITING_STATUS = { label: "Awaiting approval", tone: "amber", raw: "AWAITING_APPROVAL" };
 
+  const pendingOwnerDealIdSet = new Set(pendingOwnerDealIds);
+
   const ownerCards = grants
     .filter((g) => g.role === "OWNER")
+    .filter((g) => !pendingOwnerDealIdSet.has(g.deal_id))
     .map((g) => {
       const override = buyerPendingDealIds.has(g.deal_id)
         ? BUYER_SUBMITTED_STATUS
