@@ -221,6 +221,27 @@ export async function POST(
     return json(500, { error: dealOwnerUpdErr.message });
   }
 
+  if (propRow.owner_user_id) {
+    const { error: ownerGrantErr } = await (
+      svc.from("deal_access_grants") as any
+    ).upsert(
+      {
+        deal_id: dealId,
+        user_id: propRow.owner_user_id,
+        role: "OWNER",
+        created_by: user.id,
+        revoked_at: null,
+        expires_at: null,
+      },
+      { onConflict: "deal_id,user_id" },
+    );
+
+    if (ownerGrantErr) {
+      console.error("submit_offer_mint_owner_grant_error", ownerGrantErr);
+      return json(500, { error: ownerGrantErr.message });
+    }
+  }
+
   // IMPORTANT: move the deal out of DRAFT into the review state expected by the DB transition guard.
   // This prevents invalid transition DRAFT -> ACTIVE on owner accept.
   // Sprint 13: do NOT update deals.status here.
