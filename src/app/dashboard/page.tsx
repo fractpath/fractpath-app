@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { OnboardingGate } from "@/components/onboarding/OnboardingGate";
 
@@ -257,6 +258,17 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     threads.map((t: any) => t.deal_id).filter(Boolean) as string[],
   );
 
+  const buyerPendingDealIds = new Set(
+    threads
+      .filter((t: any) => t.status === "pending_owner" && t.buyer_user_id === user.id)
+      .map((t: any) => t.deal_id)
+      .filter(Boolean) as string[],
+  );
+
+  const pendingOwnerDealIds = (pendingOwnerThreads as any[])
+    .map((t: any) => t.deal_id)
+    .filter(Boolean) as string[];
+
   // deals I own (for "ready to submit" check)
   const myDealsRes = await supabase
     .from("deals")
@@ -395,6 +407,33 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     }
   }
 
+  if (pendingOwnerDealIds.length > 0) {
+    const svc = createServiceClient();
+    const extraIds = pendingOwnerDealIds.filter((id) => !byId.has(id));
+    if (extraIds.length > 0) {
+      const [extraDealsRes, extraSnapsRes] = await Promise.all([
+        (svc.from("deals") as any)
+          .select("id, owner_user_id, status, created_at")
+          .in("id", extraIds),
+        (svc.from("deal_snapshots") as any)
+          .select("deal_id, snapshot_json, created_at")
+          .in("deal_id", extraIds)
+          .order("created_at", { ascending: false }),
+      ]);
+      for (const d of extraDealsRes.data ?? []) {
+        if (d?.id) byId.set(d.id, d);
+      }
+      for (const s of extraSnapsRes.data ?? []) {
+        if (s?.deal_id && s.snapshot_json && !latestSnapByDeal.has(s.deal_id)) {
+          latestSnapByDeal.set(s.deal_id, s.snapshot_json);
+        }
+        if (s?.deal_id && s.created_at && !snapDateByDeal.has(s.deal_id)) {
+          snapDateByDeal.set(s.deal_id, s.created_at);
+        }
+      }
+    }
+  }
+
   function getHeaderFromSnapshot(snap: any): {
     title: string | null;
     display_address: string | null;
@@ -415,16 +454,20 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     };
   }
 
-  function buildCardVm(dealId: string, grantRole: string): CardVm {
+  function buildCardVm(
+    dealId: string,
+    grantRole: string,
+    overrideStatus?: { label: string; tone: string; raw: string },
+  ): CardVm {
     const deal = byId.get(dealId);
     const snap = latestSnapByDeal.get(dealId);
     const meta = extractDealCardMeta(snap);
 
     const header = getHeaderFromSnapshot(snap);
 
-    const rawStatus = ((deal?.status as string) || "IMPORTED").toUpperCase();
-    const statusLabel = formatStatusLabel(rawStatus);
-    const tone = STATUS_TONE[rawStatus] ?? "gray";
+    const rawStatus = overrideStatus?.raw ?? ((deal?.status as string) || "IMPORTED").toUpperCase();
+    const statusLabel = overrideStatus?.label ?? formatStatusLabel(rawStatus);
+    const tone = overrideStatus?.tone ?? (STATUS_TONE[rawStatus] ?? "gray");
 
     const href =
       grantRole === "OWNER" ? `/deal/${dealId}` : `/deal/${dealId}?mode=shared`;
@@ -479,13 +522,25 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     };
   }
 
+  const BUYER_SUBMITTED_STATUS = { label: "Offer submitted", tone: "blue", raw: "OFFER_SUBMITTED" };
+  const OWNER_AWAITING_STATUS = { label: "Awaiting approval", tone: "amber", raw: "AWAITING_APPROVAL" };
+
   const ownerCards = grants
     .filter((g) => g.role === "OWNER")
-    .map((g) => buildCardVm(g.deal_id, g.role));
+    .map((g) => {
+      const override = buyerPendingDealIds.has(g.deal_id)
+        ? BUYER_SUBMITTED_STATUS
+        : undefined;
+      return buildCardVm(g.deal_id, g.role, override);
+    });
 
   const viewerCards = grants
     .filter((g) => g.role === "VIEWER")
     .map((g) => buildCardVm(g.deal_id, g.role));
+
+  const pendingApprovalCards = pendingOwnerDealIds.map((dealId) =>
+    buildCardVm(dealId, "OWNER", OWNER_AWAITING_STATUS),
+  ).map((vm) => ({ ...vm, href: `/deal/${vm.dealId}#offer` }));
 
   const allCards = [...ownerCards, ...viewerCards];
 
@@ -632,6 +687,38 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           </div>
         </section>
 
+        {pendingApprovalCards.length > 0 && (
+          <section className="space-y-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-semibold">Offers waiting approval</h2>
+                <span className="inline-flex items-center justify-center rounded-full bg-amber-100 text-amber-800 text-xs font-semibold min-w-[20px] h-5 px-1.5">
+                  {pendingApprovalCards.length}
+                </span>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Review and decide on pending offers
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              {pendingApprovalCards.map((vm) => (
+                <DealCard
+                  key={vm.dealId}
+                  href={vm.href}
+                  title={vm.title}
+                  secondaryFmvLabel={vm.secondaryFmvLabel}
+                  kpiLine={vm.kpiLine}
+                  metaLine={vm.metaLine}
+                  statusLabel={vm.statusLabel}
+                  statusTone={vm.statusTone}
+                  roleChipLabel={vm.roleChipLabel}
+                />
+              ))}
+            </div>
+          </section>
+        )}
+
         <section className="space-y-6">
           <div className="flex items-center justify-between">
             <div>
@@ -647,27 +734,6 @@ export default async function DashboardPage({ searchParams }: PageProps) {
               + Create Deal
             </Link>
           </div>
-
-          {pendingOwnerThreads.length > 0 && (
-            <div className="rounded-lg border p-5 mb-6">
-              <h3 className="text-lg font-semibold mb-3">
-                Offers waiting for your decision
-              </h3>
-
-              <ul className="space-y-2">
-                {pendingOwnerThreads.map((thread: any) => (
-                  <li key={thread.id}>
-                    <Link
-                      href={`/deal/${thread.deal_id}#offer`}
-                      className="text-sm underline"
-                    >
-                      Review offer {(thread.deal_id ?? thread.id).slice(0, 8)}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
 
           {ownerCards.length === 0 ? (
             <div className="rounded-lg border p-4">
