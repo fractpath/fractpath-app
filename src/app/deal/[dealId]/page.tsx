@@ -6,6 +6,7 @@ import { AppHeader } from "@/components/layout/AppHeader";
 import { DealHeader } from "@/components/deals/DealHeader";
 import { DealDetailWidgetPanel } from "@/components/deal/DealDetailWidgetPanel";
 import { DealActivityFeed } from "@/components/deal/DealActivityFeed";
+import { ActiveThreadBanner } from "@/components/deal/ActiveThreadBanner";
 
 type PageProps = {
   params: Promise<{ dealId: string }>;
@@ -118,6 +119,13 @@ export default async function DealPage(ctx: PageProps) {
             initialTitle={headerTitle}
             initialProperty={headerProperty}
           />
+
+          {activeThread && (
+            <ActiveThreadBanner
+              threadId={activeThread.id}
+              threadStatus={activeThread.status}
+            />
+          )}
 
           <DealDetailWidgetPanel
             dealId={dealId}
