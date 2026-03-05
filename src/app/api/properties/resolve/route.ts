@@ -37,7 +37,7 @@ async function checkBlockingDeal(
     const { data: threads } = await (svc.from("deal_threads") as any)
       .select("id, status")
       .eq("property_id", propertyId)
-      .in("status", ["active", "pending", "negotiating"])
+      .in("status", ["pending_owner", "negotiating", "accepted"])
       .limit(1);
 
     if (threads && threads.length > 0) {
