@@ -7,11 +7,11 @@ function pickFirst(v: FormDataEntryValue | null): string {
 }
 
 function sanitizeReturnTo(rt: string): string {
-  // Same-origin only; allow absolute paths with query.
-  // Examples: "/share?t=...", "/dashboard", "/deal/abc?mode=shared"
   if (typeof rt !== "string") return "/dashboard";
   if (!rt.startsWith("/")) return "/dashboard";
   if (rt.startsWith("//")) return "/dashboard";
+  if (rt.startsWith("/\\")) return "/dashboard";
+  if (rt.includes("://")) return "/dashboard";
   return rt;
 }
 

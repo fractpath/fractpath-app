@@ -58,8 +58,16 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   });
 }
 
+function sanitizeReturnTo(rt: string): string {
+  if (typeof rt !== "string") return "/dashboard";
+  if (!rt.startsWith("/")) return "/dashboard";
+  if (rt.startsWith("//")) return "/dashboard";
+  if (rt.startsWith("/\\")) return "/dashboard";
+  if (rt.includes("://")) return "/dashboard";
+  return rt;
+}
+
 function abs(req: Request, pathAndQuery: string) {
-  // ✅ Correct on Replit + prod: external origin from forwarded headers
   const origin = getRequestOrigin(req);
   return new URL(pathAndQuery, origin);
 }
@@ -70,6 +78,7 @@ export async function POST(req: Request) {
   const password = String(form.get("password") || "");
   const personaRaw = String(form.get("persona") || "").toLowerCase();
   const persona = isValidPersona(personaRaw) ? personaRaw : null;
+  const returnTo = sanitizeReturnTo(String(form.get("returnTo") || ""));
 
   if (!email || !password) {
     return NextResponse.redirect(abs(req, "/signup?error=missing_fields"), 303);
@@ -105,7 +114,10 @@ export async function POST(req: Request) {
 
   const origin = getRequestOrigin(req);
   const base = supabaseUrl.replace(/\/+$/, "");
-  const redirectTo = origin + "/auth/callback";
+  const callbackPath = returnTo !== "/dashboard"
+    ? "/auth/callback?next=" + encodeURIComponent(returnTo)
+    : "/auth/callback";
+  const redirectTo = origin + callbackPath;
   const endpoint =
     base + "/auth/v1/signup?redirect_to=" + encodeURIComponent(redirectTo);
 
