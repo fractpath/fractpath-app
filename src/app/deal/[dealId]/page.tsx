@@ -8,6 +8,7 @@ import { DealDetailWidgetPanel } from "@/components/deal/DealDetailWidgetPanel";
 import { DealActivityFeed } from "@/components/deal/DealActivityFeed";
 import { ActiveThreadBanner } from "@/components/deal/ActiveThreadBanner";
 import { OwnerDecisionSection } from "@/components/deal/OwnerDecisionSection";
+import { DealActionsBar } from "@/components/deal/DealActionsBar";
 
 type PageProps = {
   params: Promise<{ dealId: string }>;
@@ -135,14 +136,24 @@ export default async function DealPage(ctx: PageProps) {
       <div className="min-h-screen">
         <AppHeader />
         <main className="mx-auto max-w-5xl p-6 space-y-6">
-          <DealHeader
-            dealId={dealId}
-            readOnly={!isOwner}
-            activeThread={activeThread}
-            initialTitle={headerTitle}
-            initialProperty={headerProperty}
-            locked={locked}
-          />
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1 min-w-0">
+              <DealHeader
+                dealId={dealId}
+                readOnly={!isOwner}
+                activeThread={activeThread}
+                initialTitle={headerTitle}
+                initialProperty={headerProperty}
+                locked={locked}
+              />
+            </div>
+            <DealActionsBar
+              dealId={dealId}
+              propertyId={headerProperty?.property_id ?? null}
+              locked={locked}
+              readOnly={!isOwner}
+            />
+          </div>
 
           {isPendingOwner && isBuyer && activeThread && (
             <ActiveThreadBanner
