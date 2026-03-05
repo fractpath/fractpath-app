@@ -103,10 +103,7 @@ export default async function DealPage(ctx: PageProps) {
     const isBuyer = !!activeThread && activeThread.buyer_user_id === user.id;
     const isPendingOwner = activeThread?.status === "pending_owner";
 
-    if (isPendingOwner && isPropertyOwner && activeThread) {
-      redirect(`/threads/${activeThread.id}`);
-    }
-
+    const showOwnerReviewLink = isPendingOwner && isPropertyOwner && !!activeThread;
     const locked = !!(isPendingOwner && isBuyer);
 
     const inputs = snapJson?.inputs ?? null;
@@ -137,6 +134,23 @@ export default async function DealPage(ctx: PageProps) {
               threadStatus={activeThread.status}
               isBuyer={true}
             />
+          )}
+
+          {showOwnerReviewLink && activeThread && (
+            <div className="rounded-md border border-emerald-300 bg-emerald-50 p-4">
+              <div className="flex items-center justify-between gap-4">
+                <div className="text-sm font-medium text-emerald-900">
+                  Offer submitted — review and decide
+                </div>
+                <Link
+                  href={`/threads/${activeThread.id}`}
+                  className="shrink-0 rounded-md border border-emerald-400 bg-white px-3 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-100"
+                  data-testid="owner-review-offer-link"
+                >
+                  Review offer
+                </Link>
+              </div>
+            </div>
           )}
 
           <DealDetailWidgetPanel
