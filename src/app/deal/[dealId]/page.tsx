@@ -104,7 +104,7 @@ export default async function DealPage(ctx: PageProps) {
     const isPendingOwner = activeThread?.status === "pending_owner";
 
     const showOwnerReviewLink = isPendingOwner && isPropertyOwner && !!activeThread;
-    const locked = !!(isPendingOwner && isBuyer);
+    const locked = !!isPendingOwner;
 
     const inputs = snapJson?.inputs ?? null;
     const results = snapJson?.outputs?.results ?? null;
@@ -159,7 +159,7 @@ export default async function DealPage(ctx: PageProps) {
             inputs={inputs}
             results={results}
             computeVersion={snapJson?.compute_version ?? null}
-            canEdit={isOwner}
+            canEdit={isOwner && !locked}
             persona="homeowner"
           />
 

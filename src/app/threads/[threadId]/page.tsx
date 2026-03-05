@@ -153,8 +153,10 @@ export default async function ThreadReviewPage(ctx: PageProps) {
     }
   }
 
-  // Redirect to deal offer view unless arriving from deal page (prevents loop)
-  if (!debug && !fromDeal && dealId) {
+  // Redirect to deal offer view unless:
+  // - arriving from deal page (prevents loop)
+  // - thread is pending_owner (owner needs Accept/Reject on this page)
+  if (!debug && !fromDeal && dealId && thread.status !== "pending_owner") {
     redirect(`/deal/${dealId}#offer`);
   }
 

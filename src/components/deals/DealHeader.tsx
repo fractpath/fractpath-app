@@ -196,55 +196,66 @@ export function DealHeader({
             <label className="mb-1 block text-sm font-medium text-gray-700">
               Deal Title
             </label>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Name this deal..."
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1"
-              data-testid="deal-title-input"
-              disabled={isDisabled}
-            />
+            {locked ? (
+              <div
+                className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700"
+                data-testid="deal-title-input"
+              >
+                {title || "Untitled deal"}
+              </div>
+            ) : (
+              <input
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Name this deal..."
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1"
+                data-testid="deal-title-input"
+                disabled={isDisabled}
+              />
+            )}
           </div>
 
-          <div className="flex items-center gap-2 pt-6">
-            <button
-              type="button"
-              onClick={() => setOpenAddProperty(true)}
-              disabled={isDisabled}
-              className="rounded-md border px-3 py-2 text-sm"
-              data-testid="deal-add-property-btn"
-            >
-              + Add property
-            </button>
+          {!locked && (
+            <div className="flex items-center gap-2 pt-6">
+              <button
+                type="button"
+                onClick={() => setOpenAddProperty(true)}
+                disabled={isDisabled}
+                className="rounded-md border px-3 py-2 text-sm"
+                data-testid="deal-add-property-btn"
+              >
+                + Add property
+              </button>
 
-            <button
-              type="button"
-              onClick={onSave}
-              disabled={isDisabled}
-              className="rounded-md border px-3 py-2 text-sm"
-              data-testid="deal-save-btn"
-            >
-              Save
-            </button>
+              <button
+                type="button"
+                onClick={onSave}
+                disabled={isDisabled}
+                className="rounded-md border px-3 py-2 text-sm"
+                data-testid="deal-save-btn"
+              >
+                Save
+              </button>
 
-            <button
-              type="button"
-              disabled={!canMakeOffer}
-              className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50"
-              data-testid="deal-propose-btn"
-              title={
-                hasActiveThread
-                  ? "Offer already pending"
-                  : !property?.property_id
-                    ? "Add a property first"
-                    : undefined
-              }
-              onClick={() => setOpenSubmitOffer(true)}
-            >
-              Submit Offer
-            </button>
-          </div>
+              <button
+                type="button"
+                disabled={!canMakeOffer}
+                className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50"
+                data-testid="deal-propose-btn"
+                title={
+                  hasActiveThread
+                    ? "Offer already pending"
+                    : !property?.property_id
+                      ? "Add a property first"
+                      : undefined
+                }
+                onClick={() => setOpenSubmitOffer(true)}
+              >
+                Submit Offer
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3">
