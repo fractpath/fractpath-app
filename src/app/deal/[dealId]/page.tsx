@@ -91,13 +91,23 @@ export default async function DealPage(ctx: PageProps) {
         : null;
 
     const { data: activeThreads } = await (svc.from("deal_threads") as any)
-      .select("id, status")
+      .select("id, status, buyer_user_id")
       .eq("deal_id", dealId)
       .in("status", ["pending_owner"])
       .limit(1);
 
     const activeThread =
       activeThreads && activeThreads.length > 0 ? activeThreads[0] : null;
+
+    const isPropertyOwner = user.id === (deal as any).owner_user_id;
+    const isBuyer = !!activeThread && activeThread.buyer_user_id === user.id;
+    const isPendingOwner = activeThread?.status === "pending_owner";
+
+    if (isPendingOwner && isPropertyOwner && activeThread) {
+      redirect(`/threads/${activeThread.id}`);
+    }
+
+    const locked = !!(isPendingOwner && isBuyer);
 
     const inputs = snapJson?.inputs ?? null;
     const results = snapJson?.outputs?.results ?? null;
@@ -118,12 +128,14 @@ export default async function DealPage(ctx: PageProps) {
             activeThread={activeThread}
             initialTitle={headerTitle}
             initialProperty={headerProperty}
+            locked={locked}
           />
 
-          {activeThread && (
+          {isPendingOwner && isBuyer && activeThread && (
             <ActiveThreadBanner
               threadId={activeThread.id}
               threadStatus={activeThread.status}
+              isBuyer={true}
             />
           )}
 

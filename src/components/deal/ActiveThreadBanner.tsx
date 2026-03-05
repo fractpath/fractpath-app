@@ -6,9 +6,10 @@ import { useRouter } from "next/navigation";
 type Props = {
   threadId: string;
   threadStatus: string;
+  isBuyer: boolean;
 };
 
-export function ActiveThreadBanner({ threadId, threadStatus }: Props) {
+export function ActiveThreadBanner({ threadId, threadStatus, isBuyer }: Props) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,7 +35,7 @@ export function ActiveThreadBanner({ threadId, threadStatus }: Props) {
     }
   }, [threadId, router]);
 
-  if (threadStatus !== "pending_owner") return null;
+  if (threadStatus !== "pending_owner" || !isBuyer) return null;
 
   return (
     <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 p-4" data-testid="active-thread-banner">

@@ -22,6 +22,7 @@ type Props = {
     property_status?: string | null;
     ownership_status?: string | null;
   } | null;
+  locked?: boolean;
 };
 
 function lsKey(dealId: string) {
@@ -42,6 +43,7 @@ export function DealHeader({
   activeThread,
   initialTitle,
   initialProperty,
+  locked = false,
 }: Props) {
   const [title, setTitle] = useState(initialTitle ?? "");
   const [property, setProperty] = useState<ResolvedProperty | null>(
@@ -171,7 +173,8 @@ export function DealHeader({
   }
 
   const hasActiveThread = activeThread?.status === "pending_owner";
-  const canMakeOffer = !!property?.property_id && !readOnly && !hasActiveThread;
+  const isDisabled = readOnly || locked;
+  const canMakeOffer = !!property?.property_id && !isDisabled && !hasActiveThread;
 
   const statusLabel = (() => {
     const ps =
@@ -200,7 +203,7 @@ export function DealHeader({
               placeholder="Name this deal..."
               className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1"
               data-testid="deal-title-input"
-              disabled={readOnly}
+              disabled={isDisabled}
             />
           </div>
 
@@ -208,7 +211,7 @@ export function DealHeader({
             <button
               type="button"
               onClick={() => setOpenAddProperty(true)}
-              disabled={readOnly}
+              disabled={isDisabled}
               className="rounded-md border px-3 py-2 text-sm"
               data-testid="deal-add-property-btn"
             >
@@ -218,7 +221,7 @@ export function DealHeader({
             <button
               type="button"
               onClick={onSave}
-              disabled={readOnly}
+              disabled={isDisabled}
               className="rounded-md border px-3 py-2 text-sm"
               data-testid="deal-save-btn"
             >
