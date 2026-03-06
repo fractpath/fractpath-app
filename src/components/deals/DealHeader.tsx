@@ -22,6 +22,7 @@ type Props = {
     ownership_status?: string | null;
   } | null;
   locked?: boolean;
+  onPropertyChange?: (propertyId: string | null) => void;
 };
 
 function lsKey(dealId: string) {
@@ -43,6 +44,7 @@ export function DealHeader({
   initialTitle,
   initialProperty,
   locked = false,
+  onPropertyChange,
 }: Props) {
   const [title, setTitle] = useState(initialTitle ?? "");
   const [property, setProperty] = useState<ResolvedProperty | null>(
@@ -95,11 +97,12 @@ export function DealHeader({
           property_status: parsed.property_status ?? null,
           ownership_status: parsed.ownership_status ?? null,
         });
+        onPropertyChange?.(parsed.property_id);
       }
     } catch {
       // ignore
     }
-  }, [key, initialTitle, initialProperty]);
+  }, [key, initialTitle, initialProperty, onPropertyChange]);
 
   const persistLocal = useCallback(
     (next: Stored) => {
@@ -220,6 +223,7 @@ export function DealHeader({
             property_status: r.property_status ?? null,
             ownership_status: r.ownership_status ?? null,
           });
+          onPropertyChange?.(r.property_id ?? null);
 
           const payload: Stored = {
             title,

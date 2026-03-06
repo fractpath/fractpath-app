@@ -3,12 +3,11 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { AppHeader } from "@/components/layout/AppHeader";
-import { DealHeader } from "@/components/deals/DealHeader";
+import { DealPageShell } from "@/components/deal/DealPageShell";
 import { DealDetailWidgetPanel } from "@/components/deal/DealDetailWidgetPanel";
 import { DealActivityFeed } from "@/components/deal/DealActivityFeed";
 import { ActiveThreadBanner } from "@/components/deal/ActiveThreadBanner";
 import { OwnerDecisionSection } from "@/components/deal/OwnerDecisionSection";
-import { DealActionsBar } from "@/components/deal/DealActionsBar";
 
 type PageProps = {
   params: Promise<{ dealId: string }>;
@@ -153,22 +152,13 @@ export default async function DealPage(ctx: PageProps) {
       <div className="min-h-screen">
         <AppHeader />
         <main className="mx-auto max-w-5xl p-6 space-y-6">
-          <div className="flex justify-end">
-            <DealActionsBar
-              dealId={dealId}
-              propertyId={headerProperty?.property_id ?? null}
-              locked={locked}
-              readOnly={!isOwner}
-            />
-          </div>
-
-          <DealHeader
+          <DealPageShell
             dealId={dealId}
-            readOnly={!isOwner}
+            isOwner={isOwner}
+            locked={locked}
             activeThread={activeThread}
             initialTitle={headerTitle}
             initialProperty={headerProperty}
-            locked={locked}
           />
 
           {isPendingOwner && isBuyer && activeThread && (
