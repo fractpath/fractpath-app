@@ -190,23 +190,46 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     .order("created_at", { ascending: false });
 
   const svcEarly = createServiceClient();
-  const pendingOwnerThreadsRes = await (svcEarly.from("deal_threads") as any)
-    .select(
-      `
-      id,
-      deal_id,
-      status,
-      property_id,
-      buyer_user_id,
-      properties!inner(owner_user_id)
-    `,
-    )
-    .eq("status", "pending_owner")
-    .eq("properties.owner_user_id", user.id)
-    .neq("buyer_user_id", user.id)
-    .order("created_at", { ascending: false });
+  const [pendingOwnerThreadsRes, acceptedOwnerThreadsRes] = await Promise.all([
+    (svcEarly.from("deal_threads") as any)
+      .select(
+        `
+        id,
+        deal_id,
+        status,
+        property_id,
+        buyer_user_id,
+        properties!inner(owner_user_id)
+      `,
+      )
+      .eq("status", "pending_owner")
+      .eq("properties.owner_user_id", user.id)
+      .neq("buyer_user_id", user.id)
+      .order("created_at", { ascending: false }),
+    (svcEarly.from("deal_threads") as any)
+      .select(
+        `
+        id,
+        deal_id,
+        status,
+        property_id,
+        buyer_user_id,
+        properties!inner(owner_user_id)
+      `,
+      )
+      .eq("status", "accepted")
+      .eq("properties.owner_user_id", user.id)
+      .neq("buyer_user_id", user.id)
+      .order("created_at", { ascending: false }),
+  ]);
 
   const pendingOwnerThreads = pendingOwnerThreadsRes.data ?? [];
+  const acceptedOwnerThreads = acceptedOwnerThreadsRes.data ?? [];
+  const acceptedOwnerDealIds = new Set(
+    (acceptedOwnerThreads as any[])
+      .map((t: any) => t.deal_id)
+      .filter(Boolean) as string[],
+  );
 
   if (grantsRes.error) {
     return (
@@ -428,6 +451,10 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     }
   }
 
+  for (const id of acceptedOwnerDealIds) {
+    acceptedThreadDealIds.add(id);
+  }
+
   const threadRelatedDealIds = [
     ...pendingOwnerDealIds,
     ...Array.from(acceptedThreadDealIds),
@@ -461,23 +488,51 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     }
   }
 
-  function getHeaderFromSnapshot(snap: any): {
+  const allKnownDealIds = Array.from(byId.keys());
+  const headerEventByDeal = new Map<string, Record<string, any>>();
+
+  if (allKnownDealIds.length > 0) {
+    const svcHeaders = createServiceClient();
+    const { data: headerEvents } = await (svcHeaders.from("deal_events") as any)
+      .select("deal_id, payload")
+      .in("deal_id", allKnownDealIds)
+      .eq("event_type", "DEAL_HEADER_UPDATED")
+      .order("created_at", { ascending: false });
+
+    for (const ev of headerEvents ?? []) {
+      if (ev?.deal_id && ev?.payload && !headerEventByDeal.has(ev.deal_id)) {
+        headerEventByDeal.set(ev.deal_id, ev.payload);
+      }
+    }
+  }
+
+  function getHeaderForDeal(dealId: string): {
     title: string | null;
     display_address: string | null;
     property_id: string | null;
     property_status: string | null;
     ownership_status: string | null;
   } {
+    const ev = headerEventByDeal.get(dealId);
+    const snap = latestSnapByDeal.get(dealId);
     const h = snap?.meta?.header ?? null;
+
     return {
-      title: typeof h?.title === "string" ? h.title : null,
+      title:
+        (typeof ev?.title === "string" ? ev.title : null) ??
+        (typeof h?.title === "string" ? h.title : null),
       display_address:
-        typeof h?.display_address === "string" ? h.display_address : null,
-      property_id: typeof h?.property_id === "string" ? h.property_id : null,
+        (typeof ev?.display_address === "string" ? ev.display_address : null) ??
+        (typeof h?.display_address === "string" ? h.display_address : null),
+      property_id:
+        (typeof ev?.property_id === "string" ? ev.property_id : null) ??
+        (typeof h?.property_id === "string" ? h.property_id : null),
       property_status:
-        typeof h?.property_status === "string" ? h.property_status : null,
+        (typeof ev?.property_status === "string" ? ev.property_status : null) ??
+        (typeof h?.property_status === "string" ? h.property_status : null),
       ownership_status:
-        typeof h?.ownership_status === "string" ? h.ownership_status : null,
+        (typeof ev?.ownership_status === "string" ? ev.ownership_status : null) ??
+        (typeof h?.ownership_status === "string" ? h.ownership_status : null),
     };
   }
 
@@ -490,7 +545,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     const snap = latestSnapByDeal.get(dealId);
     const meta = extractDealCardMeta(snap);
 
-    const header = getHeaderFromSnapshot(snap);
+    const header = getHeaderForDeal(dealId);
 
     const rawStatus = overrideStatus?.raw ?? ((deal?.status as string) || "IMPORTED").toUpperCase();
     const statusLabel = overrideStatus?.label ?? formatStatusLabel(rawStatus);

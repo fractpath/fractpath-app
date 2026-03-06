@@ -173,7 +173,7 @@ export async function POST(
     }
 
     const { error: tUpdErr } = await (svc.from("deal_threads") as any)
-      .update({ status: "accepted" })
+      .update({ status: "accepted", owner_user_id: user.id })
       .eq("id", thread.id)
       .eq("status", "pending_owner");
 
@@ -218,7 +218,7 @@ export async function POST(
   }
 
   const { error: tUpdErr } = await (svc.from("deal_threads") as any)
-    .update({ status: "closed" })
+    .update({ status: "closed", owner_user_id: user.id })
     .eq("id", thread.id)
     .eq("status", "pending_owner");
 

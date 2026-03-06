@@ -117,7 +117,7 @@ export async function POST(req: Request, ctx: { params: Promise<Params> }) {
 
   const { data: updated, error: updErr } = await sb
     .from("deal_threads")
-    .update({ status: nextStatus })
+    .update({ status: nextStatus, owner_user_id: user.id })
     .eq("id", threadId)
     .select("id, status")
     .maybeSingle();
