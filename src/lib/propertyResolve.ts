@@ -23,7 +23,21 @@ export async function getOrCreatePropertyByAddress(
   createdByUserId: string,
   structured?: StructuredAddress | null,
 ): Promise<ResolvedProperty> {
-  const normalized = normalizeAddress(inputAddress);
+  let normalized: string;
+  if (
+    structured &&
+    structured.address_line1
+  ) {
+    const parts = [
+      structured.address_line1,
+      structured.city,
+      structured.state,
+      structured.postal_code,
+    ].filter(Boolean).join(", ");
+    normalized = normalizeAddress(parts);
+  } else {
+    normalized = normalizeAddress(inputAddress);
+  }
   if (!normalized) throw new Error("Address is empty after normalization");
 
   const { data: existing, error: selErr } = await (

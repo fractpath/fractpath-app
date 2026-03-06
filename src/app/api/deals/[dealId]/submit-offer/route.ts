@@ -86,15 +86,22 @@ export async function POST(
     return json(422, { error: "property_id must be a valid UUID" });
   }
 
+  const { data: prop } = await (svc.from("properties") as any)
+    .select("id, owner_user_id, status")
+    .eq("id", propertyId)
+    .maybeSingle();
+
+  if (!prop) {
+    return json(422, {
+      error:
+        "Property not found. It may have been removed. Please re-select the property and try again.",
+    });
+  }
+
   let ownerUserId: string | null = null;
 
   if (mode === "verified_owner") {
-    const { data: prop } = await (svc.from("properties") as any)
-      .select("id, owner_user_id, status")
-      .eq("id", propertyId)
-      .maybeSingle();
-
-    if (!prop || prop.status !== "verified" || !prop.owner_user_id) {
+    if (prop.status !== "verified" || !prop.owner_user_id) {
       return json(422, {
         error: "Property must be verified with a known owner",
       });
@@ -199,22 +206,8 @@ export async function POST(
       created_by_user_id: user.id,
     });
   }
-  // Option A (Sprint 13): deterministically set deals.owner_user_id from the thread's property owner.
-  // This keeps legacy owner-based deal access consistent for verified owners.
-  const { data: propRow, error: propOwnerErr } = await (
-    svc.from("properties") as any
-  )
-    .select("owner_user_id")
-    .eq("id", thread.property_id)
-    .single();
-
-  if (propOwnerErr) {
-    console.error("submit_offer_load_property_owner_error", propOwnerErr);
-    return json(500, { error: propOwnerErr.message });
-  }
-
   const { error: dealOwnerUpdErr } = await (svc.from("deals") as any)
-    .update({ owner_user_id: propRow.owner_user_id })
+    .update({ owner_user_id: prop.owner_user_id })
     .eq("id", dealId)
     .eq("status", "DRAFT"); // guard: don't mutate after acceptance/execution
 
@@ -223,13 +216,13 @@ export async function POST(
     return json(500, { error: dealOwnerUpdErr.message });
   }
 
-  if (propRow.owner_user_id) {
+  if (prop.owner_user_id) {
     const { error: ownerGrantErr } = await (
       svc.from("deal_access_grants") as any
     ).upsert(
       {
         deal_id: dealId,
-        user_id: propRow.owner_user_id,
+        user_id: prop.owner_user_id,
         role: "OWNER",
         created_by: user.id,
         revoked_at: null,
@@ -257,10 +250,10 @@ export async function POST(
     created_by: user.id,
   });
 
-  if (propRow.owner_user_id) {
+  if (prop.owner_user_id) {
     try {
       const { data: ownerUser } = await svc.auth.admin.getUserById(
-        propRow.owner_user_id,
+        prop.owner_user_id,
       );
       const ownerEmail = ownerUser?.user?.email;
       if (ownerEmail) {
@@ -285,7 +278,7 @@ export async function POST(
     } catch (emailErr: any) {
       console.error("submit_offer_email_failed", {
         dealId,
-        ownerUserId: propRow.owner_user_id,
+        ownerUserId: prop.owner_user_id,
         error: emailErr?.message,
       });
     }
