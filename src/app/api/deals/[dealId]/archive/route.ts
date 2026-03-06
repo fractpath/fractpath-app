@@ -42,14 +42,17 @@ export async function POST(
   const isOwnerByField = (deal as any).owner_user_id === user.id;
   if (!grant && !isOwnerByField) return jsonError("Forbidden", 403);
 
+  // Idempotent: if already archived, treat as success.
   if ((deal as any).archived_at) {
     return NextResponse.json({ ok: true, already_archived: true });
   }
 
   const svc = createServiceClient();
+  const nowIso = new Date().toISOString();
 
+  // 1) Archive the deal (idempotent guard).
   const { error: archiveErr } = await (svc.from("deals") as any)
-    .update({ archived_at: new Date().toISOString(), archived_by: user.id })
+    .update({ archived_at: nowIso, archived_by: user.id })
     .eq("id", dealId)
     .is("archived_at", null);
 
@@ -59,12 +62,16 @@ export async function POST(
       userId: user.id,
       code: archiveErr.code,
       message: archiveErr.message,
+      details: (archiveErr as any).details,
+      hint: (archiveErr as any).hint,
     });
     return jsonError("Failed to archive deal", 500);
   }
 
+  // 2) Best-effort: revoke caller's access grant(s).
+  // IMPORTANT: Do not fail the request after archiving if revocation fails.
   const { error: revokeErr } = await (svc.from("deal_access_grants") as any)
-    .update({ revoked_at: new Date().toISOString() })
+    .update({ revoked_at: nowIso })
     .eq("deal_id", dealId)
     .eq("user_id", user.id)
     .is("revoked_at", null);
@@ -75,9 +82,16 @@ export async function POST(
       userId: user.id,
       code: revokeErr.code,
       message: revokeErr.message,
+      details: (revokeErr as any).details,
+      hint: (revokeErr as any).hint,
     });
-    return jsonError("Deal archived but failed to revoke access. Contact support.", 500);
+    // Archive succeeded; return ok with warning so UI can inform user.
+    return NextResponse.json({
+      ok: true,
+      archived: true,
+      warning: "Archived, but failed to revoke access automatically.",
+    });
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, archived: true });
 }
