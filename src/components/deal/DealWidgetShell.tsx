@@ -1,7 +1,10 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { FractPathCalculatorWidget } from "fractpath-calculator-widget";
+import {
+  DealSnapshotView,
+  DealEditModal,
+} from "fractpath-calculator-widget";
 import { normalizeDealTermsForWidget } from "@/lib/normalizeDealTermsForWidget";
 
 type AnyRecord = Record<string, unknown>;
@@ -28,49 +31,6 @@ function safeNumber(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/**
- * Normalize widget onSave payloads to deal_terms + scenario (scenario may be empty).
- */
-function pickInputsFromPayload(
-  payload: unknown,
-): { deal_terms: AnyRecord; scenario: AnyRecord } | null {
-  const p = safeRecord(payload);
-  if (!p) return null;
-
-  const candidates: unknown[] = [
-    (p as any).inputs,
-    (p as any).snapshot?.inputs,
-    (p as any).snapshot_json?.inputs,
-    (p as any).snapshot,
-    (p as any).snapshot_json,
-    p,
-  ];
-
-  for (const c of candidates) {
-    const rec = safeRecord(c);
-    if (!rec) continue;
-
-    // Case 1: rec itself looks like "inputs"
-    const dt1 = safeRecord((rec as any).deal_terms);
-    if (dt1) {
-      const sc1 = safeRecord((rec as any).scenario) ?? {};
-      return { deal_terms: dt1, scenario: sc1 };
-    }
-
-    // Case 2: rec looks like a snapshot, and .inputs exists
-    const nestedInputs = safeRecord((rec as any).inputs);
-    if (nestedInputs) {
-      const dt2 = safeRecord((nestedInputs as any).deal_terms);
-      if (dt2) {
-        const sc2 = safeRecord((nestedInputs as any).scenario) ?? {};
-        return { deal_terms: dt2, scenario: sc2 };
-      }
-    }
-  }
-
-  return null;
-}
-
 export function DealWidgetShell({
   initialSnapshot,
   canEdit,
@@ -78,6 +38,7 @@ export function DealWidgetShell({
   onSave,
 }: DealWidgetShellProps) {
   const [error, setError] = useState<string | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
 
   const seedSnapshot = useMemo(() => {
     const snap = safeRecord(initialSnapshot);
@@ -109,21 +70,19 @@ export function DealWidgetShell({
     return s0 ?? {};
   }, [seedSnapshot]);
 
-  const handleSave = useCallback(
-    async (payload: unknown) => {
-      // DEBUG (browser console): keep until save works, then remove
+  const editInitial = useMemo(() => {
+    const inputs = safeRecord((seedSnapshot as any)?.inputs);
+    if (!inputs) return undefined;
+    const dt = safeRecord((inputs as any).deal_terms);
+    const sc = safeRecord((inputs as any).scenario);
+    if (!dt) return undefined;
+    return { deal_terms: dt, scenario: sc ?? {} };
+  }, [seedSnapshot]);
 
-      const normalized = pickInputsFromPayload(payload);
-
-      if (!normalized) {
-        setError("Save failed: widget did not provide deal_terms.");
-        return;
-      }
-
-      const dealTerms = normalized.deal_terms;
-
-      // Ensure scenario.exit_year is present.
-      const scenario: AnyRecord = { ...(normalized.scenario ?? {}) };
+  const handleModalSave = useCallback(
+    async (saved: { deal_terms: AnyRecord; scenario: AnyRecord }) => {
+      const dealTerms = saved.deal_terms;
+      const scenario: AnyRecord = { ...(saved.scenario ?? {}) };
 
       const exitFromScenario = safeNumber((scenario as any).exit_year);
       const exitFromSeed = safeNumber((seedScenario as any).exit_year);
@@ -132,7 +91,6 @@ export function DealWidgetShell({
         if (exitFromSeed != null) {
           (scenario as any).exit_year = exitFromSeed;
         } else {
-          // last-resort default (keeps compute unblocked)
           (scenario as any).exit_year = 5;
         }
       }
@@ -156,12 +114,16 @@ export function DealWidgetShell({
           deal_terms: normalizeDealTermsForWidget(mergedTerms),
           scenario: mergedScenario,
         });
+        setEditOpen(false);
       } catch (err: any) {
         setError(err?.message ?? "Save failed");
       }
     },
     [onSave, seedScenario, seedSnapshot],
   );
+
+  const inputs = safeRecord((seedSnapshot as any)?.inputs);
+  const results = safeRecord((seedSnapshot as any)?.outputs?.results);
 
   return (
     <div>
@@ -171,15 +133,60 @@ export function DealWidgetShell({
         </div>
       ) : null}
 
-      {seedSnapshot ? (
+      {seedSnapshot && inputs && results ? (
         <div className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950">
-          <FractPathCalculatorWidget
+          <DealSnapshotView
             persona={persona as any}
-            mode="app"
-            canEdit={canEdit}
-            initialSnapshot={seedSnapshot as any}
-            onSave={canEdit && onSave ? handleSave : undefined}
+            status="active"
+            inputs={inputs as any}
+            results={results as any}
           />
+
+          {canEdit && onSave && (
+            <div style={{ marginTop: 12, textAlign: "right" }}>
+              <button
+                type="button"
+                onClick={() => setEditOpen(true)}
+                className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+              >
+                Edit Terms
+              </button>
+            </div>
+          )}
+
+          {editOpen && editInitial && (
+            <DealEditModal
+              initial={editInitial as any}
+              persona={persona as any}
+              onClose={() => setEditOpen(false)}
+              onSaved={handleModalSave as any}
+            />
+          )}
+        </div>
+      ) : seedSnapshot ? (
+        <div className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Snapshot data is incomplete. Missing inputs or results.
+          </p>
+          {canEdit && onSave && editInitial && (
+            <>
+              <button
+                type="button"
+                onClick={() => setEditOpen(true)}
+                className="mt-3 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+              >
+                Edit Terms
+              </button>
+              {editOpen && (
+                <DealEditModal
+                  initial={editInitial as any}
+                  persona={persona as any}
+                  onClose={() => setEditOpen(false)}
+                  onSaved={handleModalSave as any}
+                />
+              )}
+            </>
+          )}
         </div>
       ) : (
         <div className="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-950">

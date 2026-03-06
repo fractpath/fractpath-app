@@ -293,6 +293,24 @@ export default async function DealPage(ctx: PageProps) {
       property = p ?? null;
       ownerMatches = !!p?.owner_user_id && p.owner_user_id === user.id;
     }
+
+    if (!ownerMatches && threadId && user.email) {
+      const { data: invite } = await (svc.from("thread_invites") as any)
+        .select("id, intended_role, expires_at")
+        .eq("thread_id", threadId)
+        .eq("invitee_email", user.email.toLowerCase())
+        .eq("intended_role", "owner")
+        .limit(1)
+        .maybeSingle();
+
+      if (invite) {
+        const notExpired =
+          !invite.expires_at || new Date(invite.expires_at) > new Date();
+        if (notExpired) {
+          ownerMatches = true;
+        }
+      }
+    }
   }
 
   if (ownerMatches) {

@@ -189,6 +189,47 @@ export async function POST(
         ).toISOString(),
         created_by_user_id: user.id,
       });
+
+      try {
+        let inviteeUserId: string | null = null;
+        let page = 1;
+        const perPage = 100;
+        while (!inviteeUserId) {
+          const { data: listData } = await svc.auth.admin.listUsers({
+            page,
+            perPage,
+          });
+          const users = listData?.users ?? [];
+          const match = users.find(
+            (u: any) => u.email?.toLowerCase() === email,
+          );
+          if (match) {
+            inviteeUserId = match.id;
+            break;
+          }
+          if (users.length < perPage) break;
+          page++;
+        }
+        if (inviteeUserId && inviteeUserId !== user.id) {
+          await (svc.from("deal_access_grants") as any).upsert(
+            {
+              deal_id: dealId,
+              user_id: inviteeUserId,
+              role: "COUNTERPARTY",
+              created_by: user.id,
+              revoked_at: null,
+              expires_at: null,
+            },
+            { onConflict: "deal_id,user_id" },
+          );
+        }
+      } catch (grantErr: any) {
+        console.error("submit_offer_known_email_grant_error", {
+          dealId,
+          email,
+          error: grantErr?.message,
+        });
+      }
     }
   }
 
