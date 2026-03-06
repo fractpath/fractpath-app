@@ -5,6 +5,7 @@ import {
   enforceLimitsAndProcess,
   type DocProcessingMeta,
 } from "@/lib/uploads/documentProcessing";
+import { normalizeAddress } from "@/lib/propertyResolve";
 
 export const runtime = "nodejs";
 
@@ -97,6 +98,9 @@ export async function POST(req: Request) {
 
   const svc = createServiceClient();
 
+  const displayParts = [address_line1, address_line2, city, state, postal_code].filter(Boolean).join(", ");
+  const computed_normalized = normalizeAddress(displayParts);
+
   const { data: prop, error: insertErr } = await (svc.from("properties") as any)
     .insert({
       owner_user_id: user.id,
@@ -108,6 +112,7 @@ export async function POST(req: Request) {
       postal_code,
       status: "unverified",
       is_private: true,
+      normalized_address: computed_normalized || null,
     })
     .select("id")
     .single();

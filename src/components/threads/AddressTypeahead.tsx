@@ -5,6 +5,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 type Suggestion = {
   label: string;
   place_id: string;
+  address_line1?: string | null;
+  city?: string | null;
+  state?: string | null;
+  state_code?: string | null;
+  postal_code?: string | null;
 };
 
 export type ResolvedProperty = {
@@ -96,7 +101,16 @@ export function AddressTypeahead({
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ place_id: s.place_id, address: s.label }),
+        body: JSON.stringify({
+          place_id: s.place_id,
+          address: s.label,
+          structured: {
+            address_line1: s.address_line1 ?? null,
+            city: s.city ?? null,
+            state: s.state_code ?? s.state ?? null,
+            postal_code: s.postal_code ?? null,
+          },
+        }),
       });
       const data = await res.json();
       if (data.ok) {

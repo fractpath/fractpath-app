@@ -10,10 +10,18 @@ export function normalizeAddress(raw: string): string {
   return raw.trim().toLowerCase().replace(/[,.]/g, "").replace(/\s+/g, " ");
 }
 
+export type StructuredAddress = {
+  address_line1: string | null;
+  city: string | null;
+  state: string | null;
+  postal_code: string | null;
+};
+
 export async function getOrCreatePropertyByAddress(
   svc: any,
   inputAddress: string,
   createdByUserId: string,
+  structured?: StructuredAddress | null,
 ): Promise<ResolvedProperty> {
   const normalized = normalizeAddress(inputAddress);
   if (!normalized) throw new Error("Address is empty after normalization");
@@ -47,20 +55,24 @@ export async function getOrCreatePropertyByAddress(
     };
   }
 
+  const insertRow: Record<string, any> = {
+    owner_user_id: createdByUserId,
+    address_line1: structured?.address_line1 || inputAddress.trim(),
+    city: structured?.city || null,
+    state: structured?.state || null,
+    postal_code: structured?.postal_code || null,
+    status: "unverified",
+    is_private: true,
+    ownership_status: "unclaimed",
+    created_by_user_id: createdByUserId,
+    last_activity_at: now,
+    normalized_address: normalized,
+  };
+
   const { data: inserted, error: insertErr } = await (
     svc.from("properties") as any
   )
-    .insert({
-      owner_user_id: createdByUserId,
-      // beta: store as line1 only; structured parsing can be added later
-      address_line1: inputAddress.trim(),
-      status: "unverified",
-      is_private: true,
-      ownership_status: "unclaimed",
-      created_by_user_id: createdByUserId,
-      last_activity_at: now,
-      normalized_address: normalized,
-    })
+    .insert(insertRow)
     .select("id, normalized_address")
     .single();
 

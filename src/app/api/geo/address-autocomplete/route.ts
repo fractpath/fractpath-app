@@ -44,10 +44,22 @@ export async function GET(request: NextRequest) {
     const data = await res.json();
     const results = data.results ?? [];
 
-    const suggestions = results.slice(0, 6).map((r: any) => ({
-      label: r.formatted ?? "",
-      place_id: r.place_id ?? "",
-    }));
+    const suggestions = results.slice(0, 6).map((r: any) => {
+      const housenumber = typeof r.housenumber === "string" ? r.housenumber : "";
+      const street = typeof r.street === "string" ? r.street : "";
+      const line1 = [housenumber, street].filter(Boolean).join(" ");
+
+      return {
+        label: r.formatted ?? "",
+        place_id: r.place_id ?? "",
+        address_line1: line1 || null,
+        city: r.city ?? r.town ?? r.village ?? null,
+        state: r.state ?? null,
+        state_code: r.state_code ?? null,
+        postal_code: r.postcode ?? null,
+        country: r.country ?? null,
+      };
+    });
 
     return NextResponse.json({ ok: true, suggestions });
   } catch (err: any) {

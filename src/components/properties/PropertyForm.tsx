@@ -272,14 +272,11 @@ export function PropertyForm(props: {
           };
           setResolved(merged);
 
-          const parts = r.display_address.split(",").map((s) => s.trim());
-          if (parts[0]) setLine1(parts[0]);
-          if (parts.length >= 3) {
-            setCity(parts[1] ?? "");
-            const stateZip = (parts[2] ?? "").split(/\s+/);
-            if (stateZip[0]) setState(stateZip[0]);
-            if (stateZip[1]) setZip(stateZip[1]);
-          }
+          if (data.address_line1) setLine1(data.address_line1);
+          if (data.address_line2) setLine2(data.address_line2);
+          if (data.city) setCity(data.city);
+          if (data.state) setState(data.state);
+          if (data.postal_code) setZip(data.postal_code);
         } else {
           setResolved(r as ResolvedFull);
           setResolveError(

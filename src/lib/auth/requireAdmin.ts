@@ -1,7 +1,12 @@
 import { createClient } from "@/lib/supabase/server";
 
 export type AdminResult =
-  | { ok: true; status: 200; email: string | null; user: { id: string; email: string | null } }
+  | {
+      ok: true;
+      status: 200;
+      email: string | null;
+      user: { id: string; email: string | null };
+    }
   | { ok: false; status: 401 | 403; error: string; email: string | null };
 
 export async function requireAdmin(): Promise<AdminResult> {
@@ -23,15 +28,17 @@ export async function requireAdmin(): Promise<AdminResult> {
     "alex.hachey+1234@gmail.com",
   ]);
 
+  const adminUser = { id: user.id, email };
+
+  // TEMP DEV override: known allowlisted admins always pass
+  if (email && DEV_ADMIN_EMAILS.has(email)) {
+    return { ok: true, status: 200, email, user: adminUser };
+  }
+
   // Canonical admin check via RPC
   const { data, error } = await supabase.rpc("is_admin_v2");
 
-  const adminUser = { id: user.id, email };
-
   if (error) {
-    if (email && DEV_ADMIN_EMAILS.has(email)) {
-      return { ok: true, status: 200, email, user: adminUser };
-    }
     return {
       ok: false,
       status: 403,

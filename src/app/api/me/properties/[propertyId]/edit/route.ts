@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { enforceLimitsAndProcess } from "@/lib/uploads/documentProcessing";
+import { normalizeAddress } from "@/lib/propertyResolve";
 
 export const runtime = "nodejs";
 
@@ -54,6 +55,9 @@ export async function PATCH(
 
   const svc = createServiceClient();
 
+  const displayParts = [address_line1, address_line2, city, state, postal_code].filter(Boolean).join(", ");
+  const computed_normalized = normalizeAddress(displayParts);
+
   const { error: updateErr } = await (svc.from("properties") as any)
     .update({
       address_line1,
@@ -61,6 +65,7 @@ export async function PATCH(
       city: city || null,
       state,
       postal_code,
+      normalized_address: computed_normalized || null,
     })
     .eq("id", propertyId)
     .eq("owner_user_id", user.id);

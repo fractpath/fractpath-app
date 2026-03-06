@@ -72,6 +72,28 @@ export async function POST(request: NextRequest) {
   let address = typeof body?.address === "string" ? body.address.trim() : "";
   const placeId = typeof body?.place_id === "string" ? body.place_id.trim() : "";
 
+  const structured =
+    body?.structured && typeof body.structured === "object"
+      ? {
+          address_line1:
+            typeof body.structured.address_line1 === "string"
+              ? body.structured.address_line1.trim()
+              : null,
+          city:
+            typeof body.structured.city === "string"
+              ? body.structured.city.trim()
+              : null,
+          state:
+            typeof body.structured.state === "string"
+              ? body.structured.state.trim()
+              : null,
+          postal_code:
+            typeof body.structured.postal_code === "string"
+              ? body.structured.postal_code.trim()
+              : null,
+        }
+      : null;
+
   if (!address && placeId) {
     const resolved = await resolveAddressFromPlaceId(placeId);
     if (resolved) {
@@ -85,10 +107,10 @@ export async function POST(request: NextRequest) {
 
   try {
     const svc = createServiceClient();
-    const result = await getOrCreatePropertyByAddress(svc, address, user.id);
+    const result = await getOrCreatePropertyByAddress(svc, address, user.id, structured);
 
     const { data: prop } = await (svc.from("properties") as any)
-      .select("status, ownership_status, claimed_by_user_id")
+      .select("status, ownership_status, claimed_by_user_id, address_line1, address_line2, city, state, postal_code")
       .eq("id", result.property_id)
       .maybeSingle();
 
@@ -105,6 +127,11 @@ export async function POST(request: NextRequest) {
       property_exists: !result.created,
       has_blocking_deal: blocking.has_blocking_deal,
       blocking_reason: blocking.blocking_reason,
+      address_line1: prop?.address_line1 ?? null,
+      address_line2: prop?.address_line2 ?? null,
+      city: prop?.city ?? null,
+      state: prop?.state ?? null,
+      postal_code: prop?.postal_code ?? null,
     });
   } catch (err: any) {
     const msg = err?.message ?? String(err);
