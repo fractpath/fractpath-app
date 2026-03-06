@@ -189,8 +189,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     .is("revoked_at", null)
     .order("created_at", { ascending: false });
 
-  const pendingOwnerThreadsRes = await supabase
-    .from("deal_threads")
+  const svcEarly = createServiceClient();
+  const pendingOwnerThreadsRes = await (svcEarly.from("deal_threads") as any)
     .select(
       `
       id,
@@ -268,6 +268,20 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const pendingOwnerDealIds = (pendingOwnerThreads as any[])
     .map((t: any) => t.deal_id)
     .filter(Boolean) as string[];
+
+  const acceptedThreadDealIds = new Set(
+    threads
+      .filter((t: any) => t.status === "accepted")
+      .map((t: any) => t.deal_id)
+      .filter(Boolean) as string[],
+  );
+
+  const declinedThreadDealIds = new Set(
+    threads
+      .filter((t: any) => t.status === "declined")
+      .map((t: any) => t.deal_id)
+      .filter(Boolean) as string[],
+  );
 
   // deals I own (for "ready to submit" check)
   const myDealsRes = await supabase
@@ -409,9 +423,14 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     }
   }
 
-  if (pendingOwnerDealIds.length > 0) {
+  const threadRelatedDealIds = [
+    ...pendingOwnerDealIds,
+    ...Array.from(acceptedThreadDealIds),
+  ];
+
+  if (threadRelatedDealIds.length > 0) {
     const svc = createServiceClient();
-    const extraIds = pendingOwnerDealIds.filter((id) => !byId.has(id));
+    const extraIds = threadRelatedDealIds.filter((id) => !byId.has(id));
     if (extraIds.length > 0) {
       const [extraDealsRes, extraSnapsRes] = await Promise.all([
         (svc.from("deals") as any)
@@ -527,6 +546,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   const BUYER_SUBMITTED_STATUS = { label: "Offer submitted", tone: "blue", raw: "OFFER_SUBMITTED" };
   const OWNER_AWAITING_STATUS = { label: "Awaiting approval", tone: "amber", raw: "AWAITING_APPROVAL" };
+  const ACTIVE_DEAL_STATUS = { label: "Active", tone: "green", raw: "ACTIVE" };
 
   const pendingOwnerDealIdSet = new Set(pendingOwnerDealIds);
 
@@ -534,6 +554,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     .filter((g) => g.role === "OWNER")
     .filter((g) => byId.has(g.deal_id))
     .filter((g) => !pendingOwnerDealIdSet.has(g.deal_id))
+    .filter((g) => !acceptedThreadDealIds.has(g.deal_id))
+    .filter((g) => !declinedThreadDealIds.has(g.deal_id))
     .map((g) => {
       const override = buyerPendingDealIds.has(g.deal_id)
         ? BUYER_SUBMITTED_STATUS
@@ -552,7 +574,14 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       buildCardVm(dealId, "OWNER", OWNER_AWAITING_STATUS),
     ).map((vm) => ({ ...vm, href: `/deal/${vm.dealId}#offer` }));
 
-  const allCards = [...ownerCards, ...viewerCards];
+  const activeDealCardIds = Array.from(acceptedThreadDealIds).filter((id) =>
+    byId.has(id),
+  );
+  const activeCards = activeDealCardIds.map((dealId) =>
+    buildCardVm(dealId, "OWNER", ACTIVE_DEAL_STATUS),
+  );
+
+  const allCards = [...ownerCards, ...viewerCards, ...activeCards];
 
   const totalDeals = allCards.length;
   const inProgress = allCards.filter((c) =>
@@ -561,11 +590,11 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const sharedCount = viewerCards.length;
   const followUpsDue = 0;
 
-  const totalPotentialValue = ownerCards.reduce(
+  const totalPotentialValue = [...ownerCards, ...activeCards].reduce(
     (sum, c) => sum + (c.fmvRaw ?? 0),
     0,
   );
-  const totalActiveValue = ownerCards
+  const totalActiveValue = [...ownerCards, ...activeCards]
     .filter((c) => ACTIVE_VALUE_STATUSES.has(c.rawStatus))
     .reduce((sum, c) => sum + (c.fmvRaw ?? 0), 0);
 
@@ -713,6 +742,38 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
             <div className="space-y-2">
               {pendingApprovalCards.map((vm) => (
+                <DealCard
+                  key={vm.dealId}
+                  href={vm.href}
+                  title={vm.title}
+                  secondaryFmvLabel={vm.secondaryFmvLabel}
+                  kpiLine={vm.kpiLine}
+                  metaLine={vm.metaLine}
+                  statusLabel={vm.statusLabel}
+                  statusTone={vm.statusTone}
+                  roleChipLabel={vm.roleChipLabel}
+                />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {activeCards.length > 0 && (
+          <section className="space-y-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-semibold">Active Deals</h2>
+                <span className="inline-flex items-center justify-center rounded-full bg-green-100 text-green-800 text-xs font-semibold min-w-[20px] h-5 px-1.5">
+                  {activeCards.length}
+                </span>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Deals with accepted offers
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              {activeCards.map((vm) => (
                 <DealCard
                   key={vm.dealId}
                   href={vm.href}
