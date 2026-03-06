@@ -2,25 +2,29 @@ type SendShareLinkEmailOpts = {
   to: string;
   from: string;
   subject: string;
-  text: string;
-  html?: string;
+  template: {
+    id: string;
+    variables: Record<string, string>;
+  };
 };
 
-export async function sendShareLinkEmail(opts: SendShareLinkEmailOpts): Promise<void> {
+export async function sendShareLinkEmail(
+  opts: SendShareLinkEmailOpts,
+): Promise<void> {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
     throw new Error("RESEND_API_KEY is not configured");
   }
 
-  const payload: Record<string, string> = {
+  const payload = {
     from: opts.from,
-    to: opts.to,
+    to: [opts.to],
     subject: opts.subject,
-    text: opts.text,
+    template: {
+      id: opts.template.id,
+      variables: opts.template.variables,
+    },
   };
-  if (opts.html) {
-    payload.html = opts.html;
-  }
 
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -31,12 +35,25 @@ export async function sendShareLinkEmail(opts: SendShareLinkEmailOpts): Promise<
     body: JSON.stringify(payload),
   });
 
+  const rawBody = await res.text().catch(() => "(no body)");
+
   if (!res.ok) {
-    const body = await res.text().catch(() => "(no body)");
     console.error("resend_send_error", {
       status: res.status,
-      body,
+      body: rawBody,
+      templateId: opts.template.id,
+      from: opts.from,
+      to: opts.to,
+      subject: opts.subject,
+      payload,
     });
-    throw new Error("Email delivery failed");
+    throw new Error(`Resend send failed (${res.status}): ${rawBody}`);
   }
+
+  console.error("resend_send_ok", {
+    status: res.status,
+    body: rawBody,
+    templateId: opts.template.id,
+    to: opts.to,
+  });
 }
