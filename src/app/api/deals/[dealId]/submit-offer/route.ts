@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import { getAppBaseUrlServer } from "@/lib/appBaseUrl";
+import { sendTemplateEmail } from "@/lib/email/sendTemplateEmail";
 
 export const runtime = "nodejs";
 
@@ -254,6 +256,40 @@ export async function POST(
     payload: { thread_id: thread.id, proposal_id: proposal.id, mode },
     created_by: user.id,
   });
+
+  if (propRow.owner_user_id) {
+    try {
+      const { data: ownerUser } = await svc.auth.admin.getUserById(
+        propRow.owner_user_id,
+      );
+      const ownerEmail = ownerUser?.user?.email;
+      if (ownerEmail) {
+        const fromEmail =
+          process.env.RESEND_FROM_EMAIL ?? "notifications@notify.fractpath.com";
+        const templateId =
+          process.env.RESEND_TEMPLATE_OFFER_SUBMITTED_ID ??
+          "fractpath-offer-submitted";
+        const APP = getAppBaseUrlServer();
+        await sendTemplateEmail({
+          to: ownerEmail,
+          from: fromEmail,
+          subject: "New offer on your property — FractPath",
+          template: {
+            id: templateId,
+            variables: {
+              ACTION_URL: `${APP}/deal/${dealId}#offer`,
+            },
+          },
+        });
+      }
+    } catch (emailErr: any) {
+      console.error("submit_offer_email_failed", {
+        dealId,
+        ownerUserId: propRow.owner_user_id,
+        error: emailErr?.message,
+      });
+    }
+  }
 
   return json(200, {
     ok: true,

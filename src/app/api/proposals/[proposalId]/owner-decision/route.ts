@@ -2,6 +2,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import { getAppBaseUrlServer } from "@/lib/appBaseUrl";
+import { sendTemplateEmail } from "@/lib/email/sendTemplateEmail";
 
 function json(status: number, body: any) {
   return NextResponse.json(body, { status });
@@ -48,7 +50,7 @@ export async function POST(
   const { data: thread, error: threadErr } = await (
     svc.from("deal_threads") as any
   )
-    .select("id, status, property_id")
+    .select("id, status, property_id, buyer_user_id, deal_id")
     .eq("id", proposal.thread_id)
     .single();
 
@@ -107,8 +109,46 @@ export async function POST(
   const dealId = offerEv.deal_id as string;
   const nowIso = new Date().toISOString();
 
+  async function sendBuyerEmail(
+    eventType: "accepted" | "rejected",
+    templateEnvKey: string,
+    templateAlias: string,
+    subject: string,
+  ) {
+    if (!thread.buyer_user_id) return;
+    try {
+      const { data: buyerUser } = await svc.auth.admin.getUserById(
+        thread.buyer_user_id,
+      );
+      const buyerEmail = buyerUser?.user?.email;
+      if (!buyerEmail) return;
+
+      const fromEmail =
+        process.env.RESEND_FROM_EMAIL ?? "notifications@notify.fractpath.com";
+      const templateId = process.env[templateEnvKey] ?? templateAlias;
+      const APP = getAppBaseUrlServer();
+      const actionDealId = thread.deal_id ?? dealId;
+      await sendTemplateEmail({
+        to: buyerEmail,
+        from: fromEmail,
+        subject,
+        template: {
+          id: templateId,
+          variables: {
+            ACTION_URL: `${APP}/deal/${actionDealId}`,
+          },
+        },
+      });
+    } catch (emailErr: any) {
+      console.error(`owner_decision_${eventType}_email_failed`, {
+        dealId,
+        buyerUserId: thread.buyer_user_id,
+        error: emailErr?.message,
+      });
+    }
+  }
+
   if (decision === "accept") {
-    // 1) Insert acceptance event first (idempotent: avoid duplicates)
     const { data: existing } = await (svc.from("deal_events") as any)
       .select("id")
       .eq("deal_id", dealId)
@@ -132,7 +172,6 @@ export async function POST(
       }
     }
 
-    // 2) Then update thread status (guard against repeated accepts)
     const { error: tUpdErr } = await (svc.from("deal_threads") as any)
       .update({ status: "accepted" })
       .eq("id", thread.id)
@@ -142,6 +181,13 @@ export async function POST(
       return json(500, { ok: false, error: tUpdErr.message });
     }
 
+    await sendBuyerEmail(
+      "accepted",
+      "RESEND_TEMPLATE_OFFER_ACCEPTED_ID",
+      "fractpath-offer-accepted",
+      "Your offer has been accepted — FractPath",
+    );
+
     return json(200, {
       ok: true,
       deal_id: dealId,
@@ -150,7 +196,6 @@ export async function POST(
     });
   }
 
-  // decision === "reject" (mirrors accept: event first, guarded thread update)
   const { data: existingReject } = await (svc.from("deal_events") as any)
     .select("id")
     .eq("deal_id", dealId)
@@ -180,6 +225,13 @@ export async function POST(
   if (tUpdErr) {
     return json(500, { ok: false, error: tUpdErr.message });
   }
+
+  await sendBuyerEmail(
+    "rejected",
+    "RESEND_TEMPLATE_OFFER_REJECTED_ID",
+    "fractpath-offer-rejected",
+    "Update on your offer — FractPath",
+  );
 
   return json(200, {
     ok: true,
