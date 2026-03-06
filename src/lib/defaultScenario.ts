@@ -111,7 +111,11 @@ export function ensureScenario(inputs: unknown): CanonicalInputs {
     | undefined;
 
   return {
-    deal_terms: (dt as any) ?? defaults.deal_terms,
-    scenario: (sc as any) ?? defaults.scenario,
+    deal_terms: dt
+      ? { ...defaults.deal_terms, ...(dt as any) }
+      : defaults.deal_terms,
+    scenario: sc
+      ? { ...defaults.scenario, ...(sc as any) }
+      : defaults.scenario,
   };
 }

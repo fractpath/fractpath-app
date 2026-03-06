@@ -8,6 +8,7 @@ import { DealDetailWidgetPanel } from "@/components/deal/DealDetailWidgetPanel";
 import { DealActivityFeed } from "@/components/deal/DealActivityFeed";
 import { ActiveThreadBanner } from "@/components/deal/ActiveThreadBanner";
 import { OwnerDecisionSection } from "@/components/deal/OwnerDecisionSection";
+import { RecomputeSnapshotButton } from "@/components/deal/RecomputeSnapshotButton";
 
 type PageProps = {
   params: Promise<{ dealId: string }>;
@@ -204,6 +205,13 @@ export default async function DealPage(ctx: PageProps) {
             canEdit={isOwner && !locked}
             persona="homeowner"
           />
+
+          {isOwner && !locked && snapJson && (
+            <RecomputeSnapshotButton
+              dealId={dealId}
+              initialInputs={snapJson?.inputs ?? null}
+            />
+          )}
 
           {events && events.length > 0 && (
             <section>

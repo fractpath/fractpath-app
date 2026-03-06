@@ -139,16 +139,28 @@ export function DealWidgetShell({
 
       setError(null);
 
+      const seedTerms =
+        safeRecord(
+          (safeRecord((seedSnapshot as any)?.inputs) as any)?.deal_terms,
+        ) ?? {};
+      const seedSc =
+        safeRecord(
+          (safeRecord((seedSnapshot as any)?.inputs) as any)?.scenario,
+        ) ?? {};
+
+      const mergedTerms = { ...seedTerms, ...dealTerms };
+      const mergedScenario = { ...seedSc, ...scenario };
+
       try {
         await onSave?.({
-          deal_terms: normalizeDealTermsForWidget(dealTerms),
-          scenario,
+          deal_terms: normalizeDealTermsForWidget(mergedTerms),
+          scenario: mergedScenario,
         });
       } catch (err: any) {
         setError(err?.message ?? "Save failed");
       }
     },
-    [onSave, seedScenario],
+    [onSave, seedScenario, seedSnapshot],
   );
 
   return (
