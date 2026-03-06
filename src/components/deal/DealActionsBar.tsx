@@ -76,6 +76,7 @@ export function DealActionsBar({ dealId, propertyId, locked, readOnly }: Props) 
       <ArchiveDealModal
         open={openArchive}
         onClose={() => setOpenArchive(false)}
+        dealId={dealId}
       />
     </>
   );

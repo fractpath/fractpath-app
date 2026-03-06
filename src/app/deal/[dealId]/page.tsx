@@ -35,9 +35,26 @@ export default async function DealPage(ctx: PageProps) {
   // --- Primary path: load deal via RLS (buyer/participant with grants) ---
   const { data: deal } = await supabase
     .from("deals")
-    .select("id, owner_user_id, status, created_at")
+    .select("id, owner_user_id, status, created_at, archived_at")
     .eq("id", dealId)
     .maybeSingle();
+
+  if (deal && (deal as any).archived_at) {
+    return (
+      <div className="min-h-screen">
+        <AppHeader />
+        <main className="mx-auto max-w-3xl p-6 space-y-6">
+          <h1 className="text-xl font-semibold">This deal has been archived.</h1>
+          <p className="text-sm text-muted-foreground">
+            Archived deals are no longer accessible. Records are retained for compliance.
+          </p>
+          <Link className="underline text-sm" href="/dashboard">
+            Back to dashboard
+          </Link>
+        </main>
+      </div>
+    );
+  }
 
   if (deal) {
     const { data: grant } = await supabase
@@ -260,6 +277,30 @@ export default async function DealPage(ctx: PageProps) {
         .maybeSingle();
       property = p ?? null;
       ownerMatches = !!p?.owner_user_id && p.owner_user_id === user.id;
+    }
+  }
+
+  if (ownerMatches) {
+    const { data: archivedCheck } = await (svc.from("deals") as any)
+      .select("archived_at")
+      .eq("id", dealId)
+      .maybeSingle();
+
+    if ((archivedCheck as any)?.archived_at) {
+      return (
+        <div className="min-h-screen">
+          <AppHeader />
+          <main className="mx-auto max-w-3xl p-6 space-y-6">
+            <h1 className="text-xl font-semibold">This deal has been archived.</h1>
+            <p className="text-sm text-muted-foreground">
+              Archived deals are no longer accessible. Records are retained for compliance.
+            </p>
+            <Link className="underline text-sm" href="/dashboard">
+              Back to dashboard
+            </Link>
+          </main>
+        </div>
+      );
     }
   }
 

@@ -374,14 +374,16 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     grants.length > 0
       ? await supabase
           .from("deals")
-          .select("id, status, owner_user_id, mode")
+          .select("id, status, owner_user_id, mode, archived_at")
           .in(
             "id",
             grants.map((g) => g.deal_id),
           )
       : { data: [], error: null as any };
 
-  const deals = (dealsRes.data ?? []) as Record<string, any>[];
+  const deals = ((dealsRes.data ?? []) as Record<string, any>[]).filter(
+    (d) => !d.archived_at,
+  );
   const byId = new Map<string, Record<string, any>>();
   for (const d of deals) byId.set(d.id, d);
 
@@ -413,8 +415,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     if (extraIds.length > 0) {
       const [extraDealsRes, extraSnapsRes] = await Promise.all([
         (svc.from("deals") as any)
-          .select("id, owner_user_id, status, created_at")
-          .in("id", extraIds),
+          .select("id, owner_user_id, status, created_at, archived_at")
+          .in("id", extraIds)
+          .is("archived_at", null),
         (svc.from("deal_snapshots") as any)
           .select("deal_id, snapshot_json, created_at")
           .in("deal_id", extraIds)
@@ -529,6 +532,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   const ownerCards = grants
     .filter((g) => g.role === "OWNER")
+    .filter((g) => byId.has(g.deal_id))
     .filter((g) => !pendingOwnerDealIdSet.has(g.deal_id))
     .map((g) => {
       const override = buyerPendingDealIds.has(g.deal_id)
@@ -539,11 +543,14 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   const viewerCards = grants
     .filter((g) => g.role === "VIEWER")
+    .filter((g) => byId.has(g.deal_id))
     .map((g) => buildCardVm(g.deal_id, g.role));
 
-  const pendingApprovalCards = pendingOwnerDealIds.map((dealId) =>
-    buildCardVm(dealId, "OWNER", OWNER_AWAITING_STATUS),
-  ).map((vm) => ({ ...vm, href: `/deal/${vm.dealId}#offer` }));
+  const pendingApprovalCards = pendingOwnerDealIds
+    .filter((id) => byId.has(id))
+    .map((dealId) =>
+      buildCardVm(dealId, "OWNER", OWNER_AWAITING_STATUS),
+    ).map((vm) => ({ ...vm, href: `/deal/${vm.dealId}#offer` }));
 
   const allCards = [...ownerCards, ...viewerCards];
 
