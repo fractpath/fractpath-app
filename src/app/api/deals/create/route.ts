@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import { computeDealAdapter as computeDeal } from "@/lib/computeAdapter";
 import { insertDealSnapshot } from "@/lib/dealSnapshotDb";
 import { ensureScenario } from "@/lib/defaultScenario";
@@ -150,6 +151,26 @@ export async function POST(request: NextRequest) {
       });
     } catch (eventErr: any) {
       console.error("deal_events insert error:", eventErr?.message);
+    }
+
+    if (headerObj && (headerObj.property_id || headerObj.display_address)) {
+      try {
+        const svc = createServiceClient();
+        await (svc.from("deal_events") as any).insert({
+          deal_id: dealId,
+          event_type: "DEAL_HEADER_UPDATED",
+          payload: {
+            title: headerObj.title ?? null,
+            property_id: headerObj.property_id ?? null,
+            display_address: headerObj.display_address ?? null,
+            property_status: headerObj.property_status ?? null,
+            ownership_status: headerObj.ownership_status ?? null,
+          },
+          created_by: user.id,
+        });
+      } catch (headerEvErr: any) {
+        console.error("deal_header_event_on_create error:", headerEvErr?.message);
+      }
     }
 
     return NextResponse.json(

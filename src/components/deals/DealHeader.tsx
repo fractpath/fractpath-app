@@ -77,7 +77,32 @@ export function DealHeader({
   const key = useMemo(() => lsKey(dealId), [dealId]);
 
   useEffect(() => {
-    if (initialTitle || initialProperty) return;
+    if (initialTitle || initialProperty) {
+      try {
+        const prev = (() => {
+          try {
+            const raw = localStorage.getItem(key);
+            return raw ? (JSON.parse(raw) as Stored) : {};
+          } catch {
+            return {};
+          }
+        })();
+        const merged: Stored = {
+          ...prev,
+          title: initialTitle ?? prev.title,
+        };
+        if (initialProperty) {
+          merged.property_id = initialProperty.property_id;
+          merged.display_address = initialProperty.display_address;
+          merged.property_status = initialProperty.property_status ?? null;
+          merged.ownership_status = initialProperty.ownership_status ?? null;
+        }
+        localStorage.setItem(key, JSON.stringify(merged));
+      } catch {
+        // ignore
+      }
+      return;
+    }
 
     try {
       const raw = localStorage.getItem(key);
