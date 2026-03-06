@@ -73,6 +73,8 @@ export function ThreadDetailView({ threadId }: { threadId: string }) {
     setCurrentUserId(meData?.user?.id ?? meData?.id ?? null);
   }, []);
 
+  const [isPropertyOwner, setIsPropertyOwner] = useState(false);
+
   const refreshThread = useCallback(async () => {
     const viewRes = await fetch(`/api/threads/${threadId}/view`, {
       credentials: "include",
@@ -84,6 +86,7 @@ export function ThreadDetailView({ threadId }: { threadId: string }) {
     const viewData = await viewRes.json();
     setThread(viewData.thread);
     setParticipants(viewData.participants ?? []);
+    setIsPropertyOwner(!!viewData.is_property_owner);
   }, [threadId]);
 
   const refreshProposals = useCallback(async () => {
@@ -131,6 +134,7 @@ export function ThreadDetailView({ threadId }: { threadId: string }) {
   }
 
   const isOwner =
+    isPropertyOwner ||
     (currentUserId && thread.owner_user_id === currentUserId) ||
     participants.some(
       (p) =>
