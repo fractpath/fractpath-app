@@ -206,17 +206,17 @@ export async function POST(
       created_by_user_id: user.id,
     });
   }
-  const { error: dealOwnerUpdErr } = await (svc.from("deals") as any)
-    .update({ owner_user_id: prop.owner_user_id })
-    .eq("id", dealId)
-    .eq("status", "DRAFT"); // guard: don't mutate after acceptance/execution
+  if (prop.owner_user_id && prop.owner_user_id !== user.id) {
+    const { error: dealOwnerUpdErr } = await (svc.from("deals") as any)
+      .update({ owner_user_id: prop.owner_user_id })
+      .eq("id", dealId)
+      .eq("status", "DRAFT");
 
-  if (dealOwnerUpdErr) {
-    console.error("submit_offer_set_deal_owner_error", dealOwnerUpdErr);
-    return json(500, { error: dealOwnerUpdErr.message });
-  }
+    if (dealOwnerUpdErr) {
+      console.error("submit_offer_set_deal_owner_error", dealOwnerUpdErr);
+      return json(500, { error: dealOwnerUpdErr.message });
+    }
 
-  if (prop.owner_user_id) {
     const { error: ownerGrantErr } = await (
       svc.from("deal_access_grants") as any
     ).upsert(

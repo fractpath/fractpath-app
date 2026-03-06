@@ -117,11 +117,10 @@ export default async function DealPage(ctx: PageProps) {
     const activeThread =
       activeThreads && activeThreads.length > 0 ? activeThreads[0] : null;
 
-    const isPropertyOwner = user.id === (deal as any).owner_user_id;
     const isBuyer = !!activeThread && activeThread.buyer_user_id === user.id;
     const isPendingOwner = activeThread?.status === "pending_owner";
 
-    const showOwnerDecision = isPendingOwner && isPropertyOwner && !!activeThread;
+    const showOwnerDecision = isPendingOwner && !isBuyer && !!activeThread;
     const locked = !!isPendingOwner;
 
     let ownerProposalId: string | null = null;

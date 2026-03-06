@@ -105,9 +105,13 @@ export async function POST(request: NextRequest) {
 
   if (!address) return jsonError("address or place_id is required", 422);
 
+  const context = typeof body?.context === "string" ? body.context : "profile";
+
   try {
     const svc = createServiceClient();
-    const result = await getOrCreatePropertyByAddress(svc, address, user.id, structured);
+    const result = await getOrCreatePropertyByAddress(svc, address, user.id, structured, {
+      setOwner: context !== "deal",
+    });
 
     const { data: prop } = await (svc.from("properties") as any)
       .select("status, ownership_status, claimed_by_user_id, address_line1, address_line2, city, state, postal_code")

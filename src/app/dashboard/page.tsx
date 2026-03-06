@@ -197,11 +197,13 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       deal_id,
       status,
       property_id,
+      buyer_user_id,
       properties!inner(owner_user_id)
     `,
     )
     .eq("status", "pending_owner")
     .eq("properties.owner_user_id", user.id)
+    .neq("buyer_user_id", user.id)
     .order("created_at", { ascending: false });
 
   const pendingOwnerThreads = pendingOwnerThreadsRes.data ?? [];
@@ -316,7 +318,10 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   // Priority 2: owner has offer to review
   const ownerPendingThread = pickFirst(
     threads.filter(
-      (t: any) => t.status === "pending_owner" && t.owner_user_id === user.id,
+      (t: any) =>
+        t.status === "pending_owner" &&
+        t.owner_user_id === user.id &&
+        t.buyer_user_id !== user.id,
     ),
   );
 

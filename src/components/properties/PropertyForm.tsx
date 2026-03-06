@@ -254,7 +254,7 @@ export function PropertyForm(props: {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ address: r.display_address }),
+          body: JSON.stringify({ address: r.display_address, context: props.context }),
         });
         const data = await res.json();
         if (data?.ok) {

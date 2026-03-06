@@ -22,6 +22,7 @@ export async function getOrCreatePropertyByAddress(
   inputAddress: string,
   createdByUserId: string,
   structured?: StructuredAddress | null,
+  opts?: { setOwner?: boolean },
 ): Promise<ResolvedProperty> {
   let normalized: string;
   if (
@@ -69,8 +70,10 @@ export async function getOrCreatePropertyByAddress(
     };
   }
 
+  const shouldSetOwner = opts?.setOwner !== false;
+
   const insertRow: Record<string, any> = {
-    owner_user_id: createdByUserId,
+    owner_user_id: shouldSetOwner ? createdByUserId : null,
     address_line1: structured?.address_line1 || inputAddress.trim(),
     city: structured?.city || null,
     state: structured?.state || null,
