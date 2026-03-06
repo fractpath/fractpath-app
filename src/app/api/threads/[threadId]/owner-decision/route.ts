@@ -72,12 +72,12 @@ export async function POST(req: Request, ctx: { params: Promise<Params> }) {
   ) {
     return json(200, { ok: true, thread_id: threadId, status: currentStatus });
   }
-  if (decision === "decline" && currentStatus === "declined") {
+  if (decision === "decline" && currentStatus === "closed") {
     return json(200, { ok: true, thread_id: threadId, status: currentStatus });
   }
 
   // 6) Finalized handling (block non-idempotent transitions)
-  const finalized = new Set(["active", "accepted", "declined", "closed"]);
+  const finalized = new Set(["active", "accepted", "closed"]);
   if (finalized.has(currentStatus)) {
     return json(409, {
       ok: false,
@@ -113,7 +113,7 @@ export async function POST(req: Request, ctx: { params: Promise<Params> }) {
   }
 
   // 8) Apply transition (RLS enforced via user client)
-  const nextStatus = decision === "accept" ? "accepted" : "declined";
+  const nextStatus = decision === "accept" ? "accepted" : "closed";
 
   const { data: updated, error: updErr } = await sb
     .from("deal_threads")

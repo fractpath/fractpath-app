@@ -145,7 +145,7 @@ export function ThreadDetailView({ threadId }: { threadId: string }) {
   );
   const actionableProposal = latestSubmitted ?? myLatestDraft ?? null;
 
-  const finalized = ["accepted", "active", "declined", "closed"].includes(
+  const finalized = ["accepted", "active", "closed"].includes(
     thread.status,
   );
 

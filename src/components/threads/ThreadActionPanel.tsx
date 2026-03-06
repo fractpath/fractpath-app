@@ -28,7 +28,7 @@ export function ThreadActionPanel({
   const [result, setResult] = useState<string | null>(null);
 
   const acceptAllowed = verStatus?.accept_allowed ?? false;
-  const finalized = ["accepted", "active", "declined", "closed"].includes(
+  const finalized = ["accepted", "active", "closed"].includes(
     threadStatus,
   );
 

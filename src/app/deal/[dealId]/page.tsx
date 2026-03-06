@@ -91,22 +91,40 @@ export default async function DealPage(ctx: PageProps) {
     const snapJson = (latestSnap as any)?.snapshot_json ?? {};
     const snapHeader = snapJson?.meta?.header ?? {};
     const headerTitle = headerPayload.title ?? snapHeader.title ?? null;
-    const headerProperty =
-      (headerPayload.property_id ?? snapHeader.property_id)
-        ? {
-            property_id: headerPayload.property_id ?? snapHeader.property_id,
-            display_address:
-              headerPayload.display_address ?? snapHeader.display_address ?? "",
-            property_status:
-              headerPayload.property_status ??
-              snapHeader.property_status ??
-              null,
-            ownership_status:
-              headerPayload.ownership_status ??
-              snapHeader.ownership_status ??
-              null,
-          }
-        : null;
+    const resolvedPropertyId = headerPayload.property_id ?? snapHeader.property_id ?? null;
+
+    let livePropertyStatus: string | null = null;
+    let liveOwnershipStatus: string | null = null;
+
+    if (resolvedPropertyId) {
+      const { data: liveProp } = await (svc.from("properties") as any)
+        .select("status, ownership_status")
+        .eq("id", resolvedPropertyId)
+        .maybeSingle();
+
+      if (liveProp) {
+        livePropertyStatus = liveProp.status ?? null;
+        liveOwnershipStatus = liveProp.ownership_status ?? null;
+      }
+    }
+
+    const headerProperty = resolvedPropertyId
+      ? {
+          property_id: resolvedPropertyId,
+          display_address:
+            headerPayload.display_address ?? snapHeader.display_address ?? "",
+          property_status:
+            livePropertyStatus ??
+            headerPayload.property_status ??
+            snapHeader.property_status ??
+            null,
+          ownership_status:
+            liveOwnershipStatus ??
+            headerPayload.ownership_status ??
+            snapHeader.ownership_status ??
+            null,
+        }
+      : null;
 
     const { data: activeThreads } = await (svc.from("deal_threads") as any)
       .select("id, status, buyer_user_id")

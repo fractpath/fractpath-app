@@ -280,7 +280,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   const declinedThreadDealIds = new Set(
     threads
-      .filter((t: any) => t.status === "declined")
+      .filter((t: any) => t.status === "closed")
       .map((t: any) => t.deal_id)
       .filter(Boolean) as string[],
   );
