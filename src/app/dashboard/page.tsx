@@ -190,7 +190,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     .order("created_at", { ascending: false });
 
   const svcEarly = createServiceClient();
-  const [pendingOwnerThreadsRes, acceptedOwnerThreadsRes] = await Promise.all([
+  const userEmail = user.email?.toLowerCase() ?? "";
+
+  const [pendingOwnerThreadsRes, acceptedOwnerThreadsRes, invitedThreadsRes] = await Promise.all([
     (svcEarly.from("deal_threads") as any)
       .select(
         `
@@ -221,10 +223,31 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       .eq("properties.owner_user_id", user.id)
       .neq("buyer_user_id", user.id)
       .order("created_at", { ascending: false }),
+    userEmail
+      ? (svcEarly.from("thread_invites") as any)
+          .select("thread_id, intended_role, invitee_email")
+          .eq("invitee_email", userEmail)
+          .is("used_at", null)
+          .eq("intended_role", "owner")
+      : { data: [] },
   ]);
 
   const pendingOwnerThreads = pendingOwnerThreadsRes.data ?? [];
   const acceptedOwnerThreads = acceptedOwnerThreadsRes.data ?? [];
+
+  const inviteThreadIds = (invitedThreadsRes.data ?? [])
+    .map((inv: any) => inv?.thread_id)
+    .filter(Boolean) as string[];
+
+  let invitedThreads: any[] = [];
+  if (inviteThreadIds.length > 0) {
+    const { data: invThreads } = await (svcEarly.from("deal_threads") as any)
+      .select("id, deal_id, status, property_id, buyer_user_id")
+      .in("id", inviteThreadIds)
+      .eq("status", "pending_owner")
+      .neq("buyer_user_id", user.id);
+    invitedThreads = invThreads ?? [];
+  }
   const acceptedOwnerDealIds = new Set(
     (acceptedOwnerThreads as any[])
       .map((t: any) => t.deal_id)
@@ -290,9 +313,14 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       .filter(Boolean) as string[],
   );
 
-  const pendingOwnerDealIds = (pendingOwnerThreads as any[])
-    .map((t: any) => t.deal_id)
-    .filter(Boolean) as string[];
+  const pendingOwnerDealIdSet = new Set<string>();
+  for (const t of pendingOwnerThreads as any[]) {
+    if (t?.deal_id) pendingOwnerDealIdSet.add(t.deal_id);
+  }
+  for (const t of invitedThreads) {
+    if (t?.deal_id) pendingOwnerDealIdSet.add(t.deal_id);
+  }
+  const pendingOwnerDealIds = Array.from(pendingOwnerDealIdSet);
 
   const acceptedThreadDealIds = new Set(
     threads
@@ -338,7 +366,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     props.filter((p: any) => p.status && p.status !== "verified"),
   );
 
-  // Priority 2: owner has offer to review
+  // Priority 2: owner has offer to review (via property ownership OR invite email)
   const ownerPendingThread = pickFirst(
     threads.filter(
       (t: any) =>
@@ -346,7 +374,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         t.owner_user_id === user.id &&
         t.buyer_user_id !== user.id,
     ),
-  );
+  ) ?? pickFirst(invitedThreads);
 
   // Priority 3: buyer deal ready to submit (owned by me + has snapshot + no active thread)
   const buyerReadyDeal = pickFirst(
@@ -608,12 +636,12 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const OWNER_AWAITING_STATUS = { label: "Awaiting approval", tone: "amber", raw: "AWAITING_APPROVAL" };
   const ACTIVE_DEAL_STATUS = { label: "Active", tone: "green", raw: "ACTIVE" };
 
-  const pendingOwnerDealIdSet = new Set(pendingOwnerDealIds);
+  const pendingOwnerDealIdSetForFilter = new Set(pendingOwnerDealIds);
 
   const ownerCards = grants
     .filter((g) => g.role === "OWNER")
     .filter((g) => byId.has(g.deal_id))
-    .filter((g) => !pendingOwnerDealIdSet.has(g.deal_id))
+    .filter((g) => !pendingOwnerDealIdSetForFilter.has(g.deal_id))
     .filter((g) => !acceptedThreadDealIds.has(g.deal_id))
     .filter((g) => !declinedThreadDealIds.has(g.deal_id))
     .map((g) => {
