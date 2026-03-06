@@ -5,6 +5,7 @@ import { insertDealSnapshot } from "@/lib/dealSnapshotDb";
 import { computeDealAdapter as computeDeal } from "@/lib/computeAdapter";
 import { ensureScenario } from "@/lib/defaultScenario";
 import { assertNotRealtor, assertOwnerGrant } from "@/lib/authz";
+import { CONTRACT_VERSION, SCHEMA_VERSION } from "@/lib/contractVersion";
 
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
@@ -67,8 +68,6 @@ export async function POST(
     );
   }
 
-  // OWNER only
-// RLS-enforced OWNER check via deal_access_grants
   const { data: grant, error: grantError } = await (
     supabase.from("deal_access_grants") as any
   )
@@ -82,7 +81,6 @@ export async function POST(
     return jsonError("Failed to verify access", 500);
   }
   const ownerCheck = assertOwnerGrant(grant?.role);
-  // Contract requires 403 specifically for non-owners
   if (!ownerCheck.ok) return jsonError(ownerCheck.error, 403);
 
   const computeResult = await computeDeal(body.inputs);
@@ -99,31 +97,47 @@ return jsonError(computeResult.error, status);
   const { compute_version, results } = computeResult.result;
   const computedAt = new Date().toISOString();
 
-  const headerObj =
-    body.header && typeof body.header === "object" && !Array.isArray(body.header)
-      ? {
-          title: typeof body.header.title === "string" ? body.header.title : undefined,
-          display_address: typeof body.header.display_address === "string" ? body.header.display_address : undefined,
-          property_id: typeof body.header.property_id === "string" ? body.header.property_id : undefined,
-          property_status: typeof body.header.property_status === "string" ? body.header.property_status : undefined,
-          ownership_status: typeof body.header.ownership_status === "string" ? body.header.ownership_status : undefined,
-        }
-      : undefined;
+  const svc = createServiceClient();
+  let canonicalHeader: Record<string, unknown> | undefined;
+
+  try {
+    const { data: headerEv } = await (svc.from("deal_events") as any)
+      .select("payload")
+      .eq("deal_id", dealId)
+      .eq("event_type", "DEAL_HEADER_UPDATED")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (headerEv?.payload && typeof headerEv.payload === "object") {
+      const p = headerEv.payload;
+      if (p.property_id || p.display_address || p.title) {
+        canonicalHeader = {
+          title: p.title ?? null,
+          property_id: p.property_id ?? null,
+          display_address: p.display_address ?? null,
+          property_status: p.property_status ?? null,
+          ownership_status: p.ownership_status ?? null,
+        };
+      }
+    }
+  } catch (headerReadErr: any) {
+    console.error("canonical_header_read_error:", headerReadErr?.message);
+  }
 
   const fullSnapshot: Record<string, unknown> = {
-    contract_version: compute_version,
-    schema_version: "1",
+    contract_version: CONTRACT_VERSION,
+    schema_version: SCHEMA_VERSION,
     inputs: body.inputs,
     outputs: { results },
     computed_at: computedAt,
     computed_by: user.id,
   };
 
-  if (headerObj) {
-    fullSnapshot.meta = { header: headerObj };
+  if (canonicalHeader) {
+    fullSnapshot.meta = { header: canonicalHeader };
   }
 
-  // Runs under user-scoped client so RLS + immutability triggers apply.
   const result = await insertDealSnapshot(
     supabase as any,
     dealId,
@@ -136,7 +150,6 @@ return jsonError(computeResult.error, status);
     return jsonError(result.error, status);
   }
 
-  // Audit event insert should also be under RLS.
   const { error: eventError } = await (
     supabase.from("deal_events") as any
   ).insert({
@@ -152,26 +165,6 @@ return jsonError(computeResult.error, status);
 
   if (eventError) {
     console.error("deal_events insert error:", eventError.message);
-  }
-
-  if (headerObj && (headerObj.property_id || headerObj.display_address)) {
-    try {
-      const svc = createServiceClient();
-      await (svc.from("deal_events") as any).insert({
-        deal_id: dealId,
-        event_type: "DEAL_HEADER_UPDATED",
-        payload: {
-          title: headerObj.title ?? null,
-          property_id: headerObj.property_id ?? null,
-          display_address: headerObj.display_address ?? null,
-          property_status: headerObj.property_status ?? null,
-          ownership_status: headerObj.ownership_status ?? null,
-        },
-        created_by: user.id,
-      });
-    } catch (headerEvErr: any) {
-      console.error("deal_header_event_on_compute error:", headerEvErr?.message);
-    }
   }
 
   return NextResponse.json(

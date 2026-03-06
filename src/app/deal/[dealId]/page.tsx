@@ -88,7 +88,7 @@ export default async function DealPage(ctx: PageProps) {
       .limit(1)
       .maybeSingle();
 
-    const snapJson = (latestSnap as any)?.snapshot_json ?? {};
+    const snapJson = (latestSnap as any)?.snapshot_json ?? null;
     const snapHeader = snapJson?.meta?.header ?? {};
     const headerTitle = headerPayload.title ?? snapHeader.title ?? null;
     const resolvedPropertyId = headerPayload.property_id ?? snapHeader.property_id ?? null;
@@ -156,8 +156,8 @@ export default async function DealPage(ctx: PageProps) {
       ownerProposalStatus = latestProposal?.status ?? null;
     }
 
-    const inputs = snapJson?.inputs ?? null;
-    const results = snapJson?.outputs?.results ?? null;
+    const inputs = snapJson ? (snapJson.inputs ?? null) : null;
+    const results = snapJson ? (snapJson.outputs?.results ?? null) : null;
 
     const { data: events } = await (svc.from("deal_events") as any)
       .select("id, deal_id, event_type, payload, created_by, created_at")

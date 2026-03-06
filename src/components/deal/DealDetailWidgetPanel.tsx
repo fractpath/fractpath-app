@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { normalizeDealTermsForWidget } from "@/lib/normalizeDealTermsForWidget";
 import { DealWidgetShell } from "@/components/deal/DealWidgetShell";
@@ -23,6 +23,13 @@ function safeRecord(v: unknown): AnyRecord | null {
     : null;
 }
 
+function hasSubstantiveData(snap: AnyRecord | null): boolean {
+  if (!snap) return false;
+  const inputs = safeRecord((snap as any)?.inputs);
+  const results = safeRecord((snap as any)?.outputs?.results);
+  return !!(inputs || results);
+}
+
 export function DealDetailWidgetPanel({
   dealId,
   initialSnapshot,
@@ -34,9 +41,13 @@ export function DealDetailWidgetPanel({
 }: DealDetailWidgetPanelProps) {
   const router = useRouter();
 
+  const hasData = hasSubstantiveData(safeRecord(initialSnapshot)) || !!inputs || !!results;
+  const [showWidget, setShowWidget] = useState(hasData);
+
   const seedSnapshot = useMemo(() => {
     const snap = safeRecord(initialSnapshot);
-    if (snap) return snap;
+
+    if (snap && hasSubstantiveData(snap)) return snap;
 
     const inRec = safeRecord(inputs);
     const outRec = safeRecord(results);
@@ -65,26 +76,19 @@ export function DealDetailWidgetPanel({
     } as AnyRecord;
   }, [initialSnapshot, inputs, results, computeVersion]);
 
+  const defaultSeed = useMemo<AnyRecord>(
+    () => ({
+      inputs: { deal_terms: {}, scenario: {} },
+      outputs: { results: null },
+      compute_version: null,
+      schema_version: "1",
+    }),
+    [],
+  );
+
   const handleSave = useCallback(
     async (parsed: { deal_terms: AnyRecord; scenario: AnyRecord }) => {
-      let header: AnyRecord | undefined;
-      try {
-        const raw = localStorage.getItem(`fractpath:deal:${dealId}:header`);
-        if (raw) {
-          const h = JSON.parse(raw);
-          if (h && typeof h === "object") {
-            header = {};
-            if (typeof h.title === "string") header.title = h.title;
-            if (typeof h.display_address === "string") header.display_address = h.display_address;
-            if (typeof h.property_id === "string") header.property_id = h.property_id;
-            if (typeof h.property_status === "string") header.property_status = h.property_status;
-            if (typeof h.ownership_status === "string") header.ownership_status = h.ownership_status;
-          }
-        }
-      } catch { /* ignore */ }
-
       const payload: AnyRecord = { inputs: parsed };
-      if (header) payload.header = header;
 
       const res = await fetch(`/api/deals/${dealId}/snapshot/compute`, {
         method: "POST",
@@ -104,6 +108,31 @@ export function DealDetailWidgetPanel({
     [dealId, router],
   );
 
+  if (!showWidget) {
+    return (
+      <div className="border-t pt-6">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-semibold">Scenario Details</h2>
+        </div>
+
+        <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-muted-foreground/25 p-8">
+          <p className="text-sm text-muted-foreground mb-3">
+            No deal terms configured yet
+          </p>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => setShowWidget(true)}
+              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              Add Deal Terms
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="border-t pt-6">
       <div className="mb-3 flex items-center justify-between">
@@ -114,7 +143,7 @@ export function DealDetailWidgetPanel({
       </div>
 
       <DealWidgetShell
-        initialSnapshot={seedSnapshot}
+        initialSnapshot={seedSnapshot ?? defaultSeed}
         canEdit={canEdit}
         persona={persona}
         onSave={canEdit ? handleSave : undefined}

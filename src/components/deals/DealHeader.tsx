@@ -77,67 +77,24 @@ export function DealHeader({
   const key = useMemo(() => lsKey(dealId), [dealId]);
 
   useEffect(() => {
-    if (initialTitle || initialProperty) {
+    if (dealId === "new") {
       try {
-        const prev = (() => {
-          try {
-            const raw = localStorage.getItem(key);
-            return raw ? (JSON.parse(raw) as Stored) : {};
-          } catch {
-            return {};
-          }
-        })();
-        const merged: Stored = {
-          ...prev,
-          title: initialTitle ?? prev.title,
-        };
-        if (initialProperty) {
-          merged.property_id = initialProperty.property_id;
-          merged.display_address = initialProperty.display_address;
-          merged.property_status = initialProperty.property_status ?? null;
-          merged.ownership_status = initialProperty.ownership_status ?? null;
-        }
-        localStorage.setItem(key, JSON.stringify(merged));
-      } catch {
-        // ignore
-      }
+        localStorage.removeItem(key);
+      } catch {}
       return;
     }
-
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Stored;
-
-      if (typeof parsed.title === "string") setTitle(parsed.title);
-
-      if (parsed.property_id && parsed.display_address) {
-        setProperty({
-          property_id: parsed.property_id,
-          display_address: parsed.display_address,
-          property_status: parsed.property_status ?? null,
-          ownership_status: parsed.ownership_status ?? null,
-        });
-        setPropertyMeta({
-          property_status: parsed.property_status ?? null,
-          ownership_status: parsed.ownership_status ?? null,
-        });
-        onPropertyChange?.(parsed.property_id);
-      }
-    } catch {
-      // ignore
-    }
-  }, [key, initialTitle, initialProperty, onPropertyChange]);
+  }, [dealId, key]);
 
   const persistLocal = useCallback(
     (next: Stored) => {
+      if (dealId === "new") return;
       try {
         localStorage.setItem(key, JSON.stringify(next));
       } catch {
         // ignore
       }
     },
-    [key],
+    [key, dealId],
   );
 
   const isDisabled = readOnly || locked || !isPersistedDeal;
@@ -198,7 +155,7 @@ export function DealHeader({
               className="shrink-0 rounded-md border bg-white px-3 py-1.5 text-sm font-medium hover:bg-muted/50"
               data-testid="deal-add-property-btn"
             >
-              Edit Property
+              {property?.property_id ? "Edit Property" : "Add Property"}
             </button>
           )}
         </div>
@@ -219,9 +176,20 @@ export function DealHeader({
             </div>
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground" data-testid="deal-property-empty">
-            No property assigned yet. Add a property to enable making an offer.
-          </p>
+          <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-muted-foreground/25 p-8" data-testid="deal-property-empty">
+            <p className="text-sm text-muted-foreground mb-3">
+              No property selected
+            </p>
+            {!isDisabled && (
+              <button
+                type="button"
+                onClick={() => setOpenAddProperty(true)}
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              >
+                Add Property
+              </button>
+            )}
+          </div>
         )}
       </div>
 
