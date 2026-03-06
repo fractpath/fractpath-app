@@ -136,17 +136,7 @@ export default async function DealPage(ctx: PageProps) {
       <div className="min-h-screen">
         <AppHeader />
         <main className="mx-auto max-w-5xl p-6 space-y-6">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1 min-w-0">
-              <DealHeader
-                dealId={dealId}
-                readOnly={!isOwner}
-                activeThread={activeThread}
-                initialTitle={headerTitle}
-                initialProperty={headerProperty}
-                locked={locked}
-              />
-            </div>
+          <div className="flex justify-end">
             <DealActionsBar
               dealId={dealId}
               propertyId={headerProperty?.property_id ?? null}
@@ -154,6 +144,15 @@ export default async function DealPage(ctx: PageProps) {
               readOnly={!isOwner}
             />
           </div>
+
+          <DealHeader
+            dealId={dealId}
+            readOnly={!isOwner}
+            activeThread={activeThread}
+            initialTitle={headerTitle}
+            initialProperty={headerProperty}
+            locked={locked}
+          />
 
           {isPendingOwner && isBuyer && activeThread && (
             <ActiveThreadBanner

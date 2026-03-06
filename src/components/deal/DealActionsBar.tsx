@@ -37,14 +37,14 @@ export function DealActionsBar({ dealId, propertyId, locked, readOnly }: Props) 
                 : undefined
           }
         >
-          Submit
+          Submit offer
         </button>
 
         <button
           type="button"
           onClick={() => setOpenShare(true)}
           disabled={isDisabled}
-          className="rounded-md border px-3 py-1.5 text-sm font-medium disabled:opacity-50"
+          className="rounded-md border bg-white px-3 py-1.5 text-sm font-medium disabled:opacity-50"
           data-testid="deal-action-share"
         >
           Share
@@ -53,7 +53,7 @@ export function DealActionsBar({ dealId, propertyId, locked, readOnly }: Props) 
         <button
           type="button"
           onClick={() => setOpenArchive(true)}
-          className="rounded-md border px-3 py-1.5 text-sm font-medium"
+          className="rounded-md border bg-white px-3 py-1.5 text-sm font-medium"
           data-testid="deal-action-archive"
         >
           Archive

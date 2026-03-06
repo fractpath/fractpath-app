@@ -105,11 +105,11 @@ export function DealDetailWidgetPanel({
   );
 
   return (
-    <section className="mt-6">
+    <div className="border-t pt-6">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-base font-semibold">Scenario Details</h2>
+        <h2 className="text-sm font-semibold">Scenario Details</h2>
         {!canEdit ? (
-          <span className="text-xs text-muted-foreground">Owner only</span>
+          <span className="text-xs text-muted-foreground">View only</span>
         ) : null}
       </div>
 
@@ -119,6 +119,6 @@ export function DealDetailWidgetPanel({
         persona={persona}
         onSave={canEdit ? handleSave : undefined}
       />
-    </section>
+    </div>
   );
 }

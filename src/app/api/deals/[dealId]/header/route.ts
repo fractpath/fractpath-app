@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 
 export const runtime = "nodejs";
 
@@ -62,7 +63,10 @@ export async function PATCH(
   const ownership_status =
     typeof body?.ownership_status === "string" ? body.ownership_status : null;
 
-  const { error } = await (supabase.from("deal_events") as any).insert({
+  // Use service client for event insert to avoid RLS blocking inserts into deal_events.
+  // Authorization is still enforced above via user + owner/grant checks.
+  const svc = createServiceClient();
+  const { error } = await (svc.from("deal_events") as any).insert({
     deal_id: dealId,
     event_type: "DEAL_HEADER_UPDATED",
     payload: {
@@ -76,7 +80,14 @@ export async function PATCH(
   });
 
   if (error) {
-    console.error("deal_header_persist_error", error);
+    console.error("deal_header_persist_error", {
+      dealId,
+      userId: user.id,
+      code: error.code,
+      message: error.message,
+      details: (error as any).details,
+      hint: (error as any).hint,
+    });
     return jsonError("Failed to persist header", 500);
   }
 

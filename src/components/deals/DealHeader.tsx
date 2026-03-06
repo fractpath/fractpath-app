@@ -70,6 +70,8 @@ export function DealHeader({
   const [openAddProperty, setOpenAddProperty] = useState(false);
   const [openEditName, setOpenEditName] = useState(false);
 
+  const isPersistedDeal = typeof dealId === "string" && dealId !== "new";
+
   const key = useMemo(() => lsKey(dealId), [dealId]);
 
   useEffect(() => {
@@ -110,7 +112,7 @@ export function DealHeader({
     [key],
   );
 
-  const isDisabled = readOnly || locked;
+  const isDisabled = readOnly || locked || !isPersistedDeal;
 
   const statusLabel = (() => {
     const ps =
@@ -139,57 +141,60 @@ export function DealHeader({
   }
 
   return (
-    <section className="mb-6 rounded-md border p-4">
-      <div className="flex flex-col gap-3">
-        <div className="flex items-center gap-3">
-          <h1 className="text-xl font-semibold" data-testid="deal-title-input">
-            {title || "Untitled deal"}
-          </h1>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold" data-testid="deal-title-input">
+          {title || "Untitled deal"}
+        </h1>
+        {!isDisabled && (
+          <button
+            type="button"
+            onClick={() => setOpenEditName(true)}
+            className="shrink-0 rounded-md border bg-white px-3 py-1.5 text-sm font-medium hover:bg-muted/50"
+            data-testid="deal-edit-title-btn"
+          >
+            Edit Name
+          </button>
+        )}
+      </div>
+
+      <div className="border-t pt-6">
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-sm font-semibold" data-testid="deal-property-label">
+            Property
+          </span>
           {!isDisabled && (
             <button
               type="button"
-              onClick={() => setOpenEditName(true)}
-              className="shrink-0 rounded border px-2 py-1 text-xs font-medium hover:bg-muted/50"
-              data-testid="deal-edit-title-btn"
+              onClick={() => setOpenAddProperty(true)}
+              className="shrink-0 rounded-md border bg-white px-3 py-1.5 text-sm font-medium hover:bg-muted/50"
+              data-testid="deal-add-property-btn"
             >
-              Edit
+              Edit Property
             </button>
           )}
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        {property?.property_id ? (
           <div className="flex items-center gap-2">
-            {property?.property_id ? (
-              <div
-                className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs"
-                data-testid="deal-property-pill"
-                title={property.property_id}
-              >
-                <span className="font-medium">{property.display_address}</span>
-                {statusLabel ? (
-                  <span className="rounded bg-muted px-2 py-0.5 text-[10px] font-medium">
-                    {statusLabel}
-                  </span>
-                ) : null}
-              </div>
-            ) : (
-              <div className="text-xs text-muted-foreground">
-                Add a property to enable making an offer.
-              </div>
-            )}
-
-            {!isDisabled && (
-              <button
-                type="button"
-                onClick={() => setOpenAddProperty(true)}
-                className="rounded-md border px-2 py-1 text-xs font-medium hover:bg-muted/50"
-                data-testid="deal-add-property-btn"
-              >
-                + Add property
-              </button>
-            )}
+            <div
+              className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs"
+              data-testid="deal-property-pill"
+              title={property.property_id}
+            >
+              <span className="font-medium">{property.display_address}</span>
+              {statusLabel ? (
+                <span className="rounded bg-muted px-2 py-0.5 text-[10px] font-medium">
+                  {statusLabel}
+                </span>
+              ) : null}
+            </div>
           </div>
-        </div>
+        ) : (
+          <p className="text-sm text-muted-foreground" data-testid="deal-property-empty">
+            No property assigned yet. Add a property to enable making an offer.
+          </p>
+        )}
       </div>
 
       <EditDealNameModal
@@ -227,6 +232,6 @@ export function DealHeader({
           persistLocal(payload);
         }}
       />
-    </section>
+    </div>
   );
 }
