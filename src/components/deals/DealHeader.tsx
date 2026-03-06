@@ -230,6 +230,21 @@ export function DealHeader({
           };
 
           persistLocal(payload);
+
+          if (isPersistedDeal) {
+            fetch(`/api/deals/${dealId}/header`, {
+              method: "PATCH",
+              credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                title,
+                property_id: r.property_id,
+                display_address: r.display_address,
+                property_status: r.property_status ?? null,
+                ownership_status: r.ownership_status ?? null,
+              }),
+            }).catch(() => {});
+          }
         }}
       />
     </div>
