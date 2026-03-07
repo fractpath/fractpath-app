@@ -215,7 +215,7 @@ export async function POST(
             {
               deal_id: dealId,
               user_id: inviteeUserId,
-              role: "COUNTERPARTY",
+              role: "VIEWER",
               created_by: user.id,
               revoked_at: null,
               expires_at: null,
