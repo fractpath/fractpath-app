@@ -7,6 +7,7 @@ import { Modal } from "@/components/ui/Modal";
 import { PropertyForm } from "@/components/properties/PropertyForm";
 
 type PropertyStatus = "unverified" | "under_review" | "verified" | "archived";
+type PropertyVisibility = "owned" | "created" | "claimable";
 
 type Property = {
   id: string;
@@ -18,9 +19,16 @@ type Property = {
   address_display: string;
   status: PropertyStatus;
   is_private: boolean;
+  visibility?: PropertyVisibility;
+  claim_thread_id?: string | null;
+  claim_deal_id?: string | null;
+  claim_thread_status?: string | null;
 };
 
-const STATUS_BADGE: Record<PropertyStatus, { label: string; className: string; hint: string }> = {
+const STATUS_BADGE: Record<
+  PropertyStatus,
+  { label: string; className: string; hint: string }
+> = {
   unverified: {
     label: "Unverified",
     className: "bg-yellow-100 text-yellow-800",
@@ -43,11 +51,19 @@ const STATUS_BADGE: Record<PropertyStatus, { label: string; className: string; h
   },
 };
 
-function canArchive(status: PropertyStatus): boolean {
+function canArchive(
+  status: PropertyStatus,
+  visibility?: PropertyVisibility,
+): boolean {
+  if (visibility === "claimable") return false;
   return status === "unverified" || status === "verified";
 }
 
-function canEdit(status: PropertyStatus): boolean {
+function canEdit(
+  status: PropertyStatus,
+  visibility?: PropertyVisibility,
+): boolean {
+  if (visibility === "claimable") return false;
   return status === "unverified";
 }
 
@@ -59,6 +75,8 @@ export function PropertyList() {
   const [archiving, setArchiving] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [editTarget, setEditTarget] = useState<Property | null>(null);
+  const [claimingId, setClaimingId] = useState<string | null>(null);
+  const [verifyTarget, setVerifyTarget] = useState<Property | null>(null);
 
   async function load() {
     setLoading(true);
@@ -84,13 +102,44 @@ export function PropertyList() {
         method: "POST",
       });
       const json = await res.json().catch(() => null);
-      if (!res.ok)
+      if (!res.ok) {
         return t.error(json?.error || "Couldn't archive that — try again.");
+      }
       t.success("Archived.");
       setArchiveId(null);
       await load();
     } finally {
       setArchiving(false);
+    }
+  }
+
+  async function claimNow(p: Property) {
+    if (!p.claim_thread_id || claimingId) return;
+    setClaimingId(p.id);
+    try {
+      const res = await fetch(
+        `/api/threads/${p.claim_thread_id}/claim-property`,
+        {
+          method: "POST",
+        },
+      );
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        t.error(json?.error || "Couldn't claim this property.");
+        return;
+      }
+
+      t.success("Property claimed. Complete verification to continue.");
+      await load();
+
+      const claimed = {
+        ...p,
+        visibility: "owned" as const,
+      };
+      setVerifyTarget(claimed);
+    } finally {
+      setClaimingId(null);
     }
   }
 
@@ -111,7 +160,15 @@ export function PropertyList() {
       ) : (
         <ul className="space-y-2">
           {items.map((p) => {
-            const badge = STATUS_BADGE[p.status] ?? STATUS_BADGE.unverified;
+            const isClaimable = p.visibility === "claimable";
+            const badge = isClaimable
+              ? {
+                  label: "Claimable",
+                  className: "bg-amber-100 text-amber-800",
+                  hint: "Invited homeowner action required",
+                }
+              : (STATUS_BADGE[p.status] ?? STATUS_BADGE.unverified);
+
             return (
               <li key={p.id} className="rounded-md border p-3">
                 <div className="flex items-center justify-between gap-2">
@@ -119,7 +176,7 @@ export function PropertyList() {
                     <div className="text-sm font-medium">
                       {p.address_display || p.address_line1}
                     </div>
-                    <div className="mt-1 flex items-center gap-2">
+                    <div className="mt-1 flex items-center gap-2 flex-wrap">
                       <span
                         className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-medium ${badge.className}`}
                       >
@@ -129,23 +186,52 @@ export function PropertyList() {
                         {badge.hint}
                       </span>
                     </div>
-                  </div>
-                  <div className="flex shrink-0 gap-2">
-                    {canEdit(p.status) && (
-                      <button
-                        className="text-sm underline"
-                        onClick={() => setEditTarget(p)}
-                      >
-                        Edit
-                      </button>
+
+                    {isClaimable && (
+                      <div className="mt-2 text-xs text-muted-foreground">
+                        This home was shared with you. Claim it here, then
+                        upload verification documents so you can review the
+                        offer on the deal page.
+                      </div>
                     )}
-                    {canArchive(p.status) && (
-                      <button
-                        className="text-sm underline"
-                        onClick={() => setArchiveId(p.id)}
+                  </div>
+
+                  <div className="flex shrink-0 gap-2">
+                    {isClaimable ? (
+                      <LoadingButton
+                        loading={claimingId === p.id}
+                        onClick={() => claimNow(p)}
                       >
-                        Archive
-                      </button>
+                        Claim & verify
+                      </LoadingButton>
+                    ) : (
+                      <>
+                        {canEdit(p.status, p.visibility) && (
+                          <button
+                            className="text-sm underline"
+                            onClick={() => setEditTarget(p)}
+                          >
+                            Edit
+                          </button>
+                        )}
+                        {canArchive(p.status, p.visibility) && (
+                          <button
+                            className="text-sm underline"
+                            onClick={() => setArchiveId(p.id)}
+                          >
+                            Archive
+                          </button>
+                        )}
+                        {p.visibility === "owned" &&
+                          p.status === "unverified" && (
+                            <button
+                              className="text-sm underline"
+                              onClick={() => setVerifyTarget(p)}
+                            >
+                              Verify
+                            </button>
+                          )}
+                      </>
                     )}
                   </div>
                 </div>
@@ -180,6 +266,26 @@ export function PropertyList() {
             city: editTarget.city ?? "",
             state: editTarget.state,
             postal_code: editTarget.postal_code,
+          }}
+        />
+      )}
+
+      {verifyTarget && (
+        <PropertyForm
+          open={true}
+          onClose={() => setVerifyTarget(null)}
+          onSuccess={() => {
+            setVerifyTarget(null);
+            load();
+          }}
+          context="profile"
+          editPrefill={{
+            propertyId: verifyTarget.id,
+            address_line1: verifyTarget.address_line1,
+            address_line2: verifyTarget.address_line2 ?? "",
+            city: verifyTarget.city ?? "",
+            state: verifyTarget.state,
+            postal_code: verifyTarget.postal_code,
           }}
         />
       )}
