@@ -5,14 +5,17 @@ import { SubmitOfferModal } from "@/components/deal/SubmitOfferModal";
 import { ShareDealModal } from "@/components/deal/ShareDealModal";
 import { ArchiveDealModal } from "@/components/deal/ArchiveDealModal";
 
+type AnyRecord = Record<string, unknown>;
+
 type Props = {
   dealId: string;
   propertyId: string | null;
   locked: boolean;
   readOnly: boolean;
+  effectiveSnapshot: AnyRecord | null;
 };
 
-export function DealActionsBar({ dealId, propertyId, locked, readOnly }: Props) {
+export function DealActionsBar({ dealId, propertyId, locked, readOnly, effectiveSnapshot }: Props) {
   const [openSubmit, setOpenSubmit] = useState(false);
   const [openShare, setOpenShare] = useState(false);
   const [openArchive, setOpenArchive] = useState(false);
@@ -65,6 +68,7 @@ export function DealActionsBar({ dealId, propertyId, locked, readOnly }: Props) 
         onClose={() => setOpenSubmit(false)}
         dealId={dealId}
         propertyId={propertyId}
+        effectiveSnapshot={effectiveSnapshot}
       />
 
       <ShareDealModal

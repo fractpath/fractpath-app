@@ -3,11 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
+type AnyRecord = Record<string, unknown>;
+
 type Props = {
   open: boolean;
   onClose: () => void;
   dealId: string;
   propertyId: string | null;
+  effectiveSnapshot: AnyRecord | null;
 };
 
 type PropertyInfo = {
@@ -18,7 +21,7 @@ type PropertyInfo = {
 
 type OfferMode = "verified_owner" | "known_email" | "outreach";
 
-export function SubmitOfferModal({ open, onClose, dealId, propertyId }: Props) {
+export function SubmitOfferModal({ open, onClose, dealId, propertyId, effectiveSnapshot }: Props) {
   const router = useRouter();
   const [propertyInfo, setPropertyInfo] = useState<PropertyInfo | null>(null);
   const [loading, setLoading] = useState(false);
@@ -52,8 +55,14 @@ export function SubmitOfferModal({ open, onClose, dealId, propertyId }: Props) {
   const isVerifiedOwner =
     propertyInfo?.status === "verified" && !!propertyInfo?.owner_user_id;
 
+  const snapshotMissing = !effectiveSnapshot || !effectiveSnapshot.inputs;
+
   const handleSubmit = useCallback(async () => {
     if (!propertyId) return;
+    if (snapshotMissing) {
+      setError("Deal terms are required before submitting an offer.");
+      return;
+    }
     setBusy(true);
     setError(null);
 
@@ -67,6 +76,7 @@ export function SubmitOfferModal({ open, onClose, dealId, propertyId }: Props) {
     const payload: Record<string, any> = {
       mode,
       property_id: propertyId,
+      terms_snapshot: effectiveSnapshot,
     };
 
     if (mode === "known_email") {
@@ -99,7 +109,7 @@ export function SubmitOfferModal({ open, onClose, dealId, propertyId }: Props) {
     } finally {
       setBusy(false);
     }
-  }, [dealId, propertyId, isVerifiedOwner, segment, email, onClose, router]);
+  }, [dealId, propertyId, isVerifiedOwner, segment, email, onClose, router, snapshotMissing, effectiveSnapshot]);
 
   if (!open) return null;
 
@@ -118,7 +128,11 @@ export function SubmitOfferModal({ open, onClose, dealId, propertyId }: Props) {
           </button>
         </div>
 
-        {!propertyId ? (
+        {snapshotMissing ? (
+          <div className="mt-4 text-sm text-red-600">
+            Deal terms are required before submitting an offer. Configure deal terms and compute a scenario first.
+          </div>
+        ) : !propertyId ? (
           <div className="mt-4 text-sm text-red-600">
             Add a property to your deal before submitting an offer.
           </div>

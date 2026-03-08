@@ -17,6 +17,8 @@ type HeaderProperty = {
   ownership_status?: string | null;
 };
 
+type AnyRecord = Record<string, unknown>;
+
 type Props = {
   dealId: string;
   isOwner: boolean;
@@ -24,6 +26,7 @@ type Props = {
   activeThread: ActiveThread | null;
   initialTitle: string | null;
   initialProperty: HeaderProperty | null;
+  effectiveSnapshot: AnyRecord | null;
 };
 
 export function DealPageShell({
@@ -33,6 +36,7 @@ export function DealPageShell({
   activeThread,
   initialTitle,
   initialProperty,
+  effectiveSnapshot,
 }: Props) {
   const [propertyId, setPropertyId] = useState<string | null>(
     initialProperty?.property_id ?? null,
@@ -46,6 +50,7 @@ export function DealPageShell({
           propertyId={propertyId}
           locked={locked}
           readOnly={!isOwner}
+          effectiveSnapshot={effectiveSnapshot}
         />
       </div>
 

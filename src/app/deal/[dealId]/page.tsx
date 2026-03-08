@@ -294,6 +294,7 @@ export default async function DealPage(ctx: PageProps) {
             activeThread={effectiveThread}
             initialTitle={headerTitle}
             initialProperty={headerProperty}
+            effectiveSnapshot={effectiveSnapshotRecord}
           />
 
           {showNegotiationUi && negState.isSender && effectiveThread && (
@@ -677,6 +678,7 @@ export default async function DealPage(ctx: PageProps) {
             activeThread={effectiveThread}
             initialTitle={headerTitle}
             initialProperty={headerProperty}
+            effectiveSnapshot={effectiveSnapshotRecord}
           />
 
           {showNegotiationUi && negState.isSender && effectiveThread && (
