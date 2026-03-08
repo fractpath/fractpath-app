@@ -16,7 +16,7 @@ export function normalizeDealTermsForWidget(raw: DealTerms): DealTerms {
     realtor_representation_mode: r.realtor_representation_mode ?? "NONE",
     realtor_commission_pct: r.realtor_commission_pct ?? 0,
     realtor_commission_payment_mode:
-      r.realtor_commission_payment_mode ?? "UPFRONT",
+      r.realtor_commission_payment_mode ?? "PER_PAYMENT_EVENT",
   } as any;
 }
 

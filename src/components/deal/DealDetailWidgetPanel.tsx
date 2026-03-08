@@ -114,7 +114,25 @@ export function DealDetailWidgetPanel({
   const seedSnapshot = useMemo(() => {
     const snap = safeRecord(initialSnapshot);
 
-    if (snap && hasSubstantiveData(snap)) return snap;
+    if (snap && hasSubstantiveData(snap)) {
+      const snapInputs = safeRecord((snap as any)?.inputs);
+      const snapDealTerms = safeRecord((snapInputs as any)?.deal_terms);
+      const snapScenario = safeRecord((snapInputs as any)?.scenario);
+      const snapResults = safeRecord((snap as any)?.outputs?.results);
+
+      return {
+        ...snap,
+        inputs: {
+          ...(snapInputs ?? {}),
+          deal_terms: normalizeDealTermsForWidget(snapDealTerms ?? {}),
+          scenario: snapScenario ?? {},
+        },
+        outputs: {
+          ...(safeRecord((snap as any)?.outputs) ?? {}),
+          results: snapResults ?? null,
+        },
+      } as AnyRecord;
+    }
 
     const inRec = safeRecord(inputs);
     const outRec = safeRecord(results);
@@ -215,16 +233,6 @@ export function DealDetailWidgetPanel({
             {canEdit && (
               <button
                 type="button"
-                onClick={openHeaderPropertyModal}
-                className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted/50"
-              >
-                Add Property
-              </button>
-            )}
-
-            {canEdit && (
-              <button
-                type="button"
                 onClick={() => {
                   setShowWidget(true);
                   setOpenEditorImmediately(true);
@@ -249,17 +257,6 @@ export function DealDetailWidgetPanel({
         ) : null}
       </div>
 
-      {hasRenderableComputedSnapshot(currentInputs, currentResults) ? (
-        <div className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950">
-          <DealSnapshotView
-            persona={persona as any}
-            status={"draft" as any}
-            inputs={currentInputs as any}
-            results={currentResults as any}
-          />
-        </div>
-      ) : null}
-
       <DealWidgetShell
         initialSnapshot={seedSnapshot ?? defaultSeed}
         canEdit={canEdit}
@@ -267,6 +264,15 @@ export function DealDetailWidgetPanel({
         onSave={canEdit ? handleSave : undefined}
         initiallyOpenEditor={openEditorImmediately}
       />
+
+      {hasRenderableComputedSnapshot(currentInputs, currentResults) ? (
+        <DealSnapshotView
+          persona={persona as any}
+          status={"draft" as any}
+          inputs={currentInputs as any}
+          results={currentResults as any}
+        />
+      ) : null}
     </div>
   );
 }

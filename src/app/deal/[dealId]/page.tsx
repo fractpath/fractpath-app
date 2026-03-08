@@ -69,10 +69,10 @@ function toEffectiveSnapshot(
 
 async function loadNegotiationState(
   svc: ReturnType<typeof createServiceClient>,
-  activeThread: any,
+  effectiveThread: any,
   userId: string,
 ) {
-  if (!activeThread) {
+  if (!effectiveThread) {
     return {
       currentProposal: null,
       previousProposal: null,
@@ -85,12 +85,14 @@ async function loadNegotiationState(
 
   const { data: proposals } = await (svc.from("deal_proposals") as any)
     .select("id, status, created_by_user_id, terms_snapshot, created_at")
-    .eq("thread_id", activeThread.id)
+    .eq("thread_id", effectiveThread.id)
     .order("created_at", { ascending: false })
     .limit(20);
 
   const all = proposals ?? [];
-  const currentProposal = all.find((p: any) => p.status === "submitted") ?? null;
+  const currentProposal =
+    all.find((p: any) => p.status === "submitted" || p.status === "accepted") ??
+    null;
 
   const currentIdx = currentProposal
     ? all.findIndex((p: any) => p.id === currentProposal.id)
@@ -98,14 +100,14 @@ async function loadNegotiationState(
 
   const previousProposal =
     currentIdx >= 0
-      ? all
-          .slice(currentIdx + 1)
-          .find((p: any) => !!p?.terms_snapshot) ?? null
+      ? (all.slice(currentIdx + 1).find((p: any) => !!p?.terms_snapshot) ??
+        null)
       : null;
 
-  const isBuyer = activeThread.buyer_user_id === userId;
+  const isBuyer = effectiveThread.buyer_user_id === userId;
   const isSender = currentProposal?.created_by_user_id === userId;
-  const isResponder = !!currentProposal && !isSender;
+  const isResponder =
+    !!currentProposal && !isSender && effectiveThread.status !== "accepted";
 
   return {
     currentProposal,
@@ -136,10 +138,12 @@ export default async function DealPage(ctx: PageProps) {
 
   // --- Primary path: load deal via RLS (buyer/participant with grants) ---
   const { data: deal } = await supabase
-  .from("deals")
-  .select("id, owner_user_id, created_by_user_id, user_id, status, created_at, archived_at")
-  .eq("id", dealId)
-  .maybeSingle();
+    .from("deals")
+    .select(
+      "id, owner_user_id, created_by_user_id, user_id, status, created_at, archived_at",
+    )
+    .eq("id", dealId)
+    .maybeSingle();
 
   if (deal && (deal as any).archived_at) {
     return (
@@ -236,17 +240,29 @@ export default async function DealPage(ctx: PageProps) {
         }
       : null;
 
-    const { data: activeThreads } = await (svc.from("deal_threads") as any)
-      .select("id, status, buyer_user_id, owner_user_id")
+    const { data: candidateThreads } = await (svc.from("deal_threads") as any)
+      .select("id, status, buyer_user_id, owner_user_id, created_at")
       .eq("deal_id", dealId)
-      .in("status", ["pending_owner", "negotiating"])
-      .limit(1);
+      .in("status", ["pending_owner", "negotiating", "accepted"])
+      .order("created_at", { ascending: false })
+      .limit(5);
 
-    const activeThread =
-      activeThreads && activeThreads.length > 0 ? activeThreads[0] : null;
+    const effectiveThread =
+      candidateThreads && candidateThreads.length > 0
+        ? candidateThreads[0]
+        : null;
 
-    const negState = await loadNegotiationState(svc, activeThread, user.id);
-    const locked = !!activeThread;
+    const negState = await loadNegotiationState(svc, effectiveThread, user.id);
+
+    const editingLocked =
+      !!effectiveThread &&
+      ["pending_owner", "negotiating", "accepted"].includes(
+        effectiveThread.status,
+      );
+
+    const showNegotiationUi =
+      !!effectiveThread &&
+      ["pending_owner", "negotiating"].includes(effectiveThread.status);
 
     const effectiveSnapshot = toEffectiveSnapshot(
       negState.currentProposal?.terms_snapshot ?? null,
@@ -254,7 +270,9 @@ export default async function DealPage(ctx: PageProps) {
     );
 
     const effectiveSnapshotRecord = safeRecord(effectiveSnapshot);
-    const effectiveOutputs = safeRecord((effectiveSnapshotRecord as any)?.outputs);
+    const effectiveOutputs = safeRecord(
+      (effectiveSnapshotRecord as any)?.outputs,
+    );
 
     const inputs = safeRecord((effectiveSnapshotRecord as any)?.inputs);
     const results = safeRecord((effectiveOutputs as any)?.results);
@@ -272,29 +290,34 @@ export default async function DealPage(ctx: PageProps) {
           <DealPageShell
             dealId={dealId}
             isOwner={isOwner}
-            locked={locked}
-            activeThread={activeThread}
+            locked={editingLocked}
+            activeThread={effectiveThread}
             initialTitle={headerTitle}
             initialProperty={headerProperty}
           />
 
-          {negState.isSender && activeThread && (
+          {showNegotiationUi && negState.isSender && effectiveThread && (
             <WaitingBanner
-              threadId={activeThread.id}
+              threadId={effectiveThread.id}
               isBuyer={negState.isBuyer}
             />
           )}
 
-          {negState.isResponder && negState.currentProposal && activeThread && (
-            <NegotiationSection
-              threadId={activeThread.id}
-              proposalId={negState.currentProposal.id}
-              proposalStatus={negState.currentProposal.status}
-              currentTerms={negState.currentProposal.terms_snapshot ?? null}
-              previousTerms={negState.previousProposal?.terms_snapshot ?? null}
-              isOwnerSide={negState.isOwnerSide}
-            />
-          )}
+          {showNegotiationUi &&
+            negState.isResponder &&
+            negState.currentProposal &&
+            effectiveThread && (
+              <NegotiationSection
+                threadId={effectiveThread.id}
+                proposalId={negState.currentProposal.id}
+                proposalStatus={negState.currentProposal.status}
+                currentTerms={negState.currentProposal.terms_snapshot ?? null}
+                previousTerms={
+                  negState.previousProposal?.terms_snapshot ?? null
+                }
+                isOwnerSide={negState.isOwnerSide}
+              />
+            )}
 
           <DealDetailWidgetPanel
             dealId={dealId}
@@ -302,15 +325,16 @@ export default async function DealPage(ctx: PageProps) {
             inputs={inputs}
             results={results}
             computeVersion={
-              typeof (effectiveSnapshotRecord as any)?.compute_version === "string"
+              typeof (effectiveSnapshotRecord as any)?.compute_version ===
+              "string"
                 ? (effectiveSnapshotRecord as any).compute_version
                 : null
             }
-            canEdit={isOwner && !locked}
+            canEdit={isOwner && !editingLocked}
             persona="homeowner"
           />
 
-          {isOwner && !locked && snapJson && (
+          {isOwner && !editingLocked && snapJson && (
             <RecomputeSnapshotButton
               dealId={dealId}
               initialInputs={snapJson?.inputs ?? null}
@@ -344,7 +368,7 @@ export default async function DealPage(ctx: PageProps) {
                     userRole,
                     headerPayload,
                     snapHeader,
-                    activeThread,
+                    effectiveThread,
                     negState: {
                       isResponder: negState.isResponder,
                       isSender: negState.isSender,
@@ -598,13 +622,23 @@ export default async function DealPage(ctx: PageProps) {
         }
       : null;
 
-    const activeThread =
-      thread && ["pending_owner", "negotiating"].includes(thread.status)
+    const effectiveThread =
+      thread &&
+      ["pending_owner", "negotiating", "accepted"].includes(thread.status)
         ? thread
         : null;
 
-    const negState = await loadNegotiationState(svc, activeThread, user.id);
-    const locked = !!activeThread;
+    const negState = await loadNegotiationState(svc, effectiveThread, user.id);
+
+    const editingLocked =
+      !!effectiveThread &&
+      ["pending_owner", "negotiating", "accepted"].includes(
+        effectiveThread.status,
+      );
+
+    const showNegotiationUi =
+      !!effectiveThread &&
+      ["pending_owner", "negotiating"].includes(effectiveThread.status);
 
     const effectiveSnapshot = toEffectiveSnapshot(
       negState.currentProposal?.terms_snapshot ?? null,
@@ -612,7 +646,9 @@ export default async function DealPage(ctx: PageProps) {
     );
 
     const effectiveSnapshotRecord = safeRecord(effectiveSnapshot);
-    const effectiveOutputs = safeRecord((effectiveSnapshotRecord as any)?.outputs);
+    const effectiveOutputs = safeRecord(
+      (effectiveSnapshotRecord as any)?.outputs,
+    );
 
     const inputs = safeRecord((effectiveSnapshotRecord as any)?.inputs);
     const results = safeRecord((effectiveOutputs as any)?.results);
@@ -623,36 +659,48 @@ export default async function DealPage(ctx: PageProps) {
       .order("created_at", { ascending: false })
       .limit(50);
 
+    const fallbackCanEdit =
+      (directOwnerMatches || threadOwnerMatches || grantMatches) &&
+      !editingLocked;
+
+    const fallbackIsOwner =
+      directOwnerMatches || threadOwnerMatches || grantMatches;
+
     return (
       <div className="min-h-screen">
         <AppHeader />
         <main className="mx-auto max-w-5xl p-6 space-y-6">
           <DealPageShell
             dealId={dealId}
-            isOwner={true}
-            locked={locked}
-            activeThread={activeThread}
+            isOwner={fallbackIsOwner}
+            locked={editingLocked}
+            activeThread={effectiveThread}
             initialTitle={headerTitle}
             initialProperty={headerProperty}
           />
 
-          {negState.isSender && activeThread && (
+          {showNegotiationUi && negState.isSender && effectiveThread && (
             <WaitingBanner
-              threadId={activeThread.id}
+              threadId={effectiveThread.id}
               isBuyer={negState.isBuyer}
             />
           )}
 
-          {negState.isResponder && negState.currentProposal && activeThread && (
-            <NegotiationSection
-              threadId={activeThread.id}
-              proposalId={negState.currentProposal.id}
-              proposalStatus={negState.currentProposal.status}
-              currentTerms={negState.currentProposal.terms_snapshot ?? null}
-              previousTerms={negState.previousProposal?.terms_snapshot ?? null}
-              isOwnerSide={negState.isOwnerSide}
-            />
-          )}
+          {showNegotiationUi &&
+            negState.isResponder &&
+            negState.currentProposal &&
+            effectiveThread && (
+              <NegotiationSection
+                threadId={effectiveThread.id}
+                proposalId={negState.currentProposal.id}
+                proposalStatus={negState.currentProposal.status}
+                currentTerms={negState.currentProposal.terms_snapshot ?? null}
+                previousTerms={
+                  negState.previousProposal?.terms_snapshot ?? null
+                }
+                isOwnerSide={negState.isOwnerSide}
+              />
+            )}
 
           <DealDetailWidgetPanel
             dealId={dealId}
@@ -660,15 +708,16 @@ export default async function DealPage(ctx: PageProps) {
             inputs={inputs}
             results={results}
             computeVersion={
-              typeof (effectiveSnapshotRecord as any)?.compute_version === "string"
+              typeof (effectiveSnapshotRecord as any)?.compute_version ===
+              "string"
                 ? (effectiveSnapshotRecord as any).compute_version
                 : null
             }
-            canEdit={(directOwnerMatches || threadOwnerMatches || grantMatches) && !locked}
+            canEdit={fallbackCanEdit}
             persona="homeowner"
           />
 
-          {(directOwnerMatches || threadOwnerMatches || grantMatches) && !locked && snapJson && (
+          {fallbackIsOwner && !editingLocked && snapJson && (
             <RecomputeSnapshotButton
               dealId={dealId}
               initialInputs={snapJson?.inputs ?? null}
@@ -707,7 +756,7 @@ export default async function DealPage(ctx: PageProps) {
                     property,
                     ownerMatches,
                     allowDealFallback,
-                    activeThread,
+                    effectiveThread,
                     negState: {
                       isResponder: negState.isResponder,
                       isSender: negState.isSender,

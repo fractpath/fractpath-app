@@ -48,7 +48,7 @@ FractPath is built with Next.js, leveraging API routes for backend logic and Sup
     - **Compute Endpoint:** Handles computation of deal snapshots.
     - **Fork Endpoint:** Allows creation of new deals from existing ones.
     - **Manage Access:** OWNERs can list and revoke access grants with audit logging.
-    - **Compute Adapter:** Integrates the `@fractpath/compute` engine for all calculations.
+    - **Compute Adapter:** Calls `computeDeal` from `@fractpath/compute` directly (resolved via webpack alias to `fractpath-calculator-widget/packages/compute/dist`). Previous adapter used the marketing `computeScenario` function which had a materially different economic model. All routes use the canonical v10.2 engine.
     - **Default Scenario:** Provides baseline `deal_terms` and `scenario` for new deals, merging user inputs with defaults.
     - **Recompute Button:** Enables owners to regenerate snapshots.
     - **Create Deal Flow:** Supports creation of new deals via an authenticated endpoint.

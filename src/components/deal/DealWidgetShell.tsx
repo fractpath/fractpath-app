@@ -68,6 +68,7 @@ export function DealWidgetShell({
 }: DealWidgetShellProps) {
   const [editOpen, setEditOpen] = useState(initiallyOpenEditor);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (initiallyOpenEditor && canEdit) {
@@ -118,6 +119,7 @@ export function DealWidgetShell({
   const handleSaved = useCallback(
     async (saved: { deal_terms: AnyRecord; scenario: AnyRecord }) => {
       setError(null);
+      setSaving(true);
       try {
         await onSave?.({
           deal_terms: normalizeDealTermsForWidget(
@@ -128,6 +130,8 @@ export function DealWidgetShell({
         setEditOpen(false);
       } catch (err: any) {
         setError(err?.message ?? "Save failed");
+      } finally {
+        setSaving(false);
       }
     },
     [onSave],
@@ -138,6 +142,12 @@ export function DealWidgetShell({
       {error ? (
         <div className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">
           {error}
+        </div>
+      ) : null}
+
+      {saving ? (
+        <div className="mb-3 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:bg-blue-950 dark:text-blue-200">
+          Saving deal terms and recomputing snapshot…
         </div>
       ) : null}
 
