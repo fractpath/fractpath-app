@@ -1,4 +1,3 @@
-// src/app/api/proposals/[proposalId]/owner-decision/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -34,11 +33,10 @@ export async function POST(
 
   const svc = createServiceClient();
 
-  // 1) Load proposal (NO deal_id column assumed)
   const { data: proposal, error: propErr } = await (
     svc.from("deal_proposals") as any
   )
-    .select("id, thread_id, status")
+    .select("id, thread_id, status, created_by_user_id")
     .eq("id", proposalId)
     .single();
 
@@ -46,11 +44,24 @@ export async function POST(
     return json(404, { ok: false, error: "Proposal not found" });
   }
 
-  // 2) Load thread + property
+  if (proposal.status !== "submitted") {
+    return json(409, {
+      ok: false,
+      error: `Cannot ${decision} a proposal with status: ${proposal.status}`,
+    });
+  }
+
+  if (proposal.created_by_user_id === user.id) {
+    return json(403, {
+      ok: false,
+      error: "Cannot act on your own proposal. Wait for the other party.",
+    });
+  }
+
   const { data: thread, error: threadErr } = await (
     svc.from("deal_threads") as any
   )
-    .select("id, status, property_id, buyer_user_id, deal_id")
+    .select("id, status, property_id, buyer_user_id, owner_user_id, deal_id")
     .eq("id", proposal.thread_id)
     .single();
 
@@ -58,91 +69,123 @@ export async function POST(
     return json(404, { ok: false, error: "Thread not found" });
   }
 
-  const { data: property, error: propertyErr } = await (
-    svc.from("properties") as any
-  )
-    .select("id, status, owner_user_id")
-    .eq("id", thread.property_id)
-    .single();
-
-  if (propertyErr || !property) {
-    return json(404, { ok: false, error: "Property not found" });
-  }
-
-  // 3) Enforce owner + verified + pending_owner
-  if (property.owner_user_id !== user.id) {
-    return json(403, { ok: false, error: "Access denied" });
-  }
-
-  if (property.status !== "verified") {
-    return json(409, {
-      ok: false,
-      error: "Property verification required to accept",
-    });
-  }
-
-  if (thread.status !== "pending_owner") {
+  if (!["pending_owner", "negotiating"].includes(thread.status)) {
     return json(409, {
       ok: false,
       error: `Invalid thread status: ${thread.status}`,
     });
   }
 
-  // 4) Resolve deal_id from offer_submitted event for this proposal
-  const { data: offerEv, error: offerErr } = await (
-    svc.from("deal_events") as any
-  )
-    .select("id, deal_id, payload, created_at")
-    .eq("event_type", "offer_submitted")
-    .eq("payload->>proposal_id", proposalId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const isBuyer = thread.buyer_user_id === user.id;
+  const isThreadOwner = thread.owner_user_id === user.id;
 
-  if (offerErr || !offerEv?.deal_id) {
+  let isPropertyOwner = false;
+  let propertyStatus: string | null = null;
+  if (thread.property_id) {
+    const { data: property } = await (svc.from("properties") as any)
+      .select("id, status, owner_user_id")
+      .eq("id", thread.property_id)
+      .single();
+
+    if (property) {
+      isPropertyOwner = property.owner_user_id === user.id;
+      propertyStatus = property.status ?? null;
+    }
+  }
+
+  let isInvitedOwner = false;
+  if (!isBuyer && !isThreadOwner && !isPropertyOwner && user.email) {
+    const { data: invite } = await (svc.from("thread_invites") as any)
+      .select("id, intended_role, expires_at")
+      .eq("thread_id", thread.id)
+      .eq("invitee_email", user.email.toLowerCase())
+      .eq("intended_role", "owner")
+      .limit(1)
+      .maybeSingle();
+
+    if (invite) {
+      const notExpired =
+        !invite.expires_at || new Date(invite.expires_at) > new Date();
+      isInvitedOwner = notExpired;
+    }
+  }
+
+  const isOwnerSide = isPropertyOwner || isThreadOwner || isInvitedOwner;
+  const hasAccess = isBuyer || isOwnerSide;
+
+  if (!hasAccess) {
+    return json(403, { ok: false, error: "Access denied" });
+  }
+
+  if (decision === "accept" && isOwnerSide && !isBuyer) {
+    if (propertyStatus !== "verified") {
+      return json(409, {
+        ok: false,
+        error: "Property verification required to accept",
+      });
+    }
+  }
+
+  let resolvedDealId: string | null = (thread.deal_id as string) ?? null;
+
+  if (!resolvedDealId) {
+    const { data: offerEv } = await (svc.from("deal_events") as any)
+      .select("deal_id")
+      .eq("event_type", "offer_submitted")
+      .eq("payload->>proposal_id", proposalId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (offerEv?.deal_id) {
+      resolvedDealId = offerEv.deal_id as string;
+    }
+  }
+
+  if (!resolvedDealId) {
     return json(409, {
       ok: false,
-      error: "Cannot resolve deal for this proposal (missing offer_submitted)",
+      error: "Cannot resolve deal for this proposal",
     });
   }
 
-  const dealId = offerEv.deal_id as string;
-  const nowIso = new Date().toISOString();
+  const otherPartyId = isBuyer
+    ? (thread.owner_user_id ?? null)
+    : thread.buyer_user_id;
 
-  async function sendBuyerEmail(
+  async function sendNotificationEmail(
     eventType: "accepted" | "rejected",
     templateEnvKey: string,
     templateAlias: string,
     subject: string,
   ) {
-    if (!thread.buyer_user_id) return;
+    if (!otherPartyId) return;
     try {
-      const { data: buyerUser } = await svc.auth.admin.getUserById(
-        thread.buyer_user_id,
+      const { data: otherUser } = await svc.auth.admin.getUserById(
+        otherPartyId,
       );
-      const buyerEmail = buyerUser?.user?.email;
-      if (!buyerEmail) return;
+      const otherEmail = otherUser?.user?.email;
+      if (!otherEmail) return;
 
       const fromEmail =
         process.env.RESEND_FROM_EMAIL ?? "notifications@notify.fractpath.com";
       const templateId = process.env[templateEnvKey] ?? templateAlias;
       const APP = getAppBaseUrlServer();
-      const actionDealId = thread.deal_id ?? dealId;
       await sendTemplateEmail({
-        to: buyerEmail,
+        to: otherEmail,
         from: fromEmail,
         subject,
         template: {
           id: templateId,
           variables: {
-            ACTION_URL: `${APP}/deal/${actionDealId}`,
+            ACTION_URL: `${APP}/deal/${resolvedDealId}`,
           },
         },
       });
     } catch (emailErr: any) {
-      console.error(`owner_decision_${eventType}_email_failed`, {
-        dealId,
-        buyerUserId: thread.buyer_user_id,
+      console.error(`decision_${eventType}_email_failed`, {
+        dealId: resolvedDealId,
+        otherPartyId,
         error: emailErr?.message,
       });
     }
@@ -151,7 +194,7 @@ export async function POST(
   if (decision === "accept") {
     const { data: existing } = await (svc.from("deal_events") as any)
       .select("id")
-      .eq("deal_id", dealId)
+      .eq("deal_id", resolvedDealId)
       .eq("event_type", "OFFER_ACCEPTED")
       .eq("payload->>proposal_id", proposalId)
       .limit(1)
@@ -160,7 +203,7 @@ export async function POST(
     if (!existing) {
       const { error: evInsErr } = await (svc.from("deal_events") as any).insert(
         {
-          deal_id: dealId,
+          deal_id: resolvedDealId,
           event_type: "OFFER_ACCEPTED",
           payload: { thread_id: thread.id, proposal_id: proposalId },
           created_by: user.id,
@@ -172,16 +215,30 @@ export async function POST(
       }
     }
 
+    const { error: pUpdErr } = await (svc.from("deal_proposals") as any)
+      .update({ status: "accepted" })
+      .eq("id", proposalId)
+      .eq("status", "submitted");
+
+    if (pUpdErr) {
+      console.error("accept_proposal_status_update_error", pUpdErr);
+    }
+
+    const threadPatch: Record<string, any> = { status: "accepted" };
+    if (isOwnerSide && !thread.owner_user_id) {
+      threadPatch.owner_user_id = user.id;
+    }
+
     const { error: tUpdErr } = await (svc.from("deal_threads") as any)
-      .update({ status: "accepted", owner_user_id: user.id })
+      .update(threadPatch)
       .eq("id", thread.id)
-      .eq("status", "pending_owner");
+      .in("status", ["pending_owner", "negotiating"]);
 
     if (tUpdErr) {
       return json(500, { ok: false, error: tUpdErr.message });
     }
 
-    await sendBuyerEmail(
+    await sendNotificationEmail(
       "accepted",
       "RESEND_TEMPLATE_OFFER_ACCEPTED_ID",
       "fractpath-offer-accepted",
@@ -190,7 +247,7 @@ export async function POST(
 
     return json(200, {
       ok: true,
-      deal_id: dealId,
+      deal_id: resolvedDealId,
       thread_id: thread.id,
       status: "accepted",
     });
@@ -198,7 +255,7 @@ export async function POST(
 
   const { data: existingReject } = await (svc.from("deal_events") as any)
     .select("id")
-    .eq("deal_id", dealId)
+    .eq("deal_id", resolvedDealId)
     .eq("event_type", "OFFER_REJECTED")
     .eq("payload->>proposal_id", proposalId)
     .limit(1)
@@ -206,7 +263,7 @@ export async function POST(
 
   if (!existingReject) {
     const { error: evInsErr } = await (svc.from("deal_events") as any).insert({
-      deal_id: dealId,
+      deal_id: resolvedDealId,
       event_type: "OFFER_REJECTED",
       payload: { thread_id: thread.id, proposal_id: proposalId },
       created_by: user.id,
@@ -217,16 +274,30 @@ export async function POST(
     }
   }
 
+  const { error: pUpdErr } = await (svc.from("deal_proposals") as any)
+    .update({ status: "rejected" })
+    .eq("id", proposalId)
+    .eq("status", "submitted");
+
+  if (pUpdErr) {
+    console.error("reject_proposal_status_update_error", pUpdErr);
+  }
+
+  const threadPatch: Record<string, any> = { status: "closed" };
+  if (isOwnerSide && !thread.owner_user_id) {
+    threadPatch.owner_user_id = user.id;
+  }
+
   const { error: tUpdErr } = await (svc.from("deal_threads") as any)
-    .update({ status: "closed", owner_user_id: user.id })
+    .update(threadPatch)
     .eq("id", thread.id)
-    .eq("status", "pending_owner");
+    .in("status", ["pending_owner", "negotiating"]);
 
   if (tUpdErr) {
     return json(500, { ok: false, error: tUpdErr.message });
   }
 
-  await sendBuyerEmail(
+  await sendNotificationEmail(
     "rejected",
     "RESEND_TEMPLATE_OFFER_REJECTED_ID",
     "fractpath-offer-rejected",
@@ -235,7 +306,7 @@ export async function POST(
 
   return json(200, {
     ok: true,
-    deal_id: dealId,
+    deal_id: resolvedDealId,
     thread_id: thread.id,
     status: "closed",
   });

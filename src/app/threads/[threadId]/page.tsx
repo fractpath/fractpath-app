@@ -24,7 +24,6 @@ export default async function ThreadReviewPage(ctx: PageProps) {
       ? (searchParams as any).from
       : undefined) === "deal";
 
-  // Auth (cookie-based)
   const supabase = await createClient();
   const {
     data: { user },
@@ -34,11 +33,14 @@ export default async function ThreadReviewPage(ctx: PageProps) {
     redirect(`/login?returnTo=${encodeURIComponent(`/threads/${threadId}`)}`);
   }
 
-  // Service reads (bypass RLS)
   const svc = createServiceClient();
 
-  const { data: thread, error: threadErr } = await (svc.from("deal_threads") as any)
-    .select("id,status,property_id,created_at,updated_at")
+  const { data: thread, error: threadErr } = await (
+    svc.from("deal_threads") as any
+  )
+    .select(
+      "id,status,property_id,buyer_user_id,owner_user_id,created_at,updated_at",
+    )
     .eq("id", threadId)
     .maybeSingle();
 
@@ -68,7 +70,9 @@ export default async function ThreadReviewPage(ctx: PageProps) {
     );
   }
 
-  const { data: property, error: propErr } = await (svc.from("properties") as any)
+  const { data: property, error: propErr } = await (
+    svc.from("properties") as any
+  )
     .select("id,status,owner_user_id,normalized_address")
     .eq("id", thread.property_id)
     .maybeSingle();
@@ -85,8 +89,50 @@ export default async function ThreadReviewPage(ctx: PageProps) {
     );
   }
 
-  const ownerMatches =
+  const directOwnerMatches =
     !!property?.owner_user_id && property.owner_user_id === user.id;
+
+  const threadOwnerMatches =
+    !!thread?.owner_user_id && thread.owner_user_id === user.id;
+
+  const buyerMatches =
+    !!thread?.buyer_user_id && thread.buyer_user_id === user.id;
+
+  let participantMatches = false;
+  const { data: participant } = await (
+    svc.from("deal_thread_participants") as any
+  )
+    .select("user_id,status,role")
+    .eq("thread_id", threadId)
+    .eq("user_id", user.id)
+    .eq("status", "active")
+    .limit(1)
+    .maybeSingle();
+
+  participantMatches = !!participant;
+
+  let inviteMatches = false;
+  if (user.email) {
+    const { data: invite } = await (svc.from("thread_invites") as any)
+      .select("id,intended_role,expires_at")
+      .eq("thread_id", threadId)
+      .eq("invitee_email", user.email.toLowerCase())
+      .limit(1)
+      .maybeSingle();
+
+    if (invite) {
+      const notExpired =
+        !invite.expires_at || new Date(invite.expires_at) > new Date();
+      inviteMatches = notExpired;
+    }
+  }
+
+  const ownerMatches =
+    directOwnerMatches ||
+    threadOwnerMatches ||
+    buyerMatches ||
+    participantMatches ||
+    inviteMatches;
 
   if (!ownerMatches) {
     return (
@@ -107,7 +153,12 @@ export default async function ThreadReviewPage(ctx: PageProps) {
                     threadIdParam: threadId,
                     auth: { userId: user.id, email: user.email },
                     thread,
-                    property: property ?? null,
+                    property,
+                    directOwnerMatches,
+                    threadOwnerMatches,
+                    buyerMatches,
+                    participantMatches,
+                    inviteMatches,
                     ownerMatches,
                   },
                   null,
@@ -117,18 +168,18 @@ export default async function ThreadReviewPage(ctx: PageProps) {
             </section>
           ) : null}
 
-          <div className="text-xs">
-            <Link className="underline" href="/dashboard">
-              Back to dashboard
-            </Link>
-          </div>
+          <Link className="underline text-sm" href="/dashboard">
+            Back to dashboard
+          </Link>
         </main>
       </div>
     );
   }
 
   // Get latest proposal for this thread (MVP)
-  const { data: proposal, error: proposalErr } = await (svc.from("deal_proposals") as any)
+  const { data: proposal, error: proposalErr } = await (
+    svc.from("deal_proposals") as any
+  )
     .select("id,thread_id,status,created_at,updated_at")
     .eq("thread_id", thread.id)
     .order("created_at", { ascending: false })

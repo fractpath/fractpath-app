@@ -74,7 +74,7 @@ export async function POST(
   const { data: existingThreads } = await (svc.from("deal_threads") as any)
     .select("id, status")
     .eq("deal_id", dealId)
-    .in("status", ["pending_owner"]);
+    .in("status", ["pending_owner", "negotiating"]);
 
   if (existingThreads && existingThreads.length > 0) {
     return json(409, { error: "An active offer already exists for this deal" });
