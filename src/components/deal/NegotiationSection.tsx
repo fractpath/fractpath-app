@@ -83,12 +83,14 @@ export function NegotiationSection({
         </div>
       </div>
 
-      <ProposalComparisonCard
-        currentTerms={currentTerms}
-        previousTerms={previousTerms}
-        currentLabel={previousTerms ? "Counter-offer" : "Current offer"}
-        previousLabel="Previous offer"
-      />
+      {previousTerms ? (
+        <ProposalComparisonCard
+          currentTerms={currentTerms}
+          previousTerms={previousTerms}
+          currentLabel="Counter-offer"
+          previousLabel="Previous offer"
+        />
+      ) : null}
 
       {isOwnerSide && <VerificationGateBanner threadId={threadId} />}
 

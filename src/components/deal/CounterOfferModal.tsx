@@ -4,6 +4,8 @@ import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DealEditModal } from "fractpath-calculator-widget";
 import { normalizeDealTermsForWidget } from "@/lib/normalizeDealTermsForWidget";
+import { useDealDraftState } from "@/lib/useDealDraftState";
+import type { DraftCanonicalInputs } from "@/lib/useDealDraftState";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -26,35 +28,29 @@ type Props = {
   termsSnapshot: AnyRecord;
 };
 
-export function CounterOfferModal({
-  open,
-  onClose,
+function CounterEditMount({
+  initial,
   proposalId,
-  termsSnapshot,
-}: Props) {
+  onClose,
+  onDone,
+}: {
+  initial: DraftCanonicalInputs;
+  proposalId: string;
+  onClose: () => void;
+  onDone: () => void;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const modalInitial = useMemo(() => {
-    const rawDealTerms = safeRecord(termsSnapshot?.deal_terms) ?? {};
-    const rawScenario = safeRecord(termsSnapshot?.scenario) ?? {};
+  const { draft, errors, preview, setField, onBlurCompute } =
+    useDealDraftState(initial);
 
-    const dealTerms = normalizeDealTermsForWidget(rawDealTerms);
-
-    return {
-      deal_terms: dealTerms,
-      scenario: {
-        ...rawScenario,
-        exit_year: safeNumber(rawScenario?.exit_year) ?? 5,
-      },
-    };
-  }, [termsSnapshot]);
-
-  const handleSaved = useCallback(
-    async (saved: { deal_terms: AnyRecord; scenario: AnyRecord }) => {
+  const handleSave = useCallback(
+    async (saved: DraftCanonicalInputs) => {
       setBusy(true);
       setError(null);
+
       try {
         const counterTerms = {
           deal_terms: normalizeDealTermsForWidget(
@@ -71,11 +67,12 @@ export function CounterOfferModal({
         });
 
         const body = await res.json().catch(() => ({}));
+
         if (!res.ok) {
           throw new Error(body?.error ?? `Counter failed (${res.status})`);
         }
 
-        onClose();
+        onDone();
         router.refresh();
       } catch (err: any) {
         setError(err?.message ?? "Network error");
@@ -83,51 +80,80 @@ export function CounterOfferModal({
         setBusy(false);
       }
     },
-    [proposalId, onClose, router],
+    [proposalId, onDone, router],
   );
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-100">
+        Adjust the economic terms below and send your counter-offer. Property
+        identity and participants cannot be changed here.
+      </div>
+
+      {error && (
+        <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">
+          {error}
+        </div>
+      )}
+
+      {busy && (
+        <div className="flex items-center gap-2 text-sm text-gray-600">
+          <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
+          Sending counter-offer...
+        </div>
+      )}
+
+      <DealEditModal
+        draft={draft as any}
+        errors={errors}
+        preview={preview as any}
+        persona={"buyer" as any}
+        setField={setField as any}
+        onBlurCompute={onBlurCompute}
+        onSave={(saved: any) => handleSave(saved)}
+        onClose={onClose}
+      />
+    </div>
+  );
+}
+
+export function CounterOfferModal({
+  open,
+  onClose,
+  proposalId,
+  termsSnapshot,
+}: Props) {
+  const snap = useMemo(() => safeRecord(termsSnapshot), [termsSnapshot]);
+
+  const modalInitial = useMemo<DraftCanonicalInputs>(() => {
+    const nestedInputs = safeRecord((snap as any)?.inputs);
+    const sourceDealTerms =
+      safeRecord((nestedInputs as any)?.deal_terms) ??
+      safeRecord((snap as any)?.deal_terms) ??
+      {};
+
+    const sourceScenario =
+      safeRecord((nestedInputs as any)?.scenario) ??
+      safeRecord((snap as any)?.scenario) ??
+      {};
+
+    return {
+      deal_terms: normalizeDealTermsForWidget(sourceDealTerms),
+      scenario: {
+        ...sourceScenario,
+        exit_year: safeNumber((sourceScenario as any)?.exit_year) ?? 5,
+      },
+    };
+  }, [snap]);
 
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-lg rounded-lg border bg-white p-6 shadow-lg dark:bg-gray-950">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Counter-Offer</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600"
-            aria-label="Close"
-          >
-            &#x2715;
-          </button>
-        </div>
-
-        <p className="mb-4 text-sm text-gray-600 dark:text-gray-400">
-          Adjust the economic terms below and send your counter-offer.
-          Property identity and participants cannot be changed.
-        </p>
-
-        {error && (
-          <div className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">
-            {error}
-          </div>
-        )}
-
-        {busy && (
-          <div className="mb-3 flex items-center gap-2 text-sm text-gray-600">
-            <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
-            Sending counter-offer...
-          </div>
-        )}
-
-        <DealEditModal
-          initial={modalInitial as any}
-          persona="buyer"
-          onClose={onClose}
-          onSaved={handleSaved as any}
-        />
-      </div>
-    </div>
+    <CounterEditMount
+      initial={modalInitial}
+      proposalId={proposalId}
+      onClose={onClose}
+      onDone={onClose}
+    />
   );
 }

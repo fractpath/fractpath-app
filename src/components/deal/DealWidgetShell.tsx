@@ -4,6 +4,8 @@ import { useCallback, useMemo, useState } from "react";
 import { DealEditModal } from "fractpath-calculator-widget";
 import { extractDealDisplayModel } from "@/lib/dealSnapshotDisplay";
 import { normalizeDealTermsForWidget } from "@/lib/normalizeDealTermsForWidget";
+import { useDealDraftState } from "@/lib/useDealDraftState";
+import type { DraftCanonicalInputs } from "@/lib/useDealDraftState";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -58,6 +60,34 @@ function ValueCard({ label, value }: { label: string; value: string }) {
   );
 }
 
+function EditModalMount({
+  initial,
+  persona,
+  onClose,
+  onSaved,
+}: {
+  initial: DraftCanonicalInputs;
+  persona: string;
+  onClose: () => void;
+  onSaved: (saved: DraftCanonicalInputs) => void;
+}) {
+  const { draft, errors, preview, setField, onBlurCompute } =
+    useDealDraftState(initial);
+
+  return (
+    <DealEditModal
+      draft={draft as any}
+      errors={errors}
+      preview={preview as any}
+      persona={persona as any}
+      setField={setField as any}
+      onBlurCompute={onBlurCompute}
+      onSave={(saved: any) => onSaved(saved)}
+      onClose={onClose}
+    />
+  );
+}
+
 export function DealWidgetShell({
   initialSnapshot,
   canEdit,
@@ -69,6 +99,7 @@ export function DealWidgetShell({
 
   const snap = useMemo(() => safeRecord(initialSnapshot), [initialSnapshot]);
   const inputs = useMemo(() => safeRecord((snap as any)?.inputs), [snap]);
+
   const dealTerms = useMemo(
     () =>
       normalizeDealTermsForWidget(
@@ -76,6 +107,7 @@ export function DealWidgetShell({
       ),
     [inputs],
   );
+
   const scenario = useMemo(() => {
     const sc = safeRecord((inputs as any)?.scenario) ?? {};
     return {
@@ -96,24 +128,17 @@ export function DealWidgetShell({
     model.paymentCount != null ||
     model.exitYear != null;
 
-  const hasComputedSnapshot =
-    !!inputs &&
-    !!safeRecord((snap as any)?.outputs) &&
-    !!safeRecord((snap as any)?.outputs?.results);
+  const canEditSnapshot = !!canEdit && !!onSave;
 
-  const canEditSnapshot = !!canEdit && !!onSave && hasComputedSnapshot;
-
-  const modalInitial = useMemo(() => {
-    if (!hasComputedSnapshot || !inputs) return null;
-
+  const modalInitial = useMemo<DraftCanonicalInputs>(() => {
     return {
       deal_terms: dealTerms,
       scenario,
     };
-  }, [hasComputedSnapshot, inputs, dealTerms, scenario]);
+  }, [dealTerms, scenario]);
 
   const handleSaved = useCallback(
-    async (saved: { deal_terms: AnyRecord; scenario: AnyRecord }) => {
+    async (saved: DraftCanonicalInputs) => {
       setError(null);
       try {
         await onSave?.({
@@ -154,7 +179,7 @@ export function DealWidgetShell({
             onClick={() => setEditOpen(true)}
             className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
           >
-            Edit Terms
+            {hasAnyData ? "Edit Terms" : "Add Deal Terms"}
           </button>
         ) : null}
       </div>
@@ -182,12 +207,12 @@ export function DealWidgetShell({
         </p>
       )}
 
-      {editOpen && canEditSnapshot && modalInitial ? (
-        <DealEditModal
-          initial={modalInitial as any}
-          persona={persona as any}
+      {editOpen && canEditSnapshot ? (
+        <EditModalMount
+          initial={modalInitial}
+          persona={persona}
           onClose={() => setEditOpen(false)}
-          onSaved={handleSaved as any}
+          onSaved={handleSaved}
         />
       ) : null}
     </div>

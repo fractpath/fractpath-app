@@ -59,7 +59,7 @@ FractPath is built with Next.js, leveraging API routes for backend logic and Sup
 - **Proposal Status Values:** Canonical values for `deal_proposals.status` are: `draft`, `submitted`, `accepted`, `rejected`, `withdrawn`. A `submitted` proposal is the active one. When a counter-offer is sent, the previous proposal is set to `withdrawn` (the CHECK constraint does NOT allow `countered` or `superseded`).
 - **Performance & Stability:** Optimized queries, pre-computed view models, and enforced fetch limits.
 - **Role Gating:** Centralized authorization ensures role-specific access and UI elements.
-- **Calculator Widget Package:** Provides React UI components (`DealSnapshotView`, `DealEditModal`) and utilities.
+- **Calculator Widget Package:** Provides React UI components (`DealSnapshotView`, `DealEditModal`) and utilities. Note: the exported `DealEditModal` is a raw controlled component expecting `(draft, errors, preview, setField, onBlurCompute, onSave, onClose)`. The app's `useDealDraftState` hook (`src/lib/useDealDraftState.ts`) manages draft state and provides these props, replicating the widget's internal `EditModalMount` pattern.
 - **Canonical Compute Package:** The core `@fractpath/compute` engine, serving as the single source of truth for deal calculations and versioning.
 
 ## External Dependencies
