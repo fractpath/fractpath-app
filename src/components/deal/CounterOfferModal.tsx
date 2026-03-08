@@ -2,10 +2,8 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { DealEditModal } from "fractpath-calculator-widget";
+import { EditModalMount } from "fractpath-calculator-widget";
 import { normalizeDealTermsForWidget } from "@/lib/normalizeDealTermsForWidget";
-import { useDealDraftState } from "@/lib/useDealDraftState";
-import type { DraftCanonicalInputs } from "@/lib/useDealDraftState";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -28,26 +26,41 @@ type Props = {
   termsSnapshot: AnyRecord;
 };
 
-function CounterEditMount({
-  initial,
-  proposalId,
+export function CounterOfferModal({
+  open,
   onClose,
-  onDone,
-}: {
-  initial: DraftCanonicalInputs;
-  proposalId: string;
-  onClose: () => void;
-  onDone: () => void;
-}) {
+  proposalId,
+  termsSnapshot,
+}: Props) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { draft, errors, preview, setField, onBlurCompute } =
-    useDealDraftState(initial);
+  const snap = useMemo(() => safeRecord(termsSnapshot), [termsSnapshot]);
 
-  const handleSave = useCallback(
-    async (saved: DraftCanonicalInputs) => {
+  const modalInitial = useMemo(() => {
+    const nestedInputs = safeRecord((snap as any)?.inputs);
+    const sourceDealTerms =
+      safeRecord((nestedInputs as any)?.deal_terms) ??
+      safeRecord((snap as any)?.deal_terms) ??
+      {};
+
+    const sourceScenario =
+      safeRecord((nestedInputs as any)?.scenario) ??
+      safeRecord((snap as any)?.scenario) ??
+      {};
+
+    return {
+      deal_terms: normalizeDealTermsForWidget(sourceDealTerms),
+      scenario: {
+        ...sourceScenario,
+        exit_year: safeNumber((sourceScenario as any)?.exit_year) ?? 5,
+      },
+    };
+  }, [snap]);
+
+  const handleSaved = useCallback(
+    async (saved: { deal_terms: AnyRecord; scenario: AnyRecord }) => {
       setBusy(true);
       setError(null);
 
@@ -72,7 +85,7 @@ function CounterEditMount({
           throw new Error(body?.error ?? `Counter failed (${res.status})`);
         }
 
-        onDone();
+        onClose();
         router.refresh();
       } catch (err: any) {
         setError(err?.message ?? "Network error");
@@ -80,8 +93,10 @@ function CounterEditMount({
         setBusy(false);
       }
     },
-    [proposalId, onDone, router],
+    [proposalId, onClose, router],
   );
+
+  if (!open) return null;
 
   return (
     <div className="space-y-3">
@@ -103,57 +118,12 @@ function CounterEditMount({
         </div>
       )}
 
-      <DealEditModal
-        draft={draft as any}
-        errors={errors}
-        preview={preview as any}
+      <EditModalMount
+        initial={modalInitial as any}
         persona={"buyer" as any}
-        setField={setField as any}
-        onBlurCompute={onBlurCompute}
-        onSave={(saved: any) => handleSave(saved)}
         onClose={onClose}
+        onSaved={handleSaved as any}
       />
     </div>
-  );
-}
-
-export function CounterOfferModal({
-  open,
-  onClose,
-  proposalId,
-  termsSnapshot,
-}: Props) {
-  const snap = useMemo(() => safeRecord(termsSnapshot), [termsSnapshot]);
-
-  const modalInitial = useMemo<DraftCanonicalInputs>(() => {
-    const nestedInputs = safeRecord((snap as any)?.inputs);
-    const sourceDealTerms =
-      safeRecord((nestedInputs as any)?.deal_terms) ??
-      safeRecord((snap as any)?.deal_terms) ??
-      {};
-
-    const sourceScenario =
-      safeRecord((nestedInputs as any)?.scenario) ??
-      safeRecord((snap as any)?.scenario) ??
-      {};
-
-    return {
-      deal_terms: normalizeDealTermsForWidget(sourceDealTerms),
-      scenario: {
-        ...sourceScenario,
-        exit_year: safeNumber((sourceScenario as any)?.exit_year) ?? 5,
-      },
-    };
-  }, [snap]);
-
-  if (!open) return null;
-
-  return (
-    <CounterEditMount
-      initial={modalInitial}
-      proposalId={proposalId}
-      onClose={onClose}
-      onDone={onClose}
-    />
   );
 }

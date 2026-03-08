@@ -1,11 +1,9 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { DealEditModal } from "fractpath-calculator-widget";
+import { EditModalMount } from "fractpath-calculator-widget";
 import { extractDealDisplayModel } from "@/lib/dealSnapshotDisplay";
 import { normalizeDealTermsForWidget } from "@/lib/normalizeDealTermsForWidget";
-import { useDealDraftState } from "@/lib/useDealDraftState";
-import type { DraftCanonicalInputs } from "@/lib/useDealDraftState";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -60,34 +58,6 @@ function ValueCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function EditModalMount({
-  initial,
-  persona,
-  onClose,
-  onSaved,
-}: {
-  initial: DraftCanonicalInputs;
-  persona: string;
-  onClose: () => void;
-  onSaved: (saved: DraftCanonicalInputs) => void;
-}) {
-  const { draft, errors, preview, setField, onBlurCompute } =
-    useDealDraftState(initial);
-
-  return (
-    <DealEditModal
-      draft={draft as any}
-      errors={errors}
-      preview={preview as any}
-      persona={persona as any}
-      setField={setField as any}
-      onBlurCompute={onBlurCompute}
-      onSave={(saved: any) => onSaved(saved)}
-      onClose={onClose}
-    />
-  );
-}
-
 export function DealWidgetShell({
   initialSnapshot,
   canEdit,
@@ -130,7 +100,7 @@ export function DealWidgetShell({
 
   const canEditSnapshot = !!canEdit && !!onSave;
 
-  const modalInitial = useMemo<DraftCanonicalInputs>(() => {
+  const modalInitial = useMemo(() => {
     return {
       deal_terms: dealTerms,
       scenario,
@@ -138,7 +108,7 @@ export function DealWidgetShell({
   }, [dealTerms, scenario]);
 
   const handleSaved = useCallback(
-    async (saved: DraftCanonicalInputs) => {
+    async (saved: { deal_terms: AnyRecord; scenario: AnyRecord }) => {
       setError(null);
       try {
         await onSave?.({
@@ -209,10 +179,10 @@ export function DealWidgetShell({
 
       {editOpen && canEditSnapshot ? (
         <EditModalMount
-          initial={modalInitial}
-          persona={persona}
+          initial={modalInitial as any}
+          persona={persona as any}
           onClose={() => setEditOpen(false)}
-          onSaved={handleSaved}
+          onSaved={handleSaved as any}
         />
       ) : null}
     </div>
