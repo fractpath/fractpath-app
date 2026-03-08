@@ -27,6 +27,10 @@ export type DealTerms = {
   duration_yield_floor_enabled: boolean;
   duration_yield_floor_start_year: number | null;
   duration_yield_floor_min_multiple: number | null;
+
+  realtor_representation_mode: "BUYER" | "SELLER" | "DUAL" | "NONE";
+  realtor_commission_pct: number;
+  realtor_commission_payment_mode: "PER_PAYMENT_EVENT";
 };
 
 export type ScenarioAssumptions = {
@@ -82,6 +86,10 @@ export function getDefaultDealTerms(): DealTerms {
     duration_yield_floor_enabled: false,
     duration_yield_floor_start_year: null,
     duration_yield_floor_min_multiple: null,
+
+    realtor_representation_mode: "NONE",
+    realtor_commission_pct: 0,
+    realtor_commission_payment_mode: "PER_PAYMENT_EVENT",
   };
 }
 

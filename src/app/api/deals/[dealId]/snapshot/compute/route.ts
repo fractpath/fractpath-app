@@ -132,6 +132,7 @@ return jsonError(computeResult.error, status);
     outputs: { results },
     computed_at: computedAt,
     computed_by: user.id,
+    compute_version,
   };
 
   if (canonicalHeader) {
