@@ -45,7 +45,7 @@ async function loadNegotiationState(
     all.find(
       (p: any) =>
         p.id !== currentProposal?.id &&
-        ["countered", "submitted"].includes(p.status),
+        ["withdrawn", "submitted"].includes(p.status),
     ) ?? null;
 
   const isBuyer = activeThread.buyer_user_id === userId;

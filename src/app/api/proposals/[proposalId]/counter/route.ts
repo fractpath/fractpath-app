@@ -129,7 +129,7 @@ export async function POST(
   }
 
   const { error: oldUpdErr } = await (svc.from("deal_proposals") as any)
-    .update({ status: "countered" })
+    .update({ status: "withdrawn" })
     .eq("id", proposalId)
     .eq("status", "submitted");
 

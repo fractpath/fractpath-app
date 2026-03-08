@@ -56,7 +56,7 @@ FractPath is built with Next.js, leveraging API routes for backend logic and Sup
     - **Widget Save Merge:** Merges widget output with existing seed snapshot terms to prevent data regression.
 - **Thread owner_user_id Lifecycle:** `owner_user_id` in `deal_threads` is backfilled when the property owner makes an accept/reject decision.
 - **Thread Status Values:** Canonical values for `deal_threads.status` are `draft`, `pending_owner`, `negotiating`, `decision_pending`, `accepted`, `closed`. Counter-offers transition threads from `pending_owner` to `negotiating`. Both `pending_owner` and `negotiating` are active negotiation states.
-- **Proposal Status Values:** Canonical values for `deal_proposals.status` are: `draft`, `submitted`, `countered`, `accepted`, `rejected`. A `submitted` proposal is the active one. `countered` means superseded by a counter-offer.
+- **Proposal Status Values:** Canonical values for `deal_proposals.status` are: `draft`, `submitted`, `accepted`, `rejected`, `withdrawn`. A `submitted` proposal is the active one. When a counter-offer is sent, the previous proposal is set to `withdrawn` (the CHECK constraint does NOT allow `countered` or `superseded`).
 - **Performance & Stability:** Optimized queries, pre-computed view models, and enforced fetch limits.
 - **Role Gating:** Centralized authorization ensures role-specific access and UI elements.
 - **Calculator Widget Package:** Provides React UI components (`DealSnapshotView`, `DealEditModal`) and utilities.
