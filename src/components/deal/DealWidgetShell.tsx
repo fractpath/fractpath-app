@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { EditModalMount } from "fractpath-calculator-widget";
 import { extractDealDisplayModel } from "@/lib/dealSnapshotDisplay";
 import { normalizeDealTermsForWidget } from "@/lib/normalizeDealTermsForWidget";
@@ -15,6 +15,7 @@ type DealWidgetShellProps = {
     deal_terms: AnyRecord;
     scenario: AnyRecord;
   }) => void | Promise<void>;
+  initiallyOpenEditor?: boolean;
 };
 
 function safeRecord(v: unknown): AnyRecord | null {
@@ -63,9 +64,16 @@ export function DealWidgetShell({
   canEdit,
   persona = "homeowner",
   onSave,
+  initiallyOpenEditor = false,
 }: DealWidgetShellProps) {
-  const [editOpen, setEditOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(initiallyOpenEditor);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (initiallyOpenEditor && canEdit) {
+      setEditOpen(true);
+    }
+  }, [initiallyOpenEditor, canEdit]);
 
   const snap = useMemo(() => safeRecord(initialSnapshot), [initialSnapshot]);
   const inputs = useMemo(() => safeRecord((snap as any)?.inputs), [snap]);
@@ -139,7 +147,7 @@ export function DealWidgetShell({
             Saved Deal Terms
           </h3>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            This section is rendered only from the latest saved deal snapshot.
+            This section is rendered only from the latest effective deal snapshot.
           </p>
         </div>
 

@@ -138,6 +138,75 @@ function pickFirst<T>(arr: T[] | null | undefined): T | null {
   return arr && arr.length ? arr[0] : null;
 }
 
+function safeRecord(v: unknown): Record<string, any> | null {
+  return v !== null && typeof v === "object" && !Array.isArray(v)
+    ? (v as Record<string, any>)
+    : null;
+}
+
+function toEffectiveSnapshot(
+  proposalTermsSnapshot: Record<string, any> | null,
+  fallbackSnapshot: Record<string, any> | null,
+): Record<string, any> | null {
+  const proposal = safeRecord(proposalTermsSnapshot);
+  const fallback = safeRecord(fallbackSnapshot);
+
+  if (!proposal) return fallback;
+
+  const proposalInputs = safeRecord(proposal.inputs);
+  if (proposalInputs) {
+    return {
+      ...proposal,
+      schema_version: proposal.schema_version ?? fallback?.schema_version ?? "1",
+      compute_version:
+        proposal.compute_version ?? fallback?.compute_version ?? null,
+    };
+  }
+
+  const topLevelDealTerms = safeRecord(proposal.deal_terms);
+  const topLevelScenario = safeRecord(proposal.scenario);
+
+  if (topLevelDealTerms || topLevelScenario) {
+    return {
+      inputs: {
+        deal_terms: topLevelDealTerms ?? {},
+        scenario: topLevelScenario ?? {},
+      },
+      outputs: { results: null },
+      schema_version: fallback?.schema_version ?? "1",
+      compute_version: fallback?.compute_version ?? null,
+    };
+  }
+
+  return fallback;
+}
+
+async function loadLatestSubmittedByThread(
+  svc: ReturnType<typeof createServiceClient>,
+  threadIds: string[],
+) {
+  const ids = Array.from(new Set(threadIds.filter(Boolean)));
+  const map = new Map<string, any>();
+
+  if (ids.length === 0) return map;
+
+  const { data } = await (svc.from("deal_proposals") as any)
+    .select(
+      "thread_id, id, status, created_by_user_id, terms_snapshot, created_at",
+    )
+    .in("thread_id", ids)
+    .eq("status", "submitted")
+    .order("created_at", { ascending: false });
+
+  for (const row of data ?? []) {
+    if (row?.thread_id && !map.has(row.thread_id)) {
+      map.set(row.thread_id, row);
+    }
+  }
+
+  return map;
+}
+
 export default async function DashboardPage({ searchParams }: PageProps) {
   const resolvedSearchParams = (await Promise.resolve(searchParams as any)) as
     | SearchParams
@@ -192,10 +261,11 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const svcEarly = createServiceClient();
   const userEmail = user.email?.toLowerCase() ?? "";
 
-  const [pendingOwnerThreadsRes, acceptedOwnerThreadsRes, invitedThreadsRes] = await Promise.all([
-    (svcEarly.from("deal_threads") as any)
-      .select(
-        `
+  const [ownerVisibleThreadsRes, acceptedOwnerThreadsRes, invitedThreadsRes] =
+    await Promise.all([
+      (svcEarly.from("deal_threads") as any)
+        .select(
+          `
         id,
         deal_id,
         status,
@@ -203,14 +273,14 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         buyer_user_id,
         properties!inner(owner_user_id)
       `,
-      )
-      .eq("status", "pending_owner")
-      .eq("properties.owner_user_id", user.id)
-      .neq("buyer_user_id", user.id)
-      .order("created_at", { ascending: false }),
-    (svcEarly.from("deal_threads") as any)
-      .select(
-        `
+        )
+        .in("status", ["pending_owner", "negotiating"])
+        .eq("properties.owner_user_id", user.id)
+        .neq("buyer_user_id", user.id)
+        .order("created_at", { ascending: false }),
+      (svcEarly.from("deal_threads") as any)
+        .select(
+          `
         id,
         deal_id,
         status,
@@ -218,21 +288,21 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         buyer_user_id,
         properties!inner(owner_user_id)
       `,
-      )
-      .eq("status", "accepted")
-      .eq("properties.owner_user_id", user.id)
-      .neq("buyer_user_id", user.id)
-      .order("created_at", { ascending: false }),
-    userEmail
-      ? (svcEarly.from("thread_invites") as any)
-          .select("thread_id, intended_role, invitee_email")
-          .eq("invitee_email", userEmail)
-          .is("used_at", null)
-          .eq("intended_role", "owner")
-      : { data: [] },
-  ]);
+        )
+        .eq("status", "accepted")
+        .eq("properties.owner_user_id", user.id)
+        .neq("buyer_user_id", user.id)
+        .order("created_at", { ascending: false }),
+      userEmail
+        ? (svcEarly.from("thread_invites") as any)
+            .select("thread_id, intended_role, invitee_email")
+            .eq("invitee_email", userEmail)
+            .is("used_at", null)
+            .eq("intended_role", "owner")
+        : { data: [] },
+    ]);
 
-  const pendingOwnerThreads = pendingOwnerThreadsRes.data ?? [];
+  const ownerVisibleThreads = ownerVisibleThreadsRes.data ?? [];
   const acceptedOwnerThreads = acceptedOwnerThreadsRes.data ?? [];
 
   const inviteThreadIds = (invitedThreadsRes.data ?? [])
@@ -244,10 +314,32 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     const { data: invThreads } = await (svcEarly.from("deal_threads") as any)
       .select("id, deal_id, status, property_id, buyer_user_id")
       .in("id", inviteThreadIds)
-      .eq("status", "pending_owner")
+      .in("status", ["pending_owner", "negotiating"])
       .neq("buyer_user_id", user.id);
     invitedThreads = invThreads ?? [];
   }
+
+  const ownerActionableThreadMap = new Map<string, any>();
+  const ownerCandidateThreads = [...ownerVisibleThreads, ...invitedThreads];
+
+  const ownerLatestSubmittedByThread = await loadLatestSubmittedByThread(
+    svcEarly,
+    ownerCandidateThreads
+      .map((t: any) => t?.id)
+      .filter(Boolean) as string[],
+  );
+
+  for (const t of ownerCandidateThreads) {
+    if (!t?.id) continue;
+    const latest = ownerLatestSubmittedByThread.get(t.id);
+    if (!latest) continue;
+    if (latest.created_by_user_id !== user.id) {
+      ownerActionableThreadMap.set(t.id, t);
+    }
+  }
+
+  const ownerActionableThreads = Array.from(ownerActionableThreadMap.values());
+
   const acceptedOwnerDealIds = new Set(
     (acceptedOwnerThreads as any[])
       .map((t: any) => t.deal_id)
@@ -306,22 +398,40 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     threads.map((t: any) => t.deal_id).filter(Boolean) as string[],
   );
 
-  const buyerPendingDealIds = new Set(
-    threads
-      .filter((t: any) => t.status === "pending_owner" && t.buyer_user_id === user.id)
-      .map((t: any) => t.deal_id)
-      .filter(Boolean) as string[],
+  const myLatestSubmittedByThread = await loadLatestSubmittedByThread(
+    svcEarly,
+    threads.map((t: any) => t?.id).filter(Boolean) as string[],
   );
 
-  const pendingOwnerDealIdSet = new Set<string>();
-  for (const t of pendingOwnerThreads as any[]) {
-    if (t?.deal_id) pendingOwnerDealIdSet.add(t.deal_id);
-  }
-  for (const t of invitedThreads) {
-    if (t?.deal_id) pendingOwnerDealIdSet.add(t.deal_id);
-  }
-  const pendingOwnerDealIds = Array.from(pendingOwnerDealIdSet);
+  const buyerWaitingThreads = threads.filter((t: any) => {
+    if (!["pending_owner", "negotiating"].includes(t.status)) return false;
+    if (t.buyer_user_id !== user.id) return false;
+    const latest = myLatestSubmittedByThread.get(t.id);
+    return !!latest && latest.created_by_user_id === user.id;
+  });
 
+  const buyerWaitingStatusByDealId = new Map<string, { label: string; tone: string; raw: string }>();
+  for (const t of buyerWaitingThreads) {
+    if (!t?.deal_id) continue;
+    buyerWaitingStatusByDealId.set(
+      t.deal_id,
+      t.status === "negotiating"
+        ? { label: "Counter submitted", tone: "blue", raw: "COUNTER_SUBMITTED" }
+        : { label: "Offer submitted", tone: "blue", raw: "OFFER_SUBMITTED" },
+    );
+  }
+
+  const buyerPendingDealIds = new Set(
+    buyerWaitingThreads.map((t: any) => t.deal_id).filter(Boolean) as string[],
+  );
+
+  const pendingOwnerDealIds = Array.from(
+    new Set(
+      ownerActionableThreads
+        .map((t: any) => t?.deal_id)
+        .filter(Boolean) as string[],
+    ),
+  );
   const acceptedThreadDealIds = new Set(
     threads
       .filter((t: any) => t.status === "accepted")
@@ -367,14 +477,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   );
 
   // Priority 2: owner has offer to review (via property ownership OR invite email)
-  const ownerPendingThread = pickFirst(
-    threads.filter(
-      (t: any) =>
-        t.status === "pending_owner" &&
-        t.owner_user_id === user.id &&
-        t.buyer_user_id !== user.id,
-    ),
-  ) ?? pickFirst(invitedThreads);
+  const ownerPendingThread = pickFirst(ownerActionableThreads);
 
   // Priority 3: buyer deal ready to submit (owned by me + has snapshot + no active thread)
   const buyerReadyDeal = pickFirst(
@@ -389,11 +492,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   );
 
   // Priority 4: buyer waiting for owner
-  const buyerWaitingThread = pickFirst(
-    threads.filter(
-      (t: any) => t.status === "pending_owner" && t.buyer_user_id === user.id,
-    ),
-  );
+  const buyerWaitingThread = pickFirst(buyerWaitingThreads);
 
   const dynamicSteps: any[] = [];
 
@@ -476,6 +575,85 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     }
     if (s?.deal_id && s.created_at && !snapDateByDeal.has(s.deal_id)) {
       snapDateByDeal.set(s.deal_id, s.created_at);
+    }
+  }
+
+  const allThreadIdsForEffectiveState = Array.from(
+    new Set(
+      [...threads, ...ownerVisibleThreads, ...invitedThreads]
+        .map((t: any) => t?.id)
+        .filter(Boolean) as string[],
+    ),
+  );
+
+  const latestSubmittedByThread = await loadLatestSubmittedByThread(
+    svcEarly,
+    allThreadIdsForEffectiveState,
+  );
+
+  const effectiveSnapshotByDeal = new Map<string, Record<string, any>>();
+  const effectiveStatusByDealId = new Map<
+    string,
+    { label: string; tone: string; raw: string }
+  >();
+
+  const threadCandidates = [...threads, ...ownerVisibleThreads, ...invitedThreads];
+  const latestThreadByDealId = new Map<string, any>();
+
+  for (const t of threadCandidates) {
+    if (!t?.deal_id) continue;
+    if (!latestThreadByDealId.has(t.deal_id)) {
+      latestThreadByDealId.set(t.deal_id, t);
+    }
+  }
+
+  for (const [dealId, thread] of latestThreadByDealId.entries()) {
+    const proposal = latestSubmittedByThread.get(thread.id) ?? null;
+    const fallbackSnap = latestSnapByDeal.get(dealId) ?? null;
+    const effectiveSnap = toEffectiveSnapshot(
+      proposal?.terms_snapshot ?? null,
+      fallbackSnap,
+    );
+
+    if (effectiveSnap) {
+      effectiveSnapshotByDeal.set(dealId, effectiveSnap);
+    }
+
+    if (proposal) {
+      const isSender = proposal.created_by_user_id === user.id;
+      const hasPriorRound = thread.status === "negotiating";
+
+      if (isSender) {
+        effectiveStatusByDealId.set(
+          dealId,
+          hasPriorRound
+            ? {
+                label: "Counter submitted",
+                tone: "blue",
+                raw: "COUNTER_SUBMITTED",
+              }
+            : {
+                label: "Offer submitted",
+                tone: "blue",
+                raw: "OFFER_SUBMITTED",
+              },
+        );
+      } else {
+        effectiveStatusByDealId.set(
+          dealId,
+          hasPriorRound
+            ? {
+                label: "Counter offer",
+                tone: "amber",
+                raw: "COUNTER_OFFER",
+              }
+            : {
+                label: "Awaiting approval",
+                tone: "amber",
+                raw: "AWAITING_APPROVAL",
+              },
+        );
+      }
     }
   }
 
@@ -570,14 +748,24 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     overrideStatus?: { label: string; tone: string; raw: string },
   ): CardVm {
     const deal = byId.get(dealId);
-    const snap = latestSnapByDeal.get(dealId);
+    const snap = effectiveSnapshotByDeal.get(dealId) ?? latestSnapByDeal.get(dealId);
     const meta = extractDealCardMeta(snap);
 
     const header = getHeaderForDeal(dealId);
 
-    const rawStatus = overrideStatus?.raw ?? ((deal?.status as string) || "IMPORTED").toUpperCase();
-    const statusLabel = overrideStatus?.label ?? formatStatusLabel(rawStatus);
-    const tone = overrideStatus?.tone ?? (STATUS_TONE[rawStatus] ?? "gray");
+    const inferredStatus = effectiveStatusByDealId.get(dealId);
+    const rawStatus =
+      overrideStatus?.raw ??
+      inferredStatus?.raw ??
+      (((deal?.status as string) || "IMPORTED").toUpperCase());
+    const statusLabel =
+      overrideStatus?.label ??
+      inferredStatus?.label ??
+      formatStatusLabel(rawStatus);
+    const tone =
+      overrideStatus?.tone ??
+      inferredStatus?.tone ??
+      (STATUS_TONE[rawStatus] ?? "gray");
 
     const href =
       grantRole === "OWNER" ? `/deal/${dealId}` : `/deal/${dealId}?mode=shared`;
@@ -632,8 +820,21 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     };
   }
 
-  const BUYER_SUBMITTED_STATUS = { label: "Offer submitted", tone: "blue", raw: "OFFER_SUBMITTED" };
-  const OWNER_AWAITING_STATUS = { label: "Awaiting approval", tone: "amber", raw: "AWAITING_APPROVAL" };
+  const BUYER_SUBMITTED_STATUS = {
+    label: "Offer submitted",
+    tone: "blue",
+    raw: "OFFER_SUBMITTED",
+  };
+  const BUYER_COUNTER_SUBMITTED_STATUS = {
+    label: "Counter submitted",
+    tone: "blue",
+    raw: "COUNTER_SUBMITTED",
+  };
+  const OWNER_AWAITING_STATUS = {
+    label: "Awaiting approval",
+    tone: "amber",
+    raw: "AWAITING_APPROVAL",
+  };
   const ACTIVE_DEAL_STATUS = { label: "Active", tone: "green", raw: "ACTIVE" };
 
   const pendingOwnerDealIdSetForFilter = new Set(pendingOwnerDealIds);
@@ -645,9 +846,12 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     .filter((g) => !acceptedThreadDealIds.has(g.deal_id))
     .filter((g) => !declinedThreadDealIds.has(g.deal_id))
     .map((g) => {
-      const override = buyerPendingDealIds.has(g.deal_id)
-        ? BUYER_SUBMITTED_STATUS
-        : undefined;
+      const override =
+        buyerWaitingStatusByDealId.get(g.deal_id) ??
+        (buyerPendingDealIds.has(g.deal_id)
+          ? BUYER_SUBMITTED_STATUS
+          : undefined);
+
       return buildCardVm(g.deal_id, g.role, override);
     });
 

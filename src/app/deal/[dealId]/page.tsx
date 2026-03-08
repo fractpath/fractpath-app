@@ -17,6 +17,56 @@ type PageProps = {
 
 type AnyRecord = Record<string, unknown>;
 
+function safeRecord(v: unknown): AnyRecord | null {
+  return v !== null && typeof v === "object" && !Array.isArray(v)
+    ? (v as AnyRecord)
+    : null;
+}
+
+function toEffectiveSnapshot(
+  proposalTermsSnapshot: AnyRecord | null,
+  fallbackSnapshot: AnyRecord | null,
+): AnyRecord | null {
+  const proposal = safeRecord(proposalTermsSnapshot);
+  const fallback = safeRecord(fallbackSnapshot);
+
+  if (!proposal) return fallback;
+
+  const proposalInputs = safeRecord((proposal as any).inputs);
+  if (proposalInputs) {
+    return {
+      ...proposal,
+      schema_version:
+        (proposal as any).schema_version ??
+        (fallback as any)?.schema_version ??
+        "1",
+      compute_version:
+        (proposal as any).compute_version ??
+        (fallback as any)?.compute_version ??
+        null,
+    };
+  }
+
+  const topLevelDealTerms = safeRecord((proposal as any).deal_terms);
+  const topLevelScenario = safeRecord((proposal as any).scenario);
+
+  if (topLevelDealTerms || topLevelScenario) {
+    return {
+      inputs: {
+        deal_terms: topLevelDealTerms ?? {},
+        scenario: topLevelScenario ?? {},
+      },
+      outputs: {
+        results: null,
+      },
+      schema_version: (fallback as any)?.schema_version ?? "1",
+      compute_version: (fallback as any)?.compute_version ?? null,
+    } as AnyRecord;
+  }
+
+  return fallback;
+}
+
 async function loadNegotiationState(
   svc: ReturnType<typeof createServiceClient>,
   activeThread: any,
@@ -37,16 +87,21 @@ async function loadNegotiationState(
     .select("id, status, created_by_user_id, terms_snapshot, created_at")
     .eq("thread_id", activeThread.id)
     .order("created_at", { ascending: false })
-    .limit(10);
+    .limit(20);
 
   const all = proposals ?? [];
   const currentProposal = all.find((p: any) => p.status === "submitted") ?? null;
+
+  const currentIdx = currentProposal
+    ? all.findIndex((p: any) => p.id === currentProposal.id)
+    : -1;
+
   const previousProposal =
-    all.find(
-      (p: any) =>
-        p.id !== currentProposal?.id &&
-        ["withdrawn", "submitted"].includes(p.status),
-    ) ?? null;
+    currentIdx >= 0
+      ? all
+          .slice(currentIdx + 1)
+          .find((p: any) => !!p?.terms_snapshot) ?? null
+      : null;
 
   const isBuyer = activeThread.buyer_user_id === userId;
   const isSender = currentProposal?.created_by_user_id === userId;
@@ -81,10 +136,10 @@ export default async function DealPage(ctx: PageProps) {
 
   // --- Primary path: load deal via RLS (buyer/participant with grants) ---
   const { data: deal } = await supabase
-    .from("deals")
-    .select("id, owner_user_id, status, created_at, archived_at")
-    .eq("id", dealId)
-    .maybeSingle();
+  .from("deals")
+  .select("id, owner_user_id, created_by_user_id, user_id, status, created_at, archived_at")
+  .eq("id", dealId)
+  .maybeSingle();
 
   if (deal && (deal as any).archived_at) {
     return (
@@ -117,7 +172,10 @@ export default async function DealPage(ctx: PageProps) {
 
     const userRole = grant?.role ?? null;
     const isOwner =
-      userRole === "OWNER" || (deal as any).owner_user_id === user.id;
+      userRole === "OWNER" ||
+      (deal as any).owner_user_id === user.id ||
+      (deal as any).created_by_user_id === user.id ||
+      (deal as any).user_id === user.id;
 
     const svc = createServiceClient();
 
@@ -190,8 +248,16 @@ export default async function DealPage(ctx: PageProps) {
     const negState = await loadNegotiationState(svc, activeThread, user.id);
     const locked = !!activeThread;
 
-    const inputs = snapJson ? (snapJson.inputs ?? null) : null;
-    const results = snapJson ? (snapJson.outputs?.results ?? null) : null;
+    const effectiveSnapshot = toEffectiveSnapshot(
+      negState.currentProposal?.terms_snapshot ?? null,
+      snapJson,
+    );
+
+    const effectiveSnapshotRecord = safeRecord(effectiveSnapshot);
+    const effectiveOutputs = safeRecord((effectiveSnapshotRecord as any)?.outputs);
+
+    const inputs = safeRecord((effectiveSnapshotRecord as any)?.inputs);
+    const results = safeRecord((effectiveOutputs as any)?.results);
 
     const { data: events } = await (svc.from("deal_events") as any)
       .select("id, deal_id, event_type, payload, created_by, created_at")
@@ -232,10 +298,14 @@ export default async function DealPage(ctx: PageProps) {
 
           <DealDetailWidgetPanel
             dealId={dealId}
-            initialSnapshot={snapJson}
+            initialSnapshot={effectiveSnapshotRecord}
             inputs={inputs}
             results={results}
-            computeVersion={snapJson?.compute_version ?? null}
+            computeVersion={
+              typeof (effectiveSnapshotRecord as any)?.compute_version === "string"
+                ? (effectiveSnapshotRecord as any).compute_version
+                : null
+            }
             canEdit={isOwner && !locked}
             persona="homeowner"
           />
@@ -536,8 +606,16 @@ export default async function DealPage(ctx: PageProps) {
     const negState = await loadNegotiationState(svc, activeThread, user.id);
     const locked = !!activeThread;
 
-    const inputs = snapJson ? (snapJson.inputs ?? null) : null;
-    const results = snapJson ? (snapJson.outputs?.results ?? null) : null;
+    const effectiveSnapshot = toEffectiveSnapshot(
+      negState.currentProposal?.terms_snapshot ?? null,
+      snapJson,
+    );
+
+    const effectiveSnapshotRecord = safeRecord(effectiveSnapshot);
+    const effectiveOutputs = safeRecord((effectiveSnapshotRecord as any)?.outputs);
+
+    const inputs = safeRecord((effectiveSnapshotRecord as any)?.inputs);
+    const results = safeRecord((effectiveOutputs as any)?.results);
 
     const { data: events } = await (svc.from("deal_events") as any)
       .select("id, deal_id, event_type, payload, created_by, created_at")
@@ -578,13 +656,24 @@ export default async function DealPage(ctx: PageProps) {
 
           <DealDetailWidgetPanel
             dealId={dealId}
-            initialSnapshot={snapJson}
+            initialSnapshot={effectiveSnapshotRecord}
             inputs={inputs}
             results={results}
-            computeVersion={snapJson?.compute_version ?? null}
-            canEdit={false}
+            computeVersion={
+              typeof (effectiveSnapshotRecord as any)?.compute_version === "string"
+                ? (effectiveSnapshotRecord as any).compute_version
+                : null
+            }
+            canEdit={(directOwnerMatches || threadOwnerMatches || grantMatches) && !locked}
             persona="homeowner"
           />
+
+          {(directOwnerMatches || threadOwnerMatches || grantMatches) && !locked && snapJson && (
+            <RecomputeSnapshotButton
+              dealId={dealId}
+              initialInputs={snapJson?.inputs ?? null}
+            />
+          )}
 
           {events && events.length > 0 && (
             <section>

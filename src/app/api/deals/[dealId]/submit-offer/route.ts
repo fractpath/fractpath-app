@@ -3,6 +3,9 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getAppBaseUrlServer } from "@/lib/appBaseUrl";
 import { sendTemplateEmail } from "@/lib/email/sendTemplateEmail";
+import { computeDealAdapter as computeDeal } from "@/lib/computeAdapter";
+import { ensureScenario } from "@/lib/defaultScenario";
+import { CONTRACT_VERSION, SCHEMA_VERSION } from "@/lib/contractVersion";
 
 export const runtime = "nodejs";
 
@@ -100,6 +103,43 @@ export async function POST(
 
   let ownerUserId: string | null = null;
 
+  const rawTermsSnapshot = body?.terms_snapshot;
+  if (!rawTermsSnapshot || typeof rawTermsSnapshot !== "object") {
+    return json(422, { error: "terms_snapshot is required" });
+  }
+
+  const rawInputs =
+    rawTermsSnapshot?.inputs && typeof rawTermsSnapshot.inputs === "object"
+      ? rawTermsSnapshot.inputs
+      : {
+          deal_terms:
+            rawTermsSnapshot?.deal_terms &&
+            typeof rawTermsSnapshot.deal_terms === "object"
+              ? rawTermsSnapshot.deal_terms
+              : null,
+          scenario:
+            rawTermsSnapshot?.scenario &&
+            typeof rawTermsSnapshot.scenario === "object"
+              ? rawTermsSnapshot.scenario
+              : null,
+        };
+
+  const normalizedInputs = ensureScenario(rawInputs);
+
+  if (
+    !normalizedInputs?.deal_terms ||
+    typeof normalizedInputs.deal_terms !== "object"
+  ) {
+    return json(422, { error: "terms_snapshot must include deal_terms" });
+  }
+
+  const computeResult = await computeDeal(normalizedInputs);
+  if (!computeResult.ok) {
+    return json(500, {
+      error: computeResult.error ?? "Failed to compute submitted offer snapshot",
+    });
+  }
+
   if (mode === "verified_owner") {
     if (prop.status !== "verified" || !prop.owner_user_id) {
       return json(422, {
@@ -144,6 +184,47 @@ export async function POST(
     return json(500, { error: partErr.message });
   }
 
+  let canonicalHeader: Record<string, unknown> | undefined;
+  try {
+    const { data: headerEv } = await (svc.from("deal_events") as any)
+      .select("payload")
+      .eq("deal_id", dealId)
+      .eq("event_type", "DEAL_HEADER_UPDATED")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (headerEv?.payload && typeof headerEv.payload === "object") {
+      const p = headerEv.payload;
+      if (p.property_id || p.display_address || p.title) {
+        canonicalHeader = {
+          title: p.title ?? null,
+          property_id: p.property_id ?? null,
+          display_address: p.display_address ?? null,
+          property_status: p.property_status ?? null,
+          ownership_status: p.ownership_status ?? null,
+        };
+      }
+    }
+  } catch (headerReadErr: any) {
+    console.error("submit_offer_canonical_header_read_error", headerReadErr?.message);
+  }
+
+  const computedAt = new Date().toISOString();
+  const fullSnapshot: Record<string, unknown> = {
+    contract_version: CONTRACT_VERSION,
+    schema_version: SCHEMA_VERSION,
+    inputs: normalizedInputs,
+    outputs: { results: computeResult.result.results },
+    computed_at: computedAt,
+    computed_by: user.id,
+    compute_version: computeResult.result.compute_version,
+  };
+
+  if (canonicalHeader) {
+    fullSnapshot.meta = { header: canonicalHeader };
+  }
+
   const { data: proposal, error: propErr } = await (
     svc.from("deal_proposals") as any
   )
@@ -151,7 +232,7 @@ export async function POST(
       thread_id: thread.id,
       created_by_user_id: user.id,
       status: "submitted",
-      terms_snapshot: body?.terms_snapshot ?? {},
+      terms_snapshot: fullSnapshot,
     })
     .select("id")
     .single();
