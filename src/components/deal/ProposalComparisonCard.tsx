@@ -31,8 +31,9 @@ type TermRow = {
 
 function extractTerms(snapshot: AnyRecord | null) {
   if (!snapshot) return null;
-  const dt = snapshot.deal_terms as AnyRecord | undefined;
-  const sc = snapshot.scenario as AnyRecord | undefined;
+  const inputs = snapshot.inputs as AnyRecord | undefined;
+  const dt = (inputs?.deal_terms ?? snapshot.deal_terms) as AnyRecord | undefined;
+  const sc = (inputs?.scenario ?? snapshot.scenario) as AnyRecord | undefined;
   return {
     propertyValue: safeNumber(dt?.property_value ?? dt?.propertyValue),
     upfrontPayment: safeNumber(
