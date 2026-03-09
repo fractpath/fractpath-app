@@ -301,30 +301,92 @@ export async function POST(req: Request) {
 
   const svc = createServiceClient();
 
+  let propertyId: string | null = null;
+  let createdNewProperty = false;
+
   const displayParts = [address_line1, address_line2, city, state, postal_code]
     .filter(Boolean)
     .join(", ");
   const computed_normalized = normalizeAddress(displayParts);
 
-  const { data: prop, error: insertErr } = await (svc.from("properties") as any)
-    .insert({
-      owner_user_id: user.id,
-      created_by_user_id: user.id,
-      address_line1,
-      address_line2: address_line2 || null,
-      city: city || null,
-      state,
-      postal_code,
-      status: "unverified",
-      is_private: true,
-      normalized_address: computed_normalized || null,
-    })
-    .select("id")
-    .single();
+  const { data: existingProperty, error: existingErr } = await (
+    svc.from("properties") as any
+  )
+    .select("id, owner_user_id, claimed_by_user_id, ownership_status, status")
+    .eq("normalized_address", computed_normalized || "")
+    .maybeSingle();
 
-  if (insertErr) return jsonError(insertErr.message, 500);
+  if (existingErr) {
+    return jsonError(existingErr.message, 500);
+  }
 
-  const propertyId = prop.id;
+  if (existingProperty) {
+    const ownedByAnotherUser =
+      !!existingProperty.owner_user_id &&
+      existingProperty.owner_user_id !== user.id;
+
+    const claimedByAnotherUser =
+      !!existingProperty.claimed_by_user_id &&
+      existingProperty.claimed_by_user_id !== user.id;
+
+    if (ownedByAnotherUser || claimedByAnotherUser) {
+      return jsonError("This property is already claimed by another user", 409);
+    }
+
+    const { data: updatedProperty, error: updateErr } = await (
+      svc.from("properties") as any
+    )
+      .update({
+        owner_user_id: user.id,
+        claimed_by_user_id: user.id,
+        ownership_status: "claimed",
+        address_line1,
+        address_line2: address_line2 || null,
+        city: city || null,
+        state,
+        postal_code,
+        is_private: true,
+        normalized_address: computed_normalized || null,
+      })
+      .eq("id", existingProperty.id)
+      .select("id")
+      .single();
+
+    if (updateErr) {
+      return jsonError(updateErr.message, 500);
+    }
+
+    propertyId = updatedProperty.id;
+  } else {
+    const { data: prop, error: insertErr } = await (
+      svc.from("properties") as any
+    )
+      .insert({
+        owner_user_id: user.id,
+        claimed_by_user_id: user.id,
+        ownership_status: "claimed",
+        created_by_user_id: user.id,
+        address_line1,
+        address_line2: address_line2 || null,
+        city: city || null,
+        state,
+        postal_code,
+        status: "unverified",
+        is_private: true,
+        normalized_address: computed_normalized || null,
+      })
+      .select("id")
+      .single();
+
+    if (insertErr) return jsonError(insertErr.message, 500);
+
+    propertyId = prop.id;
+    createdNewProperty = true;
+  }
+
+  if (!propertyId) {
+    return jsonError("Failed to resolve property record", 500);
+  }
 
   await ensureBucket(svc);
 
@@ -336,7 +398,9 @@ export async function POST(req: Request) {
 
     const result = await enforceLimitsAndProcess(rawBuf, file.type);
     if (!result.ok) {
-      await (svc.from("properties") as any).delete().eq("id", propertyId);
+      if (createdNewProperty) {
+        await (svc.from("properties") as any).delete().eq("id", propertyId);
+      }
       return jsonError(
         `${docType.replace("_", " ")}: ${result.error}`,
         result.status,
@@ -353,7 +417,9 @@ export async function POST(req: Request) {
       });
 
     if (uploadErr) {
-      await (svc.from("properties") as any).delete().eq("id", propertyId);
+      if (createdNewProperty) {
+        await (svc.from("properties") as any).delete().eq("id", propertyId);
+      }
       return jsonError(
         `Upload failed for ${docType}: ${uploadErr.message}`,
         500,
