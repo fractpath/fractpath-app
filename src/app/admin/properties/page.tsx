@@ -100,39 +100,66 @@ export default async function AdminPropertiesPage({
   }
 
   const allRows = (propsRes.data ?? []) as any[];
+  const propertyIds = allRows.map((p: any) => p.id);
 
-  const rows = allRows.sort((a: any, b: any) => {
-    const aReady = a.status === "under_review" || !!a.owner_user_id ? 1 : 0;
-    const bReady = b.status === "under_review" || !!b.owner_user_id ? 1 : 0;
-    if (bReady !== aReady) return bReady - aReady;
-    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-  });
+  const REQUIRED_DOC_TYPES = ["selfie", "drivers_license", "utility_bill"];
 
-  function readinessChip(p: any) {
-    if (p.status === "under_review") {
-      return (
-        <span className="inline-flex items-center rounded-full bg-blue-100 text-blue-800 border border-blue-200 px-2 py-0.5 text-xs font-medium">
-          under review
-        </span>
-      );
+  let docCountsByProperty: Record<string, Set<string>> = {};
+  if (propertyIds.length > 0) {
+    const { data: docs } = await (supabase.from("property_documents") as any)
+      .select("property_id, doc_type")
+      .in("property_id", propertyIds);
+
+    for (const d of docs ?? []) {
+      if (!docCountsByProperty[d.property_id]) {
+        docCountsByProperty[d.property_id] = new Set();
+      }
+      docCountsByProperty[d.property_id].add(d.doc_type);
     }
-    if (p.status === "verified") {
-      return (
-        <span className="inline-flex items-center rounded-full bg-green-100 text-green-800 border border-green-200 px-2 py-0.5 text-xs font-medium">
-          verified
-        </span>
-      );
-    }
-    if (p.owner_user_id) {
-      return (
-        <span className="inline-flex items-center rounded-full bg-amber-100 text-amber-800 border border-amber-200 px-2 py-0.5 text-xs font-medium">
-          claimed — awaiting docs
-        </span>
-      );
-    }
+  }
+
+  type Readiness = "ready_for_review" | "in_review" | "verified" | "missing_docs" | "unclaimed";
+
+  function getReadiness(p: any): Readiness {
+    if (p.status === "verified") return "verified";
+    if (p.status === "archived") return "verified";
+    if (p.status === "under_review") return "in_review";
+    if (!p.owner_user_id) return "unclaimed";
+    const uploadedTypes = docCountsByProperty[p.id] ?? new Set();
+    const hasAllDocs = REQUIRED_DOC_TYPES.every((t) => uploadedTypes.has(t));
+    return hasAllDocs ? "ready_for_review" : "missing_docs";
+  }
+
+  const READINESS_ORDER: Record<Readiness, number> = {
+    ready_for_review: 0,
+    in_review: 1,
+    missing_docs: 2,
+    unclaimed: 3,
+    verified: 4,
+  };
+
+  const rows = allRows
+    .map((p: any) => ({ ...p, _readiness: getReadiness(p) }))
+    .sort((a: any, b: any) => {
+      const aOrder = READINESS_ORDER[a._readiness as Readiness];
+      const bOrder = READINESS_ORDER[b._readiness as Readiness];
+      if (aOrder !== bOrder) return aOrder - bOrder;
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+
+  const READINESS_CHIPS: Record<Readiness, { label: string; bg: string; text: string; border: string }> = {
+    ready_for_review: { label: "Ready for review", bg: "bg-emerald-100", text: "text-emerald-800", border: "border-emerald-200" },
+    in_review: { label: "Under review", bg: "bg-blue-100", text: "text-blue-800", border: "border-blue-200" },
+    verified: { label: "Verified", bg: "bg-green-100", text: "text-green-800", border: "border-green-200" },
+    missing_docs: { label: "Missing documents", bg: "bg-amber-100", text: "text-amber-800", border: "border-amber-200" },
+    unclaimed: { label: "Unclaimed", bg: "bg-gray-100", text: "text-gray-500", border: "border-gray-200" },
+  };
+
+  function readinessChip(readiness: Readiness) {
+    const chip = READINESS_CHIPS[readiness];
     return (
-      <span className="inline-flex items-center rounded-full bg-gray-100 text-gray-500 border border-gray-200 px-2 py-0.5 text-xs font-medium">
-        unclaimed — not review-ready
+      <span className={`inline-flex items-center rounded-full ${chip.bg} ${chip.text} border ${chip.border} px-2 py-0.5 text-xs font-medium`}>
+        {chip.label}
       </span>
     );
   }
@@ -201,10 +228,12 @@ export default async function AdminPropertiesPage({
                   .filter(Boolean)
                   .join(", ");
 
-                const isReviewReady = p.status === "under_review" || !!p.owner_user_id;
+                const readiness = p._readiness as Readiness;
+                const isActionable = readiness === "ready_for_review" || readiness === "in_review";
+                const dimmed = readiness === "unclaimed" || readiness === "missing_docs";
 
                 return (
-                  <tr key={p.id} className={`border-t ${!isReviewReady ? "opacity-60" : ""}`}>
+                  <tr key={p.id} className={`border-t ${dimmed ? "opacity-60" : ""}`}>
                     <td className="p-3">
                       <a
                         className="font-medium underline"
@@ -231,7 +260,7 @@ export default async function AdminPropertiesPage({
                     </td>
 
                     <td className="p-3">
-                      {readinessChip(p)}
+                      {readinessChip(readiness)}
                     </td>
 
                     <td className="p-3">
@@ -242,7 +271,7 @@ export default async function AdminPropertiesPage({
 
                     <td className="p-3">
                       <div className="flex gap-1 flex-wrap">
-                        {isReviewReady && (
+                        {isActionable && (
                           <PropertyStatusButton
                             propertyId={p.id}
                             currentStatus={p.status}
