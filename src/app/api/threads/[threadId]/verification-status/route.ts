@@ -158,7 +158,7 @@ export async function GET(_req: Request, ctx: { params: Promise<Params> }) {
 
   const canVerify = isClaimant;
   const accept_allowed = property_status === "verified" && isClaimant;
-  const verify_url = isClaimant ? `/me/properties/${propertyId}` : null;
+  const verify_url = isClaimant ? "/me" : null;
 
   return NextResponse.json({
     ok: true,
