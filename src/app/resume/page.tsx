@@ -50,24 +50,35 @@ function ResumeContent() {
   useEffect(() => {
     if (!token) return;
 
-    const resumeToken = token!
-
+    const resumeToken = token;
     let cancelled = false;
 
     async function run() {
       try {
         const supabase = createClient();
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
+        const { data, error } = await supabase.auth.getUser();
 
         if (cancelled) return;
 
+        if (error) {
+          setState({
+            status: "error",
+            message: `Auth error: ${error.message}`,
+            isAuth: true,
+          });
+          return;
+        }
+
+        const user = data?.user;
+
+        // Not logged in -> route to login/signup with returnTo preserved
         if (!user) {
+          // Preserve the draft token for 1 hour (used by server resume flow)
           document.cookie = `fractpath_draft_token=${encodeURIComponent(
             resumeToken,
           )};path=/;max-age=3600;SameSite=Lax`;
 
+          // Optional: if we can fetch draft email, prefill it
           let draftEmail = "";
           try {
             const infoRes = await fetch(
@@ -76,7 +87,7 @@ function ResumeContent() {
             );
             if (infoRes.ok) {
               const info = await infoRes.json();
-              draftEmail = info.email || "";
+              draftEmail = info?.email || "";
             }
           } catch {}
 
@@ -85,126 +96,113 @@ function ResumeContent() {
             ? `&email=${encodeURIComponent(draftEmail)}`
             : "";
 
-          let userExists = false;
-          if (draftEmail) {
-            try {
-              const { data: existsData } = await supabase.auth
-                .signInWithOtp({
-                  email: draftEmail,
-                  options: {
-                    shouldCreateUser: false,
-                    emailRedirectTo:
-                      (process.env.NEXT_PUBLIC_SITE_URL || "") +
-                      "/auth/callback",
-                  },
-                })
-                .catch(() => ({ data: null as any }));
-
-              userExists = !!existsData;
-            } catch {
-              userExists = false;
-            }
-          }
-
-          if (cancelled) return;
-
-          if (draftEmail && !userExists) {
-            setState({ status: "redirecting-signup" });
-            router.push(
-              `/signup?returnTo=${encodeURIComponent(
-                returnTo,
-              )}${emailParam}&persona=homeowner`,
-            );
-          } else {
-            setState({ status: "redirecting-login" });
-            router.push(
-              `/login?returnTo=${encodeURIComponent(returnTo)}${emailParam}`,
-            );
-          }
+          // Deterministic: always go to login (signup link is on the login page).
+          // If you want auto-route to signup based on existence, do it via a server API later.
+          setState({ status: "redirecting-login" });
+          router.push(
+            `/login?returnTo=${encodeURIComponent(returnTo)}${emailParam}`,
+          );
           return;
         }
 
+        // Logged in -> redeem/resume via server
         setState({ status: "redeeming" });
 
         const res = await fetch("/api/deals/resume", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          cache: "no-store",
+          headers: { "content-type": "application/json" },
           body: JSON.stringify({ token: resumeToken }),
         });
 
-        const data = await res.json().catch(() => ({}) as any);
-        const requestId =
-          res.headers.get("x-request-id") ??
-          res.headers.get("x-amzn-requestid") ??
-          undefined;
-
-        if (cancelled) return;
-
-        if (!res.ok || !data.ok) {
-          const isAuth = res.status === 401;
+        const json = await res.json().catch(() => ({}) as any);
+        if (!res.ok || !json?.ok) {
           setState({
             status: "error",
-            message: data.error || "Failed to resume scenario",
+            message:
+              json?.error ??
+              json?.message ??
+              `Resume failed (HTTP ${res.status})`,
             httpStatus: res.status,
-            requestId,
-            isAuth,
+            requestId: json?.requestId,
           });
           return;
         }
 
-        document.cookie =
-          "fractpath_draft_token=;path=/;max-age=0;SameSite=Lax";
+        const dealId: string | undefined =
+          json?.dealId ?? json?.deal_id ?? undefined;
 
-        const redirectUrl = data.redirect_url || `/deal/${data.deal_id}`;
+        const redirectUrl: string =
+          json?.redirectUrl ?? (dealId ? `/deal/${dealId}` : "/dashboard");
 
         setState({
           status: "success",
-          dealId: data.deal_id,
+          dealId: dealId || "",
           redirectUrl,
         });
 
         router.replace(redirectUrl);
-      } catch {
-        if (!cancelled) {
-          setState({
-            status: "error",
-            message: "Network error. Please try again.",
-          });
-        }
+      } catch (e: any) {
+        if (cancelled) return;
+        setState({
+          status: "error",
+          message: e?.message ?? "Resume failed",
+        });
       }
     }
 
-    void run();
-
+    run();
     return () => {
       cancelled = true;
     };
   }, [token, router]);
 
   return (
-    <main style={{ maxWidth: 480, margin: "80px auto", padding: "0 16px" }}>
-      {state.status === "loading" && <p>Resuming your deal…</p>}
+    <main style={{ maxWidth: 520, margin: "80px auto", padding: 16 }}>
+      {state.status === "loading" && <p>Loading…</p>}
 
       {state.status === "no-token" && (
-        <div>
-          <h1 style={{ fontSize: "1.5rem", fontWeight: 700 }}>Missing Token</h1>
-          <p style={{ color: "#666", marginTop: 8 }}>
-            No draft token was provided. Please use the link from your scenario
-            email to continue.
-          </p>
-        </div>
+        <>
+          <h1>Invalid link</h1>
+          <p>This resume link is missing a token.</p>
+        </>
       )}
 
-      {state.status === "redirecting-login" && <p>Redirecting to login…</p>}
-      {state.status === "redirecting-signup" && <p>Redirecting to signup…</p>}
-      {state.status === "redeeming" && <p>Finalizing your deal…</p>}
+      {state.status === "redirecting-login" && (
+        <>
+          <h1>Sign in required</h1>
+          <p>Redirecting you to sign in…</p>
+        </>
+      )}
+
+      {state.status === "redirecting-signup" && (
+        <>
+          <h1>Create your account</h1>
+          <p>Redirecting you to sign up…</p>
+        </>
+      )}
+
+      {state.status === "redeeming" && (
+        <>
+          <h1>Resuming…</h1>
+          <p>Fetching your saved deal…</p>
+        </>
+      )}
 
       {state.status === "error" && (
-        <div>
-          <h1 style={{ fontSize: "1.5rem", fontWeight: 700 }}>Error</h1>
-          <p style={{ marginTop: 8 }}>{state.message}</p>
-        </div>
+        <>
+          <h1>Couldn’t resume</h1>
+          <p>{state.message}</p>
+          {state.requestId && (
+            <p style={{ opacity: 0.7 }}>Request ID: {state.requestId}</p>
+          )}
+        </>
+      )}
+
+      {state.status === "success" && (
+        <>
+          <h1>Success</h1>
+          <p>Redirecting…</p>
+        </>
       )}
     </main>
   );

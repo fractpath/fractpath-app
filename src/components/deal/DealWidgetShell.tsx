@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
-import { FractPathCalculatorWidget } from "fractpath-calculator-widget";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { EditModalMount } from "fractpath-calculator-widget";
+import { extractDealDisplayModel } from "@/lib/dealSnapshotDisplay";
 import { normalizeDealTermsForWidget } from "@/lib/normalizeDealTermsForWidget";
 
 type AnyRecord = Record<string, unknown>;
@@ -14,6 +15,7 @@ type DealWidgetShellProps = {
     deal_terms: AnyRecord;
     scenario: AnyRecord;
   }) => void | Promise<void>;
+  initiallyOpenEditor?: boolean;
 };
 
 function safeRecord(v: unknown): AnyRecord | null {
@@ -28,47 +30,33 @@ function safeNumber(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/**
- * Normalize widget onSave payloads to deal_terms + scenario (scenario may be empty).
- */
-function pickInputsFromPayload(
-  payload: unknown,
-): { deal_terms: AnyRecord; scenario: AnyRecord } | null {
-  const p = safeRecord(payload);
-  if (!p) return null;
+function formatCurrency(v: number | null): string {
+  if (v == null) return "—";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(v);
+}
 
-  const candidates: unknown[] = [
-    (p as any).inputs,
-    (p as any).snapshot?.inputs,
-    (p as any).snapshot_json?.inputs,
-    (p as any).snapshot,
-    (p as any).snapshot_json,
-    p,
-  ];
+function formatInteger(v: number | null): string {
+  if (v == null) return "—";
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(v);
+}
 
-  for (const c of candidates) {
-    const rec = safeRecord(c);
-    if (!rec) continue;
-
-    // Case 1: rec itself looks like "inputs"
-    const dt1 = safeRecord((rec as any).deal_terms);
-    if (dt1) {
-      const sc1 = safeRecord((rec as any).scenario) ?? {};
-      return { deal_terms: dt1, scenario: sc1 };
-    }
-
-    // Case 2: rec looks like a snapshot, and .inputs exists
-    const nestedInputs = safeRecord((rec as any).inputs);
-    if (nestedInputs) {
-      const dt2 = safeRecord((nestedInputs as any).deal_terms);
-      if (dt2) {
-        const sc2 = safeRecord((nestedInputs as any).scenario) ?? {};
-        return { deal_terms: dt2, scenario: sc2 };
-      }
-    }
-  }
-
-  return null;
+function ValueCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+      <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        {label}
+      </div>
+      <div className="mt-1 text-base font-semibold text-gray-900 dark:text-gray-100">
+        {value}
+      </div>
+    </div>
+  );
 }
 
 export function DealWidgetShell({
@@ -76,106 +64,145 @@ export function DealWidgetShell({
   canEdit,
   persona = "homeowner",
   onSave,
+  initiallyOpenEditor = false,
 }: DealWidgetShellProps) {
+  const [editOpen, setEditOpen] = useState(initiallyOpenEditor);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
-  const seedSnapshot = useMemo(() => {
-    const snap = safeRecord(initialSnapshot);
-    if (snap) {
-      const inRec = safeRecord((snap as any).inputs);
-      if (
-        inRec &&
-        safeRecord((inRec as any).deal_terms) &&
-        safeRecord((inRec as any).scenario)
-      ) {
-        return {
-          ...snap,
-          inputs: {
-            ...(inRec as any),
-            deal_terms: normalizeDealTermsForWidget(
-              (inRec as any).deal_terms as AnyRecord,
-            ),
-            scenario: (inRec as any).scenario,
-          },
-        } as AnyRecord;
-      }
-      return snap;
+  useEffect(() => {
+    if (initiallyOpenEditor && canEdit) {
+      setEditOpen(true);
     }
-    return null;
-  }, [initialSnapshot]);
+  }, [initiallyOpenEditor, canEdit]);
 
-  const seedScenario = useMemo(() => {
-    const s0 = safeRecord((seedSnapshot as any)?.inputs?.scenario);
-    return s0 ?? {};
-  }, [seedSnapshot]);
+  const snap = useMemo(() => safeRecord(initialSnapshot), [initialSnapshot]);
+  const inputs = useMemo(() => safeRecord((snap as any)?.inputs), [snap]);
 
-  const handleSave = useCallback(
-    async (payload: unknown) => {
-      // DEBUG (browser console): keep until save works, then remove
+  const dealTerms = useMemo(
+    () =>
+      normalizeDealTermsForWidget(
+        safeRecord((inputs as any)?.deal_terms) ?? {},
+      ),
+    [inputs],
+  );
 
-      const normalized = pickInputsFromPayload(payload);
+  const scenario = useMemo(() => {
+    const sc = safeRecord((inputs as any)?.scenario) ?? {};
+    return {
+      ...sc,
+      exit_year: safeNumber((sc as any)?.exit_year) ?? 5,
+    } as AnyRecord;
+  }, [inputs]);
 
-      if (!normalized) {
-        setError("Save failed: widget did not provide deal_terms.");
-        return;
-      }
+  const model = useMemo(
+    () => extractDealDisplayModel(initialSnapshot ?? null),
+    [initialSnapshot],
+  );
 
-      const dealTerms = normalized.deal_terms;
+  const hasAnyData =
+    model.propertyValue != null ||
+    model.upfrontAmount != null ||
+    model.monthlyPayment != null ||
+    model.paymentCount != null ||
+    model.exitYear != null;
 
-      // Ensure scenario.exit_year is present.
-      const scenario: AnyRecord = { ...(normalized.scenario ?? {}) };
+  const canEditSnapshot = !!canEdit && !!onSave;
 
-      const exitFromScenario = safeNumber((scenario as any).exit_year);
-      const exitFromSeed = safeNumber((seedScenario as any).exit_year);
+  const modalInitial = useMemo(() => {
+    return {
+      deal_terms: dealTerms,
+      scenario,
+    };
+  }, [dealTerms, scenario]);
 
-      if (exitFromScenario == null) {
-        if (exitFromSeed != null) {
-          (scenario as any).exit_year = exitFromSeed;
-        } else {
-          // last-resort default (keeps compute unblocked)
-          (scenario as any).exit_year = 5;
-        }
-      }
-
+  const handleSaved = useCallback(
+    async (saved: { deal_terms: AnyRecord; scenario: AnyRecord }) => {
       setError(null);
-
+      setSaving(true);
       try {
         await onSave?.({
-          deal_terms: normalizeDealTermsForWidget(dealTerms),
-          scenario,
+          deal_terms: normalizeDealTermsForWidget(
+            safeRecord(saved?.deal_terms) ?? {},
+          ),
+          scenario: safeRecord(saved?.scenario) ?? { exit_year: 5 },
         });
+        setEditOpen(false);
       } catch (err: any) {
         setError(err?.message ?? "Save failed");
+      } finally {
+        setSaving(false);
       }
     },
-    [onSave, seedScenario],
+    [onSave],
   );
 
   return (
-    <div>
+    <div className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950">
       {error ? (
         <div className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">
           {error}
         </div>
       ) : null}
 
-      {seedSnapshot ? (
-        <div className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950">
-          <FractPathCalculatorWidget
-            persona={persona as any}
-            mode="app"
-            canEdit={canEdit}
-            initialSnapshot={seedSnapshot as any}
-            onSave={canEdit && onSave ? handleSave : undefined}
-          />
+      {saving ? (
+        <div className="mb-3 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:bg-blue-950 dark:text-blue-200">
+          Saving deal terms and recomputing snapshot…
         </div>
-      ) : (
-        <div className="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-950">
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            No snapshot data available.
+      ) : null}
+
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div>
+          <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">
+            Saved Deal Terms
+          </h3>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            This section is rendered only from the latest effective deal snapshot.
           </p>
         </div>
+
+        {canEditSnapshot ? (
+          <button
+            type="button"
+            onClick={() => setEditOpen(true)}
+            className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+          >
+            {hasAnyData ? "Edit Terms" : "Add Deal Terms"}
+          </button>
+        ) : null}
+      </div>
+
+      {hasAnyData ? (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <ValueCard label="FMV" value={formatCurrency(model.propertyValue)} />
+          <ValueCard
+            label="Upfront"
+            value={formatCurrency(model.upfrontAmount)}
+          />
+          <ValueCard
+            label="Monthly"
+            value={formatCurrency(model.monthlyPayment)}
+          />
+          <ValueCard
+            label="Payments"
+            value={formatInteger(model.paymentCount)}
+          />
+          <ValueCard label="Exit Year" value={formatInteger(model.exitYear)} />
+        </div>
+      ) : (
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          No saved terms yet.
+        </p>
       )}
+
+      {editOpen && canEditSnapshot ? (
+        <EditModalMount
+          initial={modalInitial as any}
+          persona={persona as any}
+          onClose={() => setEditOpen(false)}
+          onSaved={handleSaved as any}
+        />
+      ) : null}
     </div>
   );
 }

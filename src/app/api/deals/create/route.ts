@@ -37,19 +37,54 @@ export async function POST(request: NextRequest) {
       body = {};
     }
 
-    // Accept multiple envelope shapes and normalize to { deal_terms, scenario }
     const normalized = normalizeCanonicalInputsFromUnknown(body);
-    if (!normalized) {
-      return jsonError("Missing canonical inputs (deal_terms + scenario)", 422);
+
+    const hasInputs =
+      normalized &&
+      normalized.deal_terms &&
+      typeof normalized.deal_terms === "object" &&
+      Object.keys(normalized.deal_terms).length > 0;
+
+    const { data: dealId, error: rpcErr } = await supabase.rpc(
+      "create_deal_with_owner_grant_v2",
+      {
+        p_user_id: user.id,
+      },
+    );
+
+    if (rpcErr || !dealId) {
+      console.error("CREATE_DEAL_RPC_FAILED", {
+        rpcErr,
+        userId: user?.id,
+      });
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "CREATE_DEAL_RPC_FAILED",
+          details: rpcErr,
+        },
+        { status: 500 },
+      );
     }
 
-    // Ensure scenario defaults are present, but do not change math/contract shape
+    if (!hasInputs) {
+      return NextResponse.json(
+        {
+          ok: true,
+          deal_id: dealId,
+          snapshot_id: null,
+          redirect_url: `/deal/${dealId}`,
+        },
+        { status: 201 },
+      );
+    }
+
     const canonicalInputs = ensureScenario({
-      deal_terms: normalized.deal_terms ?? {},
-      scenario: normalized.scenario ?? {},
+      deal_terms: normalized!.deal_terms ?? {},
+      scenario: normalized!.scenario ?? {},
     });
 
-    // Validate after normalization (prevents false 422 due to envelope mismatch)
     const pv = (canonicalInputs.deal_terms as any)?.property_value;
     if (typeof pv !== "number" || !Number.isFinite(pv)) {
       return jsonError("deal_terms.property_value is required", 422);
@@ -63,17 +98,7 @@ export async function POST(request: NextRequest) {
     const { compute_version, results } = computeResult.result;
     const computedAt = new Date().toISOString();
 
-    const { data: dealId, error: rpcErr } = await supabase.rpc(
-      "create_deal_with_owner_grant",
-      { p_user_id: user.id },
-    );
-
-    if (rpcErr || !dealId) {
-      console.error("CREATE_DEAL_RPC_FAILED", rpcErr?.message);
-      return jsonError("Failed to create deal", 500);
-    }
-
-    const fullSnapshot = {
+    const fullSnapshot: Record<string, unknown> = {
       contract_version: CONTRACT_VERSION,
       schema_version: SCHEMA_VERSION,
       inputs: canonicalInputs,

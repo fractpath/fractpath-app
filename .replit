@@ -4,7 +4,7 @@ expertMode = true
 
 [nix]
 channel = "stable-25_05"
-packages = ["gh", "lsof", "nano", "iproute2", "psmisc", "supabase-cli"]
+packages = ["gh", "lsof", "nano", "iproute2", "psmisc", "supabase-cli", "mailutils"]
 
 [workflows]
 runButton = "Project"
@@ -42,6 +42,10 @@ externalPort = 80
 localPort = 5001
 externalPort = 3000
 
+[[ports]]
+localPort = 5904
+externalPort = 3002
+
 [deployment]
 deploymentTarget = "static"
 publicDir = "."
@@ -53,3 +57,4 @@ NEXT_PUBLIC_SUPABASE_URL = "https://onacakmynvzcvbqenjaf.supabase.co"
 NEXT_PUBLIC_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9uYWNha215bnZ6Y3ZicWVuamFmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMzUyMzAsImV4cCI6MjA4NDkxMTIzMH0.SoIrVUxTfAn4AcaeuK25S3NcgldCoS5Z8r96DW9eoIQ"
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9uYWNha215bnZ6Y3ZicWVuamFmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMzUyMzAsImV4cCI6MjA4NDkxMTIzMH0.SoIrVUxTfAn4AcaeuK25S3NcgldCoS5Z8r96DW9eoIQ"
 SUPABASE_URL = "https://onacakmynvzcvbqenjaf.supabase.co"
+SHARE_FROM_EMAIL = "FractPath <noreply@notify.fractpath.com>"

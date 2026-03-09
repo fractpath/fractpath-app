@@ -29,9 +29,9 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 export async function POST(
   _request: NextRequest,
-  context: { params: Promise<{ dealId: string }> },
+  ctx: { params: Promise<{ dealId: string }> },
 ) {
-  const { dealId } = await context.params;
+  const { dealId } = await ctx.params;
 
   if (!isUuid(dealId)) return jsonError("Invalid deal ID", 400);
 
@@ -65,6 +65,8 @@ export async function POST(
     .select("role")
     .eq("deal_id", dealId)
     .eq("user_id", user.id)
+    .is("revoked_at", null)
+    .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`)
     .maybeSingle();
 
   const hasAccess =

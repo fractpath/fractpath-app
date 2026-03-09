@@ -1,0 +1,271 @@
+[1mdiff --git a/replit.md b/replit.md[m
+[1mindex d0f8f1d..4ac2ca8 100644[m
+[1m--- a/replit.md[m
+[1m+++ b/replit.md[m
+[36m@@ -43,6 +43,7 @@[m [mFractPath is built with Next.js, leveraging API routes for backend logic and Sup[m
+     - **Historical Snapshot Mode:** Provides read-only view of past snapshots.[m
+     - **Compute Endpoint:** Handles computation of deal snapshots for owners.[m
+     - **Fork Endpoint:** Allows users with read access to create a new deal based on an existing one.[m
+[32m+[m[32m    - **Manage Access:** OWNER can list active grants, revoke VIEWER/COUNTERPARTY grants, with audit logging via deal_events (ACCESS_REVOKED).[m
+     - **Compute Adapter:** Integrates the canonical `@fractpath/compute` engine for all calculations.[m
+     - **Default Scenario:** Provides baseline `deal_terms` and `scenario` for new deals.[m
+     - **Recompute Button:** Enables owners to regenerate snapshots with current inputs.[m
+[1mdiff --git a/src/app/api/deals/[dealId]/access/revoke/route.ts b/src/app/api/deals/[dealId]/access/revoke/route.ts[m
+[1mnew file mode 100644[m
+[1mindex 0000000..d226850[m
+[1m--- /dev/null[m
+[1m+++ b/src/app/api/deals/[dealId]/access/revoke/route.ts[m
+[36m@@ -0,0 +1,108 @@[m
+[32m+[m[32mimport { NextRequest, NextResponse } from "next/server";[m
+[32m+[m[32mimport { createClient } from "@/lib/supabase/server";[m
+[32m+[m[32mimport { createServiceClient } from "@/lib/supabase/service";[m
+[32m+[m
+[32m+[m[32mexport const runtime = "nodejs";[m
+[32m+[m
+[32m+[m[32mfunction jsonError(message: string, status = 400) {[m
+[32m+[m[32m  return NextResponse.json({ ok: false, error: message }, { status });[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mexport async function POST([m
+[32m+[m[32m  request: NextRequest,[m
+[32m+[m[32m  context: { params: Promise<{ dealId: string }> },[m
+[32m+[m[32m) {[m
+[32m+[m[32m  const supabase = await createClient();[m
+[32m+[m[32m  const {[m
+[32m+[m[32m    data: { user },[m
+[32m+[m[32m  } = await supabase.auth.getUser();[m
+[32m+[m
+[32m+[m[32m  if (!user) return jsonError("Unauthorized", 401);[m
+[32m+[m
+[32m+[m[32m  const { dealId } = await context.params;[m
+[32m+[m
+[32m+[m[32m  let body: any;[m
+[32m+[m[32m  try {[m
+[32m+[m[32m    body = await request.json();[m
+[32m+[m[32m  } catch {[m
+[32m+[m[32m    return jsonError("Invalid JSON body");[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  const grantId = typeof body?.grantId === "string" ? body.grantId.trim() : "";[m
+[32m+[m[32m  if (!grantId) {[m
+[32m+[m[32m    return jsonError("grantId is required");[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  const { data: ownerGrant } = await ([m
+[32m+[m[32m    supabase.from("deal_access_grants") as any[m
+[32m+[m[32m  )[m
+[32m+[m[32m    .select("id, role")[m
+[32m+[m[32m    .eq("deal_id", dealId)[m
+[32m+[m[32m    .eq("user_id", user.id)[m
+[32m+[m[32m    .is("revoked_at", null)[m
+[32m+[m[32m    .maybeSingle();[m
+[32m+[m
+[32m+[m[32m  if (ownerGrant?.role !== "OWNER") {[m
+[32m+[m[32m    return jsonError("Forbidden (OWNER only)", 403);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  if (ownerGrant.id === grantId) {[m
+[32m+[m[32m    return jsonError("Cannot revoke your own OWNER grant", 400);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  const service = createServiceClient();[m
+[32m+[m
+[32m+[m[32m  const { data: target } = await ([m
+[32m+[m[32m    service.from("deal_access_grants") as any[m
+[32m+[m[32m  )[m
+[32m+[m[32m    .select("id, user_id, role")[m
+[32m+[m[32m    .eq("id", grantId)[m
+[32m+[m[32m    .eq("deal_id", dealId)[m
+[32m+[m[32m    .is("revoked_at", null)[m
+[32m+[m[32m    .maybeSingle();[m
+[32m+[m
+[32m+[m[32m  if (!target) {[m
+[32m+[m[32m    return jsonError("Grant not found or already revoked", 404);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  if (target.role === "OWNER") {[m
+[32m+[m[32m    return jsonError("Cannot revoke an OWNER grant", 400);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  const { error: updateError } = await ([m
+[32m+[m[32m    service.from("deal_access_grants") as any[m
+[32m+[m[32m  )[m
+[32m+[m[32m    .update({ revoked_at: new Date().toISOString() })[m
+[32m+[m[32m    .eq("id", grantId)[m
+[32m+[m[32m    .eq("deal_id", dealId)[m
+[32m+[m[32m    .is("revoked_at", null);[m
+[32m+[m
+[32m+[m[32m  if (updateError) {[m
+[32m+[m[32m    console.error("revoke_grant_error", updateError.message);[m
+[32m+[m[32m    return jsonError("Failed to revoke grant", 500);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  try {[m
+[32m+[m[32m    await (service.from("deal_events") as any).insert({[m
+[32m+[m[32m      deal_id: dealId,[m
+[32m+[m[32m      event_type: "ACCESS_REVOKED",[m
+[32m+[m[32m      payload: {[m
+[32m+[m[32m        revoked_grant_id: grantId,[m
+[32m+[m[32m        revoked_user_id: target.user_id,[m
+[32m+[m[32m        revoked_role: target.role,[m
+[32m+[m[32m      },[m
+[32m+[m[32m      created_by: user.id,[m
+[32m+[m[32m    });[m
+[32m+[m[32m  } catch (eventErr: any) {[m
+[32m+[m[32m    console.error("deal_events audit insert error:", eventErr?.message);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  return NextResponse.json({[m
+[32m+[m[32m    ok: true,[m
+[32m+[m[32m    revoked: {[m
+[32m+[m[32m      id: grantId,[m
+[32m+[m[32m      user_id: target.user_id,[m
+[32m+[m[32m      role: target.role,[m
+[32m+[m[32m    },[m
+[32m+[m[32m  });[m
+[32m+[m[32m}[m
+[1mdiff --git a/src/app/api/deals/[dealId]/access/route.ts b/src/app/api/deals/[dealId]/access/route.ts[m
+[1mnew file mode 100644[m
+[1mindex 0000000..a0f8ad9[m
+[1m--- /dev/null[m
+[1m+++ b/src/app/api/deals/[dealId]/access/route.ts[m
+[36m@@ -0,0 +1,52 @@[m
+[32m+[m[32mimport { NextRequest, NextResponse } from "next/server";[m
+[32m+[m[32mimport { createClient } from "@/lib/supabase/server";[m
+[32m+[m[32mimport { createServiceClient } from "@/lib/supabase/service";[m
+[32m+[m
+[32m+[m[32mexport const runtime = "nodejs";[m
+[32m+[m
+[32m+[m[32mfunction jsonError(message: string, status = 400) {[m
+[32m+[m[32m  return NextResponse.json({ ok: false, error: message }, { status });[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mexport async function GET([m
+[32m+[m[32m  _request: NextRequest,[m
+[32m+[m[32m  context: { params: Promise<{ dealId: string }> },[m
+[32m+[m[32m) {[m
+[32m+[m[32m  const supabase = await createClient();[m
+[32m+[m[32m  const {[m
+[32m+[m[32m    data: { user },[m
+[32m+[m[32m  } = await supabase.auth.getUser();[m
+[32m+[m
+[32m+[m[32m  if (!user) return jsonError("Unauthorized", 401);[m
+[32m+[m
+[32m+[m[32m  const { dealId } = await context.params;[m
+[32m+[m
+[32m+[m[32m  const { data: ownerGrant } = await ([m
+[32m+[m[32m    supabase.from("deal_access_grants") as any[m
+[32m+[m[32m  )[m
+[32m+[m[32m    .select("role")[m
+[32m+[m[32m    .eq("deal_id", dealId)[m
+[32m+[m[32m    .eq("user_id", user.id)[m
+[32m+[m[32m    .is("revoked_at", null)[m
+[32m+[m[32m    .maybeSingle();[m
+[32m+[m
+[32m+[m[32m  if (ownerGrant?.role !== "OWNER") {[m
+[32m+[m[32m    return jsonError("Forbidden (OWNER only)", 403);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  const service = createServiceClient();[m
+[32m+[m[32m  const { data: grants, error } = await ([m
+[32m+[m[32m    service.from("deal_access_grants") as any[m
+[32m+[m[32m  )[m
+[32m+[m[32m    .select("id, user_id, role, created_at, expires_at, revoked_at")[m
+[32m+[m[32m    .eq("deal_id", dealId)[m
+[32m+[m[32m    .is("revoked_at", null)[m
+[32m+[m[32m    .order("created_at", { ascending: true });[m
+[32m+[m
+[32m+[m[32m  if (error) {[m
+[32m+[m[32m    console.error("list_grants_error", error.message);[m
+[32m+[m[32m    return jsonError("Failed to list grants", 500);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  return NextResponse.json({ ok: true, grants: grants ?? [] });[m
+[32m+[m[32m}[m
+[1mdiff --git a/src/app/deal/[dealId]/page.tsx b/src/app/deal/[dealId]/page.tsx[m
+[1mindex ecb5649..a0fb8e2 100644[m
+[1m--- a/src/app/deal/[dealId]/page.tsx[m
+[1m+++ b/src/app/deal/[dealId]/page.tsx[m
+[36m@@ -14,6 +14,7 @@[m [mimport { buildDealSummaryViewModel } from "@/lib/dealSummaryViewModel";[m
+ import { DealDetailWidgetPanel } from "@/components/deal/DealDetailWidgetPanel";[m
+ import { RecomputeSnapshotButton } from "@/components/deal/RecomputeSnapshotButton";[m
+ import { VersionTimelineCard } from "@/components/deal/VersionTimelineCard";[m
+[32m+[m[32mimport { ManageAccessPanel } from "@/components/deal/ManageAccessPanel";[m
+ import { getDealSnapshots } from "@/lib/dealSnapshotDb";[m
+ import { getDealVersions } from "@/lib/dealVersionDb";[m
+ import { getDealEvents, buildDealTimeline } from "@/lib/dealTimeline";[m
+[36m@@ -433,8 +434,9 @@[m [mexport default async function DealPage({ params, searchParams }: PageProps) {[m
+       </section>[m
+ [m
+       {role === "OWNER" && !readOnly && userPersona !== "realtor" ? ([m
+[31m-        <div className="mt-6">[m
+[32m+[m[32m        <div className="mt-6 space-y-4">[m
+           <ShareDealCard dealId={dealId} />[m
+[32m+[m[32m          <ManageAccessPanel dealId={dealId} />[m
+         </div>[m
+       ) : null}[m
+ [m
+[1mdiff --git a/src/components/deal/ManageAccessPanel.tsx b/src/components/deal/ManageAccessPanel.tsx[m
+[1mnew file mode 100644[m
+[1mindex 0000000..032ae4e[m
+[1m--- /dev/null[m
+[1m+++ b/src/components/deal/ManageAccessPanel.tsx[m
+[36m@@ -0,0 +1,155 @@[m
+[32m+[m[32m"use client";[m
+[32m+[m
+[32m+[m[32mimport { useCallback, useEffect, useState } from "react";[m
+[32m+[m
+[32m+[m[32mtype Grant = {[m
+[32m+[m[32m  id: string;[m
+[32m+[m[32m  user_id: string;[m
+[32m+[m[32m  role: string;[m
+[32m+[m[32m  created_at: string;[m
+[32m+[m[32m  expires_at: string | null;[m
+[32m+[m[32m};[m
+[32m+[m
+[32m+[m[32mtype ManageAccessPanelProps = {[m
+[32m+[m[32m  dealId: string;[m
+[32m+[m[32m};[m
+[32m+[m
+[32m+[m[32mexport function ManageAccessPanel({ dealId }: ManageAccessPanelProps) {[m
+[32m+[m[32m  const [open, setOpen] = useState(false);[m
+[32m+[m[32m  const [grants, setGrants] = useState<Grant[]>([]);[m
+[32m+[m[32m  const [loading, setLoading] = useState(false);[m
+[32m+[m[32m  const [error, setError] = useState<string | null>(null);[m
+[32m+[m[32m  const [revoking, setRevoking] = useState<string | null>(null);[m
+[32m+[m
+[32m+[m[32m  const fetchGrants = useCallback(async () => {[m
+[32m+[m[32m    setLoading(true);[m
+[32m+[m[32m    setError(null);[m
+[32m+[m[32m    try {[m
+[32m+[m[32m      const res = await fetch(`/api/deals/${dealId}/access`);[m
+[32m+[m[32m      const body = await res.json();[m
+[32m+[m[32m      if (!res.ok || !body.ok) {[m
+[32m+[m[32m        throw new Error(body.error ?? "Failed to load grants");[m
+[32m+[m[32m      }[m
+[32m+[m[32m      setGrants(body.grants ?? []);[m
+[32m+[m[32m    } catch (err: any) {[m
+[32m+[m[32m      setError(err?.message ?? "Failed to load");[m
+[32m+[m[32m    } finally {[m
+[32m+[m[32m      setLoading(false);[m
+[32m+[m[32m    }[m
+[32m+[m[32m  }, [dealId]);[m
+[32m+[m
+[32m+[m[32m  useEffect(() => {[m
+[32m+[m[32m    if (open) fetchGrants();[m
+[32m+[m[32m  }, [open, fetchGrants]);[m
+[32m+[m
+[32m+[m[32m  const handleRevoke = useCallback([m
+[32m+[m[32m    async (grantId: string) => {[m
+[32m+[m[32m      setRevoking(grantId);[m
+[32m+[m[32m      setError(null);[m
+[32m+[m[32m      try {[m
+[32m+[m[32m        const res = await fetch(`/api/deals/${dealId}/access/revoke`, {[m
+[32m+[m[32m          method: "POST",[m
+[32m+[m[32m          headers: { "Content-Type": "application/json" },[m
+[32m+[m[32m          body: JSON.stringify({ grantId }),[m
+[32m+[m[32m        });[m
+[32m+[m[32m        const body = await res.json();[m
+[32m+[m[32m        if (!res.ok || !body.ok) {[m
+[32m+[m[32m          throw new Error(body.error ?? "Revoke failed");[m
+[32m+

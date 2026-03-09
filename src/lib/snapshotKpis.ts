@@ -102,17 +102,15 @@ export function extractDealCardMeta(snapshotJson: unknown): DealCardMeta {
     null;
 
   const fmv =
+    num(terms.property_value) ??
     num(first(snap, [
       ["outputs", "results", "fmv"],
       ["outputs", "results", "amv"],
-      ["outputs", "results", "projected_fmv"],
       ["outputs", "results", "property_value"],
       ["results", "fmv"],
       ["results", "amv"],
-      ["results", "projected_fmv"],
       ["results", "property_value"],
     ])) ??
-    num(terms.property_value) ??
     null;
 
   const upfront = num(terms.upfront_payment) ?? null;

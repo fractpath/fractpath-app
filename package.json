@@ -10,6 +10,7 @@
     "predev": "node scripts/check-env.mjs",
     "prebuild": "node scripts/check-env.mjs",
     "smoke": "bash scripts/smoke.sh",
+    "lint:route-params": "bash scripts/guard-route-params.sh",
     "verify": "npm run lint && npm run build && npm run smoke"
   },
   "dependencies": {

@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
-import heic2any from "heic2any";
 
 async function normalizeUploadToJpeg(file: File): Promise<File> {
   const name = file.name || "upload";
@@ -17,6 +16,8 @@ async function normalizeUploadToJpeg(file: File): Promise<File> {
     lower.endsWith(".heif");
 
   if (!isHeic) return file;
+
+  const { default: heic2any } = await import("heic2any");
 
   const blob = (await heic2any({
     blob: file,
@@ -121,7 +122,8 @@ export function PropertyForm(props: {
     };
   }, [previews]);
 
-  const allFilesPresent = isEdit || Object.values(files).every((f) => f !== null);
+  const allFilesPresent =
+    isEdit || Object.values(files).every((f) => f !== null);
   const addressValid =
     !!address_line1.trim() && !!state.trim() && !!postal_code.trim();
   const canSubmit = addressValid && allFilesPresent && !submitting;
@@ -198,7 +200,9 @@ export function PropertyForm(props: {
           ? "Update your property details"
           : "Submit for verification with address and photos"
       }
-      primaryLabel={submitting ? "Saving..." : isEdit ? "Save changes" : "Submit"}
+      primaryLabel={
+        submitting ? "Saving..." : isEdit ? "Save changes" : "Submit"
+      }
       primaryLoading={submitting}
       primaryDisabled={!canSubmit}
       onPrimary={handleSubmit}
@@ -281,7 +285,9 @@ export function PropertyForm(props: {
                   <div className="flex items-center justify-between gap-2">
                     <div>
                       <div className="text-sm font-medium">{label}</div>
-                      <div className="text-xs text-muted-foreground">{hint}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {hint}
+                      </div>
                     </div>
 
                     <button
@@ -298,7 +304,9 @@ export function PropertyForm(props: {
                     type="file"
                     accept="image/*,.pdf"
                     className="hidden"
-                    onChange={(e) => handlePickFile(docType, e.target.files?.[0] ?? null)}
+                    onChange={(e) =>
+                      handlePickFile(docType, e.target.files?.[0] ?? null)
+                    }
                   />
 
                   {file && (

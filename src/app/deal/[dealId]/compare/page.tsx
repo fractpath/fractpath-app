@@ -6,7 +6,34 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { compareSnapshotDisplay } from "@/lib/snapshotCompare";
-import { formatValue, humanLabel } from "@/lib/dealSnapshotDisplay";
+import { extractDealDisplayModel } from "@/lib/dealSnapshotDisplay";
+
+function formatValue(v: unknown): string {
+  if (v == null) return "—";
+  const n = Number(v);
+  if (!Number.isFinite(n)) return String(v);
+
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(n);
+}
+
+function humanLabel(key: string): string {
+  switch (key) {
+    case "propertyValue":
+      return "FMV";
+    case "upfrontAmount":
+      return "Upfront";
+    case "monthlyPayment":
+      return "Monthly";
+    case "paymentCount":
+      return "Payments";
+    case "exitYear":
+      return "Exit Year";
+    default:
+      return key;
+  }
+}
 
 type SearchParams = Record<string, string | string[] | undefined>;
 

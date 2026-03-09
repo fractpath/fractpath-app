@@ -1,112 +1,57 @@
-/* Canonical-only (v10)
- *
- * Supported snapshot_json shape:
- *   snapshot_json.inputs  (object)
- *   snapshot_json.outputs.results (object)
- *   snapshot_json.compute_version (string)   // preferred
- *   snapshot_json.outputs.results.compute_version (string) // fallback (legacy rows)
- *
- * Non-negotiable: do NOT read legacy fields (chart_series, outputs.summary, outputs.schedule).
- */
-
-type AnyRecord = Record<string, unknown>;
-
-export type SnapshotRowLike = {
-  id?: string;
-  created_at?: string;
-  // legacy column (may exist)
-  contract_version?: string | null;
-  // canonical column (may exist depending on DB schema)
-  compute_version?: string | null;
-  schema_version?: string | null;
-  snapshot_json?: unknown;
-} | null;
-
-export type SnapshotDisplayData = {
-  // Canonical v10
-  computeVersion: string | null;
-  schemaVersion: string | null;
-  createdAt: string | null;
-  inputs: AnyRecord | null;
-  // Canonical-only: DealResults (snapshot_json.outputs.results)
-  outputs: AnyRecord | null;
-
-  // Optional backward visibility (do not use for gating)
-  contractVersion: string | null;
-};
-
-function isRecord(v: unknown): v is AnyRecord {
-  return v !== null && typeof v === "object" && Array.isArray(v) === false;
-}
+type AnyRecord = Record<string, any>;
 
 function safeRecord(v: unknown): AnyRecord | null {
-  return isRecord(v) ? (v as AnyRecord) : null;
-}
-
-function safeString(v: unknown): string | null {
-  return typeof v === "string" && v.trim().length > 0 ? v : null;
-}
-
-export function extractSnapshotDisplay(
-  snapshotRow: SnapshotRowLike,
-): SnapshotDisplayData | null {
-  if (snapshotRow === null) return null;
-
-  const json = safeRecord((snapshotRow as any).snapshot_json) ?? {};
-  const inputs = safeRecord((json as any).inputs);
-
-  const outputsContainer = safeRecord((json as any).outputs);
-  const results = outputsContainer
-    ? safeRecord((outputsContainer as any).results)
+  return v !== null && typeof v === "object" && !Array.isArray(v)
+    ? (v as AnyRecord)
     : null;
+}
 
-  // Canonical compute_version precedence:
-  // 1) snapshot_json.compute_version (new canonical)
-  // 2) snapshot_json.outputs.results.compute_version (legacy rows still have v10 DealResults)
-  // 3) row.compute_version (if present in schema)
-  const computeVersion =
-    safeString((json as any).compute_version) ??
-    safeString((results as any)?.compute_version) ??
-    safeString((snapshotRow as any).compute_version) ??
-    null;
+function safeNumber(v: unknown): number | null {
+  if (v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
 
-  const contractVersion =
-    safeString((snapshotRow as any).contract_version) ?? null;
+export type DealDisplayModel = {
+  propertyValue: number | null;
+  upfrontAmount: number | null;
+  monthlyPayment: number | null;
+  paymentCount: number | null;
+  exitYear: number | null;
+};
+
+export function extractDealDisplayModel(snapshot: unknown): DealDisplayModel {
+  const snap = safeRecord(snapshot);
+  const inputs = safeRecord(snap?.inputs);
+  const dealTerms = safeRecord(inputs?.deal_terms);
+  const scenario = safeRecord(inputs?.scenario);
 
   return {
-    computeVersion,
-    schemaVersion: ((snapshotRow as any).schema_version ?? null) as any,
-    createdAt: ((snapshotRow as any).created_at ?? null) as any,
-    inputs,
-    outputs: results,
-    contractVersion,
+    propertyValue:
+      safeNumber(dealTerms?.property_value) ??
+      safeNumber(dealTerms?.propertyValue) ??
+      null,
+
+    upfrontAmount:
+      safeNumber(dealTerms?.upfront_payment) ??
+      safeNumber(dealTerms?.upfrontPayment) ??
+      safeNumber(dealTerms?.initial_payment) ??
+      safeNumber(dealTerms?.initialPayment) ??
+      safeNumber(dealTerms?.initial_buy_amount) ??
+      safeNumber(dealTerms?.initialBuyAmount) ??
+      null,
+
+    monthlyPayment:
+      safeNumber(dealTerms?.monthly_payment) ??
+      safeNumber(dealTerms?.monthlyPayment) ??
+      null,
+
+    paymentCount:
+      safeNumber(dealTerms?.number_of_payments) ??
+      safeNumber(dealTerms?.numberOfPayments) ??
+      null,
+
+    exitYear:
+      safeNumber(scenario?.exit_year) ?? safeNumber(scenario?.exitYear) ?? null,
   };
-}
-
-export function selectSnapshot<T extends { id: string }>(
-  snapshots: T[],
-  selectedId: string | null,
-): { selected: T | null; isLatest: boolean } {
-  if (!snapshots || snapshots.length === 0)
-    return { selected: null, isLatest: true };
-  const latest = snapshots[0];
-  if (selectedId === null) return { selected: latest, isLatest: true };
-  const found = snapshots.find((s) => s.id === selectedId) ?? null;
-  return { selected: found, isLatest: found ? found.id === latest.id : true };
-}
-
-export function humanLabel(key: string): string {
-  return key.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
-}
-
-export function formatValue(v: unknown): string {
-  if (v == null) return "—";
-  if (typeof v === "number") return Number.isFinite(v) ? String(v) : "—";
-  if (typeof v === "string") return v;
-  if (typeof v === "boolean") return v ? "Yes" : "No";
-  try {
-    return JSON.stringify(v);
-  } catch {
-    return String(v);
-  }
 }

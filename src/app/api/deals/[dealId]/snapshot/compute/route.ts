@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import { insertDealSnapshot } from "@/lib/dealSnapshotDb";
 import { computeDealAdapter as computeDeal } from "@/lib/computeAdapter";
 import { ensureScenario } from "@/lib/defaultScenario";
 import { assertNotRealtor, assertOwnerGrant } from "@/lib/authz";
+import { CONTRACT_VERSION, SCHEMA_VERSION } from "@/lib/contractVersion";
 
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
@@ -17,9 +19,9 @@ function isUuid(v: string): boolean {
 
 export async function POST(
   request: NextRequest,
-  context: { params: Promise<{ dealId: string }> },
+  ctx: { params: Promise<{ dealId: string }> },
 ) {
-  const { dealId } = await context.params;
+  const { dealId } = await ctx.params;
 
   if (!isUuid(dealId)) {
     return jsonError("Invalid deal ID", 400);
@@ -66,21 +68,19 @@ export async function POST(
     );
   }
 
-  // OWNER only
-// RLS-enforced OWNER check via deal_access_grants
   const { data: grant, error: grantError } = await (
     supabase.from("deal_access_grants") as any
   )
     .select("role")
     .eq("deal_id", dealId)
     .eq("user_id", user.id)
+    .is("revoked_at", null)
     .maybeSingle();
 
   if (grantError) {
     return jsonError("Failed to verify access", 500);
   }
   const ownerCheck = assertOwnerGrant(grant?.role);
-  // Contract requires 403 specifically for non-owners
   if (!ownerCheck.ok) return jsonError(ownerCheck.error, 403);
 
   const computeResult = await computeDeal(body.inputs);
@@ -97,17 +97,48 @@ return jsonError(computeResult.error, status);
   const { compute_version, results } = computeResult.result;
   const computedAt = new Date().toISOString();
 
-  // Snapshot remains validated by validateFullDealSnapshotV1
-  const fullSnapshot = {
-    contract_version: compute_version,
-    schema_version: "1",
-    inputs: body.inputs, // { deal_terms, scenario }
-    outputs: { results }, // canonical nesting
+  const svc = createServiceClient();
+  let canonicalHeader: Record<string, unknown> | undefined;
+
+  try {
+    const { data: headerEv } = await (svc.from("deal_events") as any)
+      .select("payload")
+      .eq("deal_id", dealId)
+      .eq("event_type", "DEAL_HEADER_UPDATED")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (headerEv?.payload && typeof headerEv.payload === "object") {
+      const p = headerEv.payload;
+      if (p.property_id || p.display_address || p.title) {
+        canonicalHeader = {
+          title: p.title ?? null,
+          property_id: p.property_id ?? null,
+          display_address: p.display_address ?? null,
+          property_status: p.property_status ?? null,
+          ownership_status: p.ownership_status ?? null,
+        };
+      }
+    }
+  } catch (headerReadErr: any) {
+    console.error("canonical_header_read_error:", headerReadErr?.message);
+  }
+
+  const fullSnapshot: Record<string, unknown> = {
+    contract_version: CONTRACT_VERSION,
+    schema_version: SCHEMA_VERSION,
+    inputs: body.inputs,
+    outputs: { results },
     computed_at: computedAt,
     computed_by: user.id,
+    compute_version,
   };
 
-  // Runs under user-scoped client so RLS + immutability triggers apply.
+  if (canonicalHeader) {
+    fullSnapshot.meta = { header: canonicalHeader };
+  }
+
   const result = await insertDealSnapshot(
     supabase as any,
     dealId,
@@ -120,7 +151,6 @@ return jsonError(computeResult.error, status);
     return jsonError(result.error, status);
   }
 
-  // Audit event insert should also be under RLS.
   const { error: eventError } = await (
     supabase.from("deal_events") as any
   ).insert({

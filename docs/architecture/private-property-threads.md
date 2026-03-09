@@ -231,6 +231,25 @@ The following tables referenced in the prompt do **not exist** in the current mi
 
 ---
 
+## SQL Function Inventory
+
+### Functions Defined in Migrations
+
+| Function | Migration File | Purpose |
+|----------|---------------|---------|
+| `no_update_delete()` | `20260210_app_int_001_deals_snapshots_events.sql` | Immutability guard — raises exception on UPDATE/DELETE. Used by triggers on `deal_snapshots`, `deal_versions`, `deal_events`, `calculator_snapshots`. |
+| `set_updated_at()` | `20260225_app_profiles_properties.sql` (also `20260131_*`) | Sets `updated_at = now()` on UPDATE. Used by triggers on `profiles`, `properties`. |
+| `create_deal_with_owner_grant(p_property_address TEXT, p_user_id UUID)` | `20260210_create_deal_with_owner_grant.sql` | SECURITY DEFINER. Creates a deal + OWNER grant atomically. **See drift #10 — signature likely differs in live env.** |
+
+### Functions Called by App Code but NOT in Migrations
+
+| Function | Called From | Purpose |
+|----------|-------------|---------|
+| `mint_deal_share_token(p_deal_id, p_actor_user_id)` | `src/app/api/deals/[dealId]/share/route.ts` | Generates a share token for a deal. Only OWNER should call. |
+| `redeem_deal_share_token(...)` | `src/app/share/page.tsx` | Redeems a share token, creating a VIEWER grant. |
+
+---
+
 ## Snapshot Reuse Audit
 
 ### Does `deal_snapshots.snapshot_json` match canonical compute schema?
@@ -388,6 +407,18 @@ The `ACCEPT` version_type can be created by any OWNER regardless of whether the 
 ### 9. Legacy `calculator_snapshots` Table
 The old `calculator_snapshots` table still exists alongside the current `deal_snapshots`. No app code references it, but it represents dead schema weight.
 
+### 10. `create_deal_with_owner_grant` RPC Signature Mismatch
+The migration-defined function signature is `(p_property_address TEXT, p_user_id UUID)` and validates `p_property_address` with a minimum length check. The app code (`/api/deals/create/route.ts`) calls it with only `{ p_user_id: user.id }`, omitting `p_property_address` entirely. The RPC also references `deals.property_address` and `deals.created_by` columns, which do not exist in the `deals` table migration (`owner_user_id`, `status`, `created_from`, `source_ref`). The live Supabase environment likely has a modified version of both the RPC and the `deals` table that differs from the migration files.
+
+### 11. `deals` Table Column Divergence
+The `deals` migration defines columns: `id`, `owner_user_id`, `status`, `created_from`, `source_ref`, `created_at`. The `create_deal_with_owner_grant` RPC migration references `property_address` and `created_by` columns. App code also queries `deal.mode`. These columns (`property_address`, `created_by`, `mode`) are absent from the migration-defined schema, indicating the live `deals` table has been altered outside of migration files.
+
+### 12. `redeem_deal_share_token` RPC Not in Migrations
+In addition to `mint_deal_share_token` (drift #5), the `redeem_deal_share_token` RPC — called in the share page redemption flow — is also missing from the migration files. Both RPCs exist only in the live Supabase environment.
+
+### 13. `deal_share_tokens` Extra Columns — RESOLVED (Sprint 11.5)
+`max_redemptions` and `redemption_count` are now added to the `deal_share_tokens` table via `20260228_contract_alignment_rpc_v2.sql`. The `redeem_deal_share_token_v2` function enforces `max_redemptions` and increments `redemption_count` atomically.
+
 ---
 
 ## Invariants (Sprint 0 Freeze)
@@ -419,3 +450,55 @@ The old `calculator_snapshots` table still exists alongside the current `deal_sn
 4. Document uploads are only permitted for `unverified` properties (RLS-enforced).
 5. All documents are server-side validated: 12MB limit, magic-byte sniffing, HEIC rejection, image transcode to JPEG, fraud signal capture (sha256, byte_size, width, height).
 6. **GAP**: Deal acceptance is NOT gated by property verification status. This is an identified drift risk for future sprints.
+
+---
+
+## Contract Alignment (Sprint 11.5)
+
+Sprint 11.5 reconciled migration-vs-app drift by adding authoritative v2 RPCs and the missing `deals.mode` column.
+
+### v2 RPC Functions Added
+
+All defined in `supabase/migrations/20260228_contract_alignment_rpc_v2.sql`.
+
+| Function | Replaces (deprecated) | Signature | Returns |
+|----------|----------------------|-----------|---------|
+| `create_deal_with_owner_grant_v2` | `create_deal_with_owner_grant` | `(p_user_id UUID)` | `UUID` (deal id) |
+| `mint_deal_share_token_v2` | `mint_deal_share_token` | `(p_deal_id UUID, p_actor_user_id UUID)` | `TEXT` (token) |
+| `redeem_deal_share_token_v2` | `redeem_deal_share_token` | `(p_token TEXT)` | `UUID` (deal id) |
+| `is_admin` | (new — was live-only) | `()` | `BOOLEAN` |
+
+Key behaviors:
+- `create_deal_with_owner_grant_v2`: No `p_property_address` param (matches app). Inserts with `owner_user_id`, `status='IMPORTED'`, `created_from='app'`, `mode='app'`.
+- `mint_deal_share_token_v2`: Validates `p_actor_user_id = auth.uid()` (anti-spoofing). Validates OWNER grant. Generates 32-byte hex token. 30-day expiry.
+- `redeem_deal_share_token_v2`: Validates expiry + revocation + max_redemptions. Increments `redemption_count`. Upserts VIEWER grant (idempotent). Owner self-redeem returns deal_id without duplicate grant.
+- `is_admin`: Checks `auth.users.raw_user_meta_data->>'role' = 'admin'`.
+
+Legacy functions are NOT removed — they may still exist in the live DB but are deprecated.
+
+### `deals.mode` Column
+
+Defined in `supabase/migrations/20260228_deals_mode_column.sql`.
+
+- `mode TEXT NOT NULL DEFAULT 'app'`
+- Known values: `app`, `marketing`, `fork`
+- Backfills existing rows to `'app'`
+- No CHECK constraint added (values may expand; document as follow-up if constraint is desired)
+
+### App Code Callsite Updates
+
+| File | Old RPC | New RPC |
+|------|---------|---------|
+| `src/app/api/deals/create/route.ts` | `create_deal_with_owner_grant` | `create_deal_with_owner_grant_v2` |
+| `src/app/api/deals/[dealId]/share/route.ts` | `mint_deal_share_token` | `mint_deal_share_token_v2` |
+| `src/app/share/page.tsx` | `redeem_deal_share_token` | `redeem_deal_share_token_v2` |
+| `src/lib/auth/requireAdmin.ts` | `is_admin` | `is_admin` (unchanged — now migration-managed) |
+
+### Remaining Suspected Drift (Requires Live DB Verification)
+
+1. **`properties` column overlap**: Old `address`/`visibility` columns may coexist with new `address_line1`/`is_private`. Need live `\d properties` to confirm.
+2. **`properties_insert_own` RLS**: Still references `visibility = 'private'`; may need update to `is_private = true` if `visibility` column was dropped.
+3. **`deal_share_tokens` extra columns**: `max_redemptions` and `redemption_count` are queried in app code but not in migration. May need an additive migration.
+4. **`deals` column overlap**: Migration defines `owner_user_id`, `created_from`, `source_ref`. Live DB may also have `property_address`, `created_by` from the legacy RPC. The v2 RPC no longer references those columns.
+5. **`buyer_accept_proposal` RPC**: Referenced in `_app_unused/` code. Not in migrations. Confirmed unused — no action needed unless reactivated.
+6. **`chk_visibility_requires_verified` constraint**: References `visibility` column which may be stale.

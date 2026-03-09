@@ -1,4 +1,4 @@
-import { CONTRACT_VERSION, computeScenario } from "fractpath-calculator-widget";
+import { computeDeal as canonicalComputeDeal, COMPUTE_VERSION } from "@fractpath/compute";
 
 type Ok<T> = { ok: true; result: T };
 type Err = {
@@ -20,21 +20,33 @@ function num(v: any): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
-function clamp(x: number, lo: number, hi: number): number {
-  return Math.max(lo, Math.min(hi, x));
-}
+const DEAL_TERMS_DEFAULTS: Record<string, unknown> = {
+  monthly_payment: 0,
+  number_of_payments: 0,
+  payback_window_start_year: 3,
+  payback_window_end_year: 7,
+  timing_factor_early: 1,
+  timing_factor_late: 1,
+  floor_multiple: 1.1,
+  ceiling_multiple: 2.0,
+  downside_mode: "HARD_FLOOR",
+  contract_maturity_years: 30,
+  liquidity_trigger_year: 13,
+  minimum_hold_years: 2,
+  platform_fee: 2500,
+  servicing_fee_monthly: 20,
+  exit_fee_pct: 0.01,
+  realtor_representation_mode: "NONE",
+  realtor_commission_pct: 0,
+  realtor_commission_payment_mode: "PER_PAYMENT_EVENT",
+};
 
-function irrAnnual(invested: number, payout: number, years: number): number {
-  if (!(invested > 0) || !(payout > 0) || !(years > 0)) return 0;
-  return Math.pow(payout / invested, 1 / years) - 1;
-}
+const SCENARIO_DEFAULTS: Record<string, unknown> = {
+  annual_appreciation: 0.03,
+  closing_cost_pct: 0.02,
+  exit_year: 5,
+};
 
-/**
- * Canonical compute adapter (App repo).
- *
- * The widget package does not export computeDeal; it exports computeScenario.
- * So we derive canonical v10.2 KPI fields from computeScenario outputs.
- */
 export async function computeDeal(
   inputs: any,
 ): Promise<Ok<CanonicalComputeOk> | Err> {
@@ -48,10 +60,9 @@ export async function computeDeal(
     return { ok: false, code: "BAD_INPUT", error: "scenario is required" };
   }
 
-  // Required for KPI math
   const property_value = num(inputs.deal_terms.property_value);
   const upfront_payment = num(inputs.deal_terms.upfront_payment);
-  const exit_year = num(inputs.scenario.exit_year);
+  const exit_year = num(inputs.scenario.exit_year ?? SCENARIO_DEFAULTS.exit_year);
 
   if (property_value === null) {
     return {
@@ -75,86 +86,68 @@ export async function computeDeal(
     };
   }
 
-  let scenarioOut: any;
+  const terms: Record<string, unknown> = {
+    ...DEAL_TERMS_DEFAULTS,
+    ...inputs.deal_terms,
+  };
+
+  if (terms.realtor_commission_payment_mode !== "PER_PAYMENT_EVENT") {
+    terms.realtor_commission_payment_mode = "PER_PAYMENT_EVENT";
+  }
+
+  const scenario: Record<string, unknown> = {
+    ...SCENARIO_DEFAULTS,
+    ...inputs.scenario,
+  };
+
+  let dealResults: any;
   try {
-    scenarioOut = computeScenario(inputs);
+    dealResults = canonicalComputeDeal(terms as any, scenario as any);
   } catch (e: any) {
     return { ok: false, code: "ERROR", error: e?.message ?? String(e) };
   }
 
-  // computeScenario contract observed:
-  // { normalizedInputs, series, settlements }
-  const series: any[] = Array.isArray(scenarioOut?.series)
-    ? scenarioOut.series
-    : [];
-  const normalized = isObj(scenarioOut?.normalizedInputs)
-    ? scenarioOut.normalizedInputs
-    : null;
-
-  // Decide which month to evaluate: scenario.exit_year * 12
-  const month = Math.max(0, Math.round(exit_year * 12));
-  const row =
-    series.find((r) => r && typeof r.month === "number" && r.month === month) ??
-    null;
-
-  // Fall back: if series is missing that month, use settlements.standard
-  const std = isObj(scenarioOut?.settlements?.standard)
-    ? scenarioOut.settlements.standard
-    : null;
-
-  const homeValueAtExit =
-    num(row?.homeValue) ??
-    num(std?.homeValueAtSettlement) ??
-    // last resort: use property value as a baseline
-    property_value;
-
-  const equityPctAtExit =
-    num(row?.equityPct) ??
-    num(std?.equityPctAtSettlement) ??
-    // last resort: 0 (forces conservative results)
-    0;
-
-  // Clamp payout using normalized floor/cap multiples if present.
-  const floorMultiple = num(normalized?.floorMultiple) ?? 1;
-  const capMultiple = num(normalized?.capMultiple) ?? 999;
-
-  const rawPayout = homeValueAtExit * equityPctAtExit;
-  const minPayout = upfront_payment * floorMultiple;
-  const maxPayout = upfront_payment * capMultiple;
-  const isaSettlement = clamp(rawPayout, minPayout, maxPayout);
-
-  const invested_capital_total = upfront_payment;
-  const investor_profit = isaSettlement - invested_capital_total;
-  const investor_multiple =
-    invested_capital_total > 0 ? isaSettlement / invested_capital_total : 0;
-  const investor_irr_annual = irrAnnual(
-    invested_capital_total,
-    isaSettlement,
-    exit_year,
-  );
-
-  // Canonical-ish extra fields that downstream UI commonly expects
-  const projected_fmv = homeValueAtExit;
-  const vested_equity_pct = equityPctAtExit;
-
   const results: Record<string, unknown> = {
-    invested_capital_total,
-    projected_fmv,
-    isa_settlement: isaSettlement,
-    investor_profit,
-    investor_multiple,
-    investor_irr_annual,
-    vested_equity_pct,
+    invested_capital_total: dealResults.invested_capital_total,
+    projected_fmv: dealResults.projected_fmv,
+    isa_settlement: dealResults.isa_settlement,
+    investor_profit: dealResults.investor_profit,
+    investor_multiple: dealResults.investor_multiple,
+    investor_irr_annual: dealResults.investor_irr_annual,
+    investor_irr_annual_net: dealResults.investor_irr_annual_net,
+
+    vested_equity_percentage: dealResults.vested_equity_percentage,
+    vested_equity_pct: dealResults.vested_equity_percentage,
+
+    base_equity_value: dealResults.base_equity_value,
+    floor_amount: dealResults.floor_amount,
+    ceiling_amount: dealResults.ceiling_amount,
+    isa_pre_floor_cap: dealResults.isa_pre_floor_cap,
+    gain_above_capital: dealResults.gain_above_capital,
+    timing_factor_applied: dealResults.timing_factor_applied,
+
+    isa_standard_pre_dyf: dealResults.isa_standard_pre_dyf,
+    dyf_floor_amount: dealResults.dyf_floor_amount,
+    dyf_applied: dealResults.dyf_applied,
+
+    realtor_fee_total_projected: dealResults.realtor_fee_total_projected,
+    realtor_fee_upfront_projected: dealResults.realtor_fee_upfront_projected,
+    realtor_fee_installments_projected: dealResults.realtor_fee_installments_projected,
+    buyer_realtor_fee_total_projected: dealResults.buyer_realtor_fee_total_projected,
+    seller_realtor_fee_total_projected: dealResults.seller_realtor_fee_total_projected,
+
+    annual_appreciation: num(inputs.scenario.annual_appreciation) ?? 0.03,
+
+    compute_version: dealResults.compute_version ?? COMPUTE_VERSION,
   };
 
   return {
     ok: true,
     result: {
-      compute_version: CONTRACT_VERSION,
+      compute_version: dealResults.compute_version ?? COMPUTE_VERSION,
       results,
     },
   };
 }
 
-// Route code imports computeDealAdapter as computeDeal(...)
 export const computeDealAdapter = computeDeal;

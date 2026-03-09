@@ -1,10 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { DealWidgetShell } from "@/components/deal/DealWidgetShell";
-
-type AnyRecord = Record<string, unknown>;
 
 type NewDealClientProps = {
   persona: string;
@@ -13,33 +10,28 @@ type NewDealClientProps = {
 export function NewDealClient({ persona }: NewDealClientProps) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState(true);
 
-  const defaultSeed = useMemo<AnyRecord>(
-    () => ({
-      inputs: { deal_terms: {}, scenario: {} },
-      outputs: { results: null },
-      compute_version: null,
-      schema_version: "1",
-    }),
-    [],
-  );
+  useEffect(() => {
+    try {
+      localStorage.removeItem("fractpath:deal:new:header");
+    } catch {}
 
-  const handleSave = useCallback(
-    async (parsed: { deal_terms: AnyRecord; scenario: AnyRecord }) => {
-      setCreating(true);
-      setError(null);
+    let cancelled = false;
 
+    async function createDeal() {
       try {
         const res = await fetch("/api/deals/create", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ inputs: parsed }),
+          body: JSON.stringify({}),
         });
 
         const body = await res
           .json()
           .catch(() => ({ ok: false, error: "Invalid response" }));
+
+        if (cancelled) return;
 
         if (!res.ok || body.ok === false) {
           throw new Error(body.error ?? `Create failed (${res.status})`);
@@ -47,42 +39,47 @@ export function NewDealClient({ persona }: NewDealClientProps) {
 
         router.push(body.redirect_url ?? "/dashboard");
       } catch (err: any) {
-        setError(err?.message ?? "Failed to create deal");
-        setCreating(false);
+        if (!cancelled) {
+          setError(err?.message ?? "Failed to create deal");
+          setCreating(false);
+        }
       }
-    },
-    [router],
-  );
+    }
 
-  return (
-    <>
-      <h1 className="text-2xl font-semibold">Create a new deal</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Configure your deal terms and scenario, then save to create.
-      </p>
+    createDeal();
 
-      {error ? (
-        <div className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
+
+  if (error) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-xl font-semibold">New Deal</h1>
+        <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">
           {error}
         </div>
-      ) : null}
+        <button
+          type="button"
+          onClick={() => {
+            setError(null);
+            setCreating(true);
+            window.location.reload();
+          }}
+          className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted/50"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
 
-      {creating ? (
-        <div className="mt-6 rounded-lg border p-6 text-center">
-          <p className="text-sm text-muted-foreground">
-            Creating your deal...
-          </p>
-        </div>
-      ) : (
-        <div className="mt-6">
-          <DealWidgetShell
-            initialSnapshot={defaultSeed}
-            canEdit={true}
-            persona={persona}
-            onSave={handleSave}
-          />
-        </div>
-      )}
-    </>
+  return (
+    <div className="flex flex-col items-center justify-center py-12">
+      <div className="animate-pulse text-sm text-muted-foreground">
+        Creating your deal...
+      </div>
+    </div>
   );
 }

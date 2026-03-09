@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
-import { enforceLimitsAndProcess, type DocProcessingMeta } from "@/lib/uploads/documentProcessing";
+import {
+  enforceLimitsAndProcess,
+  type DocProcessingMeta,
+} from "@/lib/uploads/documentProcessing";
+import { normalizeAddress } from "@/lib/propertyResolve";
 
 export const runtime = "nodejs";
 
@@ -33,21 +37,224 @@ export async function GET() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
   if (!user) return jsonError("Unauthorized", 401);
 
-  const { data, error } = await (supabase.from("properties") as any)
+  const svc = createServiceClient();
+  const email = user.email?.toLowerCase() ?? null;
+
+  const { data: ownedData, error: ownedErr } = await (
+    svc.from("properties") as any
+  )
     .select(
-      "id, owner_user_id, address_line1, address_line2, city, state, postal_code, status, is_private, created_at, updated_at",
+      "id, address_line1, address_line2, city, state, postal_code, status, ownership_status, is_private, owner_user_id, claimed_by_user_id, created_by_user_id, created_at, updated_at",
     )
-    .eq("owner_user_id", user.id)
-    .order("created_at", { ascending: false });
+    .or(
+      `owner_user_id.eq.${user.id},created_by_user_id.eq.${user.id},claimed_by_user_id.eq.${user.id}`,
+    )
+    .order("updated_at", { ascending: false });
 
-  if (error) return jsonError(error.message, 500);
+  if (ownedErr) return jsonError(ownedErr.message, 500);
 
-  const rows = (data ?? []).map((r: any) => ({
-    ...r,
-    address_display: formatAddress(r),
-  }));
+  let claimableProperties: any[] = [];
+
+  // 2) Claimable / owner-visible properties for known_email pending-owner flow.
+  // Support all four bridges:
+  // - email invite
+  // - active owner participant row
+  // - deal_thread.owner_user_id already attached to this user
+  // - active deal_access_grants -> deal_threads.deal_id
+  {
+    const threadIdSet = new Set<string>();
+    const grantedDealIdSet = new Set<string>();
+
+    if (email) {
+      const { data: invites, error: invitesErr } = await (
+        svc.from("thread_invites") as any
+      )
+        .select("thread_id, invitee_email, intended_role, expires_at")
+        .eq("invitee_email", email)
+        .eq("intended_role", "owner");
+
+      if (invitesErr) return jsonError(invitesErr.message, 500);
+
+      for (const inv of invites ?? []) {
+        const notExpired =
+          !inv?.expires_at || new Date(inv.expires_at) > new Date();
+        if (notExpired && inv?.thread_id) {
+          threadIdSet.add(inv.thread_id);
+        }
+      }
+    }
+
+    const { data: participantRows, error: participantErr } = await (
+      svc.from("deal_thread_participants") as any
+    )
+      .select("thread_id, role, status")
+      .eq("user_id", user.id)
+      .eq("role", "owner")
+      .eq("status", "active");
+
+    if (participantErr) return jsonError(participantErr.message, 500);
+
+    for (const row of participantRows ?? []) {
+      if (row?.thread_id) threadIdSet.add(row.thread_id);
+    }
+
+    const { data: ownerThreads, error: ownerThreadsErr } = await (
+      svc.from("deal_threads") as any
+    )
+      .select("id")
+      .eq("owner_user_id", user.id);
+
+    if (ownerThreadsErr) return jsonError(ownerThreadsErr.message, 500);
+
+    for (const row of ownerThreads ?? []) {
+      if (row?.id) threadIdSet.add(row.id);
+    }
+
+    const { data: grants, error: grantsErr } = await (
+      svc.from("deal_access_grants") as any
+    )
+      .select("deal_id, role, revoked_at")
+      .eq("user_id", user.id)
+      .is("revoked_at", null);
+
+    if (grantsErr) return jsonError(grantsErr.message, 500);
+
+    for (const row of grants ?? []) {
+      if (row?.deal_id) grantedDealIdSet.add(row.deal_id);
+    }
+
+    if (grantedDealIdSet.size > 0) {
+      const { data: grantThreads, error: grantThreadsErr } = await (
+        svc.from("deal_threads") as any
+      )
+        .select("id")
+        .in("deal_id", Array.from(grantedDealIdSet));
+
+      if (grantThreadsErr) return jsonError(grantThreadsErr.message, 500);
+
+      for (const row of grantThreads ?? []) {
+        if (row?.id) threadIdSet.add(row.id);
+      }
+    }
+
+    const threadIds = Array.from(threadIdSet);
+
+    if (threadIds.length > 0) {
+      const { data: threads, error: threadsErr } = await (
+        svc.from("deal_threads") as any
+      )
+        .select("id, property_id, status, deal_id, owner_user_id")
+        .in("id", threadIds);
+
+      if (threadsErr) return jsonError(threadsErr.message, 500);
+
+      const propertyIds = (threads ?? [])
+        .map((t: any) => t.property_id)
+        .filter(Boolean);
+
+      if (propertyIds.length > 0) {
+        const { data: props, error: propsErr } = await (
+          svc.from("properties") as any
+        )
+          .select(
+            "id, address_line1, address_line2, city, state, postal_code, status, ownership_status, is_private, owner_user_id, claimed_by_user_id, created_by_user_id, created_at, updated_at",
+          )
+          .in("id", propertyIds);
+
+        if (propsErr) return jsonError(propsErr.message, 500);
+
+        const threadByPropertyId = new Map<string, any>();
+        for (const thread of threads ?? []) {
+          if (!thread?.property_id) continue;
+          if (!threadByPropertyId.has(thread.property_id)) {
+            threadByPropertyId.set(thread.property_id, thread);
+          }
+        }
+
+        claimableProperties = (props ?? [])
+          .map((p: any) => {
+            const thread = threadByPropertyId.get(p.id) ?? null;
+            return {
+              ...p,
+              claim_thread_id: thread?.id ?? null,
+              claim_deal_id: thread?.deal_id ?? null,
+              claim_thread_status: thread?.status ?? null,
+            };
+          })
+          .filter((p: any) => {
+            const thread = threadByPropertyId.get(p.id) ?? null;
+
+            const ownershipStatus = p.ownership_status ?? null;
+            const ownerUserId = p.owner_user_id ?? null;
+            const claimedByUserId = p.claimed_by_user_id ?? null;
+
+            const explicitlyUnclaimed =
+              !ownershipStatus || ownershipStatus === "unclaimed";
+
+            const alreadyClaimedByThisUser =
+              claimedByUserId === user.id || ownerUserId === user.id;
+
+            const alreadyClaimedByAnotherUser =
+              ownershipStatus === "claimed" &&
+              !!(claimedByUserId || ownerUserId) &&
+              !alreadyClaimedByThisUser;
+
+            const threadAlreadyAttachedToThisUser =
+              !!thread?.owner_user_id && thread.owner_user_id === user.id;
+
+            const grantedDealVisibleToThisUser =
+              !!thread?.deal_id && grantedDealIdSet.has(thread.deal_id);
+
+            const inviteOrBridgeVisible =
+              !!p.claim_thread_id &&
+              (threadAlreadyAttachedToThisUser || grantedDealVisibleToThisUser);
+
+            const isClaimable =
+              !alreadyClaimedByAnotherUser &&
+              (explicitlyUnclaimed ||
+                alreadyClaimedByThisUser ||
+                inviteOrBridgeVisible);
+
+            return isClaimable && !!p.claim_thread_id;
+          });
+      }
+    }
+  }
+
+  const byId = new Map<string, any>();
+
+  for (const r of ownedData ?? []) {
+    byId.set(r.id, {
+      ...r,
+      address_display: formatAddress(r),
+      visibility:
+        r.owner_user_id === user.id || r.claimed_by_user_id === user.id
+          ? "owned"
+          : "created",
+      claim_thread_id: null,
+      claim_deal_id: null,
+      claim_thread_status: null,
+    });
+  }
+
+  for (const r of claimableProperties) {
+    if (!byId.has(r.id)) {
+      byId.set(r.id, {
+        ...r,
+        address_display: formatAddress(r),
+        visibility: "claimable",
+      });
+    }
+  }
+
+  const rows = Array.from(byId.values()).sort((a: any, b: any) => {
+    const aTime = new Date(a.updated_at ?? a.created_at ?? 0).getTime();
+    const bTime = new Date(b.updated_at ?? b.created_at ?? 0).getTime();
+    return bTime - aTime;
+  });
 
   return NextResponse.json({ ok: true, properties: rows });
 }
@@ -94,23 +301,92 @@ export async function POST(req: Request) {
 
   const svc = createServiceClient();
 
-  const { data: prop, error: insertErr } = await (svc.from("properties") as any)
-    .insert({
-      owner_user_id: user.id,
-      address_line1,
-      address_line2: address_line2 || null,
-      city: city || null,
-      state,
-      postal_code,
-      status: "unverified",
-      is_private: true,
-    })
-    .select("id")
-    .single();
+  let propertyId: string | null = null;
+  let createdNewProperty = false;
 
-  if (insertErr) return jsonError(insertErr.message, 500);
+  const displayParts = [address_line1, address_line2, city, state, postal_code]
+    .filter(Boolean)
+    .join(", ");
+  const computed_normalized = normalizeAddress(displayParts);
 
-  const propertyId = prop.id;
+  const { data: existingProperty, error: existingErr } = await (
+    svc.from("properties") as any
+  )
+    .select("id, owner_user_id, claimed_by_user_id, ownership_status, status")
+    .eq("normalized_address", computed_normalized || "")
+    .maybeSingle();
+
+  if (existingErr) {
+    return jsonError(existingErr.message, 500);
+  }
+
+  if (existingProperty) {
+    const ownedByAnotherUser =
+      !!existingProperty.owner_user_id &&
+      existingProperty.owner_user_id !== user.id;
+
+    const claimedByAnotherUser =
+      !!existingProperty.claimed_by_user_id &&
+      existingProperty.claimed_by_user_id !== user.id;
+
+    if (ownedByAnotherUser || claimedByAnotherUser) {
+      return jsonError("This property is already claimed by another user", 409);
+    }
+
+    const { data: updatedProperty, error: updateErr } = await (
+      svc.from("properties") as any
+    )
+      .update({
+        owner_user_id: user.id,
+        claimed_by_user_id: user.id,
+        ownership_status: "claimed",
+        address_line1,
+        address_line2: address_line2 || null,
+        city: city || null,
+        state,
+        postal_code,
+        is_private: true,
+        normalized_address: computed_normalized || null,
+      })
+      .eq("id", existingProperty.id)
+      .select("id")
+      .single();
+
+    if (updateErr) {
+      return jsonError(updateErr.message, 500);
+    }
+
+    propertyId = updatedProperty.id;
+  } else {
+    const { data: prop, error: insertErr } = await (
+      svc.from("properties") as any
+    )
+      .insert({
+        owner_user_id: user.id,
+        claimed_by_user_id: user.id,
+        ownership_status: "claimed",
+        created_by_user_id: user.id,
+        address_line1,
+        address_line2: address_line2 || null,
+        city: city || null,
+        state,
+        postal_code,
+        status: "unverified",
+        is_private: true,
+        normalized_address: computed_normalized || null,
+      })
+      .select("id")
+      .single();
+
+    if (insertErr) return jsonError(insertErr.message, 500);
+
+    propertyId = prop.id;
+    createdNewProperty = true;
+  }
+
+  if (!propertyId) {
+    return jsonError("Failed to resolve property record", 500);
+  }
 
   await ensureBucket(svc);
 
@@ -122,7 +398,9 @@ export async function POST(req: Request) {
 
     const result = await enforceLimitsAndProcess(rawBuf, file.type);
     if (!result.ok) {
-      await (svc.from("properties") as any).delete().eq("id", propertyId);
+      if (createdNewProperty) {
+        await (svc.from("properties") as any).delete().eq("id", propertyId);
+      }
       return jsonError(
         `${docType.replace("_", " ")}: ${result.error}`,
         result.status,
@@ -139,7 +417,9 @@ export async function POST(req: Request) {
       });
 
     if (uploadErr) {
-      await (svc.from("properties") as any).delete().eq("id", propertyId);
+      if (createdNewProperty) {
+        await (svc.from("properties") as any).delete().eq("id", propertyId);
+      }
       return jsonError(
         `Upload failed for ${docType}: ${uploadErr.message}`,
         500,

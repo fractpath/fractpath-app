@@ -1,0 +1,146 @@
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
+import { getOrCreatePropertyByAddress } from "@/lib/propertyResolve";
+
+export const runtime = "nodejs";
+
+function jsonError(message: string, status = 400) {
+  return NextResponse.json({ ok: false, error: message }, { status });
+}
+
+async function resolveAddressFromPlaceId(placeId: string): Promise<string | null> {
+  const apiKey = process.env.GEOAPIFY_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const url = new URL("https://api.geoapify.com/v2/place-details");
+    url.searchParams.set("id", placeId);
+    url.searchParams.set("apiKey", apiKey);
+
+    const res = await fetch(url.toString(), { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    const props = data?.features?.[0]?.properties;
+    return props?.formatted ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function checkBlockingDeal(
+  svc: any,
+  propertyId: string,
+): Promise<{ has_blocking_deal: boolean; blocking_reason: string | null }> {
+  try {
+    const { data: threads } = await (svc.from("deal_threads") as any)
+      .select("id, status")
+      .eq("property_id", propertyId)
+      .in("status", ["pending_owner", "negotiating", "accepted"])
+      .limit(1);
+
+    if (threads && threads.length > 0) {
+      return {
+        has_blocking_deal: true,
+        blocking_reason:
+          "There is already an active or pending opportunity on this property. A new offer cannot be started until the existing agreement is resolved.",
+      };
+    }
+  } catch {
+    // deal_threads table may not exist yet; treat as no blocking deal
+  }
+
+  return { has_blocking_deal: false, blocking_reason: null };
+}
+
+export async function POST(request: NextRequest) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return jsonError("Unauthorized", 401);
+
+  let body: any;
+  try {
+    body = await request.json();
+  } catch {
+    return jsonError("Invalid JSON body");
+  }
+
+  let address = typeof body?.address === "string" ? body.address.trim() : "";
+  const placeId = typeof body?.place_id === "string" ? body.place_id.trim() : "";
+
+  const structured =
+    body?.structured && typeof body.structured === "object"
+      ? {
+          address_line1:
+            typeof body.structured.address_line1 === "string"
+              ? body.structured.address_line1.trim()
+              : null,
+          city:
+            typeof body.structured.city === "string"
+              ? body.structured.city.trim()
+              : null,
+          state:
+            typeof body.structured.state === "string"
+              ? body.structured.state.trim()
+              : null,
+          postal_code:
+            typeof body.structured.postal_code === "string"
+              ? body.structured.postal_code.trim()
+              : null,
+        }
+      : null;
+
+  if (!address && placeId) {
+    const resolved = await resolveAddressFromPlaceId(placeId);
+    if (resolved) {
+      address = resolved;
+    } else {
+      return jsonError("Could not resolve place_id to an address", 422);
+    }
+  }
+
+  if (!address) return jsonError("address or place_id is required", 422);
+
+  const context = typeof body?.context === "string" ? body.context : "profile";
+
+  try {
+    const svc = createServiceClient();
+    const result = await getOrCreatePropertyByAddress(svc, address, user.id, structured, {
+      setOwner: context !== "deal",
+    });
+
+    const { data: prop } = await (svc.from("properties") as any)
+      .select("status, ownership_status, claimed_by_user_id, address_line1, address_line2, city, state, postal_code")
+      .eq("id", result.property_id)
+      .maybeSingle();
+
+    const blocking = await checkBlockingDeal(svc, result.property_id);
+
+    return NextResponse.json({
+      ok: true,
+      property_id: result.property_id,
+      display_address: address,
+      normalized_address: result.normalized_address,
+      property_status: prop?.status ?? null,
+      ownership_status: prop?.ownership_status ?? null,
+      claimed_by_user_id: prop?.claimed_by_user_id ?? null,
+      property_exists: !result.created,
+      has_blocking_deal: blocking.has_blocking_deal,
+      blocking_reason: blocking.blocking_reason,
+      address_line1: prop?.address_line1 ?? null,
+      address_line2: prop?.address_line2 ?? null,
+      city: prop?.city ?? null,
+      state: prop?.state ?? null,
+      postal_code: prop?.postal_code ?? null,
+    });
+  } catch (err: any) {
+    const msg = err?.message ?? String(err);
+    const code = err?.code ?? err?.cause?.code;
+    console.error("property_resolve_error", err);
+    return NextResponse.json({ ok: false, error: msg, code }, { status: 500 });
+  }
+}

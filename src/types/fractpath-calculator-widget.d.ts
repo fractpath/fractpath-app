@@ -12,6 +12,7 @@ declare module "fractpath-calculator-widget" {
 
   // Some builds import other helpers/components; keep these permissive.
   export const DealEditModal: any;
+  export const EditModalMount: any;
   export const DealKpiStrip: any;
   export const DealSnapshotView: any;
   export const EquityChart: any;
