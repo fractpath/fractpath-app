@@ -210,42 +210,18 @@ export function PropertyCaptureModal({
 
           <AddressTypeahead
             onResolved={(r) => {
-              // NOTE: AddressTypeahead currently calls /api/properties/resolve and only returns core fields.
-              // We augment below by fetching resolve again so we can show richer microcopy (exists/blocking).
-              (async () => {
-                try {
-                  const res = await fetch("/api/properties/resolve", {
-                    method: "POST",
-                    credentials: "include",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ address: r.display_address }),
-                  });
-                  const data = await res.json();
-                  if (data?.ok) {
-                    const merged: ResolvedProperty & ResolveExtras = {
-                      property_id: data.property_id,
-                      display_address:
-                        data.display_address ?? r.display_address,
-                      property_status:
-                        data.property_status ?? r.property_status ?? null,
-                      ownership_status:
-                        data.ownership_status ?? r.ownership_status ?? null,
-
-                      normalized_address: data.normalized_address ?? null,
-                      claimed_by_user_id: data.claimed_by_user_id ?? null,
-
-                      property_exists: data.property_exists ?? null,
-                      has_blocking_deal: data.has_blocking_deal ?? null,
-                      blocking_reason: data.blocking_reason ?? null,
-                    };
-                    setResolved(merged);
-                  } else {
-                    setResolved(r);
-                  }
-                } catch {
-                  setResolved(r);
-                }
-              })();
+              const merged: ResolvedProperty & ResolveExtras = {
+                property_id: r.property_id,
+                display_address: r.display_address,
+                property_status: r.property_status ?? null,
+                ownership_status: r.ownership_status ?? null,
+                normalized_address: r.normalized_address ?? null,
+                claimed_by_user_id: r.claimed_by_user_id ?? null,
+                property_exists: r.property_exists ?? null,
+                has_blocking_deal: r.has_blocking_deal ?? null,
+                blocking_reason: r.blocking_reason ?? null,
+              };
+              setResolved(merged);
             }}
             inputTestId={
               context === "deal"

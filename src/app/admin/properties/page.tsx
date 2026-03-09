@@ -99,7 +99,43 @@ export default async function AdminPropertiesPage({
     );
   }
 
-  const rows = (propsRes.data ?? []) as any[];
+  const allRows = (propsRes.data ?? []) as any[];
+
+  const rows = allRows.sort((a: any, b: any) => {
+    const aReady = a.status === "under_review" || !!a.owner_user_id ? 1 : 0;
+    const bReady = b.status === "under_review" || !!b.owner_user_id ? 1 : 0;
+    if (bReady !== aReady) return bReady - aReady;
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
+
+  function readinessChip(p: any) {
+    if (p.status === "under_review") {
+      return (
+        <span className="inline-flex items-center rounded-full bg-blue-100 text-blue-800 border border-blue-200 px-2 py-0.5 text-xs font-medium">
+          under review
+        </span>
+      );
+    }
+    if (p.status === "verified") {
+      return (
+        <span className="inline-flex items-center rounded-full bg-green-100 text-green-800 border border-green-200 px-2 py-0.5 text-xs font-medium">
+          verified
+        </span>
+      );
+    }
+    if (p.owner_user_id) {
+      return (
+        <span className="inline-flex items-center rounded-full bg-amber-100 text-amber-800 border border-amber-200 px-2 py-0.5 text-xs font-medium">
+          claimed — awaiting docs
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center rounded-full bg-gray-100 text-gray-500 border border-gray-200 px-2 py-0.5 text-xs font-medium">
+        unclaimed — not review-ready
+      </span>
+    );
+  }
 
   return (
     <main className="mx-auto max-w-5xl p-6 space-y-6">
@@ -141,6 +177,7 @@ export default async function AdminPropertiesPage({
               <th className="p-3">Property</th>
               <th className="p-3">Owner</th>
               <th className="p-3">Status</th>
+              <th className="p-3">Readiness</th>
               <th className="p-3">Notes</th>
               <th className="p-3 w-[120px]">Action</th>
             </tr>
@@ -148,7 +185,7 @@ export default async function AdminPropertiesPage({
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td className="p-3 text-muted-foreground" colSpan={5}>
+                <td className="p-3 text-muted-foreground" colSpan={6}>
                   No properties found for: {filter}
                 </td>
               </tr>
@@ -164,8 +201,10 @@ export default async function AdminPropertiesPage({
                   .filter(Boolean)
                   .join(", ");
 
+                const isReviewReady = p.status === "under_review" || !!p.owner_user_id;
+
                 return (
-                  <tr key={p.id} className="border-t">
+                  <tr key={p.id} className={`border-t ${!isReviewReady ? "opacity-60" : ""}`}>
                     <td className="p-3">
                       <a
                         className="font-medium underline"
@@ -176,15 +215,23 @@ export default async function AdminPropertiesPage({
                     </td>
 
                     <td className="p-3">
-                      <div className="font-mono text-xs break-all">
-                        {p.owner_user_id}
-                      </div>
+                      {p.owner_user_id ? (
+                        <div className="font-mono text-xs break-all">
+                          {p.owner_user_id}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">none</span>
+                      )}
                     </td>
 
                     <td className="p-3">
                       <span className="inline-flex items-center rounded-full border px-2 py-0.5">
                         {String(p.status).replace("_", " ")}
                       </span>
+                    </td>
+
+                    <td className="p-3">
+                      {readinessChip(p)}
                     </td>
 
                     <td className="p-3">
@@ -195,18 +242,22 @@ export default async function AdminPropertiesPage({
 
                     <td className="p-3">
                       <div className="flex gap-1 flex-wrap">
-                        <PropertyStatusButton
-                          propertyId={p.id}
-                          currentStatus={p.status}
-                          targetStatus="verified"
-                          label="Verify"
-                        />
-                        <PropertyStatusButton
-                          propertyId={p.id}
-                          currentStatus={p.status}
-                          targetStatus="unverified"
-                          label="Unverify"
-                        />
+                        {isReviewReady && (
+                          <PropertyStatusButton
+                            propertyId={p.id}
+                            currentStatus={p.status}
+                            targetStatus="verified"
+                            label="Verify"
+                          />
+                        )}
+                        {p.status !== "unverified" && (
+                          <PropertyStatusButton
+                            propertyId={p.id}
+                            currentStatus={p.status}
+                            targetStatus="unverified"
+                            label="Unverify"
+                          />
+                        )}
                         <a
                           className="text-xs px-2 py-1 rounded border hover:bg-muted inline-block"
                           href={`/admin/properties/${p.id}`}
