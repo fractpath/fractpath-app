@@ -186,15 +186,11 @@ export function PropertyForm(props: {
   };
 
   const [submitting, setSubmitting] = useState(false);
-  const [isResolving, setIsResolving] = useState(false);
-  const [resolveError, setResolveError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!props.open) return;
     setMode(defaultMode);
     setResolved(null);
-    setResolveError(null);
-    setIsResolving(false);
     if (!isEdit) {
       setLine1("");
       setLine2("");
@@ -246,52 +242,24 @@ export function PropertyForm(props: {
   }
 
   function handleAddressResolved(r: ResolvedProperty) {
-    (async () => {
-      setIsResolving(true);
-      setResolveError(null);
-      try {
-        const res = await fetch("/api/properties/resolve", {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ address: r.display_address, context: props.context }),
-        });
-        const data = await res.json();
-        if (data?.ok) {
-          const merged: ResolvedFull = {
-            property_id: data.property_id,
-            display_address: data.display_address ?? r.display_address,
-            property_status: data.property_status ?? r.property_status ?? null,
-            ownership_status:
-              data.ownership_status ?? r.ownership_status ?? null,
-            normalized_address: data.normalized_address ?? null,
-            claimed_by_user_id: data.claimed_by_user_id ?? null,
-            property_exists: data.property_exists ?? null,
-            has_blocking_deal: data.has_blocking_deal ?? null,
-            blocking_reason: data.blocking_reason ?? null,
-          };
-          setResolved(merged);
+    const merged: ResolvedFull = {
+      property_id: r.property_id,
+      display_address: r.display_address,
+      property_status: r.property_status ?? null,
+      ownership_status: r.ownership_status ?? null,
+      normalized_address: r.normalized_address ?? null,
+      claimed_by_user_id: r.claimed_by_user_id ?? null,
+      property_exists: r.property_exists ?? null,
+      has_blocking_deal: r.has_blocking_deal ?? null,
+      blocking_reason: r.blocking_reason ?? null,
+    };
+    setResolved(merged);
 
-          if (data.address_line1) setLine1(data.address_line1);
-          if (data.address_line2) setLine2(data.address_line2);
-          if (data.city) setCity(data.city);
-          if (data.state) setState(data.state);
-          if (data.postal_code) setZip(data.postal_code);
-        } else {
-          setResolved(r as ResolvedFull);
-          setResolveError(
-            "Couldn\u2019t normalize address yet \u2014 you can still save and fix later.",
-          );
-        }
-      } catch {
-        setResolved(r as ResolvedFull);
-        setResolveError(
-          "Couldn\u2019t normalize address yet \u2014 you can still save and fix later.",
-        );
-      } finally {
-        setIsResolving(false);
-      }
-    })();
+    setLine1(r.address_line1 ?? "");
+    setLine2(r.address_line2 ?? "");
+    setCity(r.city ?? "");
+    setState(r.state ?? "");
+    setZip(r.postal_code ?? "");
   }
 
   const isOwnerMode = mode === "owner";
@@ -299,17 +267,17 @@ export function PropertyForm(props: {
     isEdit || !isOwnerMode || Object.values(files).every((f) => f !== null);
   const addressValid =
     !!resolved?.property_id || (isEdit && !!address_line1.trim());
+  const structuredReady = !!address_line1.trim() && !!state.trim();
   const canSubmitOwner =
     isOwnerMode &&
     addressValid &&
+    structuredReady &&
     allFilesPresent &&
-    !submitting &&
-    !isResolving;
+    !submitting;
   const canSubmitInvestor =
     !isOwnerMode &&
     !!resolved?.property_id &&
-    !resolved?.has_blocking_deal &&
-    !isResolving;
+    !resolved?.has_blocking_deal;
 
   async function handleSubmitOwner() {
     if (!canSubmitOwner) return;
@@ -459,13 +427,10 @@ export function PropertyForm(props: {
               placeholder="Search street address..."
               showLabel={false}
             />
-            {isResolving && (
-              <p className="mt-1 text-xs text-muted-foreground animate-pulse">
-                Looking up normalized address…
+            {!resolved && address_line1 === "" && state === "" && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Select an address from the suggestions above.
               </p>
-            )}
-            {resolveError && !isResolving && (
-              <p className="mt-1 text-xs text-amber-600">{resolveError}</p>
             )}
           </div>
         )}

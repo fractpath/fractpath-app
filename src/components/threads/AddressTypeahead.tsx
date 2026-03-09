@@ -17,6 +17,16 @@ export type ResolvedProperty = {
   display_address: string;
   property_status: string | null;
   ownership_status: string | null;
+  normalized_address?: string | null;
+  claimed_by_user_id?: string | null;
+  property_exists?: boolean | null;
+  has_blocking_deal?: boolean | null;
+  blocking_reason?: string | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postal_code?: string | null;
 };
 
 type Props = {
@@ -119,6 +129,16 @@ export function AddressTypeahead({
           display_address: data.display_address ?? s.label,
           property_status: data.property_status ?? null,
           ownership_status: data.ownership_status ?? null,
+          normalized_address: data.normalized_address ?? null,
+          claimed_by_user_id: data.claimed_by_user_id ?? null,
+          property_exists: data.property_exists ?? null,
+          has_blocking_deal: data.has_blocking_deal ?? null,
+          blocking_reason: data.blocking_reason ?? null,
+          address_line1: data.address_line1 ?? null,
+          address_line2: data.address_line2 ?? null,
+          city: data.city ?? null,
+          state: data.state ?? null,
+          postal_code: data.postal_code ?? null,
         });
       }
     } catch {
