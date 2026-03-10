@@ -1,13 +1,13 @@
-export default async function LoginPage({
-  searchParams,
-}: {
-  searchParams:
-    | Record<string, string | string[] | undefined>
-    | Promise<Record<string, string | string[] | undefined>>;
-}) {
-  const sp: any = await searchParams;
+type SearchParams = Record<string, string | string[] | undefined>;
 
-  const rtRaw = sp?.returnTo;
+type PageProps = {
+  searchParams?: Promise<SearchParams>;
+};
+
+export default async function LoginPage({ searchParams }: PageProps) {
+  const sp: SearchParams = searchParams ? await searchParams : {};
+
+  const rtRaw = sp.returnTo;
   const returnTo = Array.isArray(rtRaw) ? rtRaw[0] || "" : rtRaw || "";
 
   // Keep querystring if present; prevent open redirects.
@@ -17,7 +17,7 @@ export default async function LoginPage({
       ? returnTo
       : "/dashboard";
 
-  const emailRaw = sp?.email;
+  const emailRaw = sp.email;
   const prefilledEmail =
     typeof emailRaw === "string"
       ? emailRaw
