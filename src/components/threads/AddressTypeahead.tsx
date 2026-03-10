@@ -54,6 +54,7 @@ export function AddressTypeahead({
   const [resolving, setResolving] = useState(false);
   const [locked, setLocked] = useState(false);
   const [fetching, setFetching] = useState(false);
+  const [fetchError, setFetchError] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
   const lastFetchedRef = useRef<string>("");
@@ -68,20 +69,33 @@ export function AddressTypeahead({
     abortRef.current = controller;
 
     setFetching(true);
+    setFetchError(false);
     try {
       const res = await fetch(
         `/api/geo/address-autocomplete?q=${encodeURIComponent(q)}`,
         { credentials: "include", signal: controller.signal },
       );
-      if (!res.ok) return;
+      if (!res.ok) {
+        if (!controller.signal.aborted) {
+          setFetchError(true);
+          setFetching(false);
+        }
+        return;
+      }
       const data = await res.json();
       if (!controller.signal.aborted) {
-        const next = (data.suggestions ?? []) as Suggestion[];
-        setSuggestions(next);
-        setShowDropdown(next.length > 0);
+        if (data.ok === false) {
+          setFetchError(true);
+        } else {
+          const next = (data.suggestions ?? []) as Suggestion[];
+          setSuggestions(next);
+          setShowDropdown(next.length > 0);
+        }
       }
-    } catch {
-      // aborted or network error — ignore
+    } catch (err: any) {
+      if (!controller.signal.aborted) {
+        setFetchError(true);
+      }
     } finally {
       if (!controller.signal.aborted) setFetching(false);
     }
@@ -154,6 +168,7 @@ export function AddressTypeahead({
 
   function handleInputChange(value: string) {
     setQuery(value);
+    setFetchError(false);
     if (locked) {
       setLocked(false);
       lastFetchedRef.current = "";
@@ -174,16 +189,26 @@ export function AddressTypeahead({
           value={query}
           onChange={(e) => handleInputChange(e.target.value)}
           placeholder={placeholder}
-          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="w-full rounded-md border border-gray-300 px-3 py-2 pr-9 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           data-testid={inputTestId}
         />
         {fetching ? (
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
+          <svg
+            className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-gray-400"
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+          >
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
         ) : null}
       </div>
 
       {fetching ? (
         <p className="mt-1 text-xs text-gray-400">Searching addresses…</p>
+      ) : fetchError ? (
+        <p className="mt-1 text-xs text-amber-600">Address lookup unavailable — you can enter the address manually.</p>
       ) : resolving ? (
         <p className="mt-1 text-xs text-gray-500">Resolving property…</p>
       ) : null}

@@ -283,28 +283,64 @@ export function PropertyForm(props: {
     if (!canSubmitOwner) return;
     setSubmitting(true);
     try {
-      const fd = new FormData();
-      fd.set("address_line1", address_line1.trim());
-      fd.set("address_line2", address_line2.trim());
-      fd.set("city", city.trim());
-      fd.set("state", state.trim());
-      fd.set("postal_code", postal_code.trim());
+      if (isEdit) {
+        const metadataFd = new FormData();
+        metadataFd.set("address_line1", address_line1.trim());
+        metadataFd.set("address_line2", address_line2.trim());
+        metadataFd.set("city", city.trim());
+        metadataFd.set("state", state.trim());
+        metadataFd.set("postal_code", postal_code.trim());
 
-      for (const docType of Object.keys(DOC_LABELS) as DocType[]) {
-        if (files[docType]) fd.set(docType, files[docType]!);
-      }
+        const editUrl = `/api/me/properties/${props.editPrefill!.propertyId}/edit`;
+        const metaRes = await fetch(editUrl, { method: "PATCH", body: metadataFd });
+        const metaJson = await metaRes.json().catch(() => null);
 
-      const url = isEdit
-        ? `/api/me/properties/${props.editPrefill!.propertyId}/edit`
-        : "/api/me/properties";
-      const method = isEdit ? "PATCH" : "POST";
+        if (!metaRes.ok) {
+          t.error(metaJson?.error || "Something went wrong — try again.");
+          return;
+        }
 
-      const res = await fetch(url, { method, body: fd });
-      const json = await res.json().catch(() => null);
+        const docsToUpload = (Object.keys(DOC_LABELS) as DocType[]).filter(
+          (k) => files[k] !== null,
+        );
+        for (const docType of docsToUpload) {
+          const docFd = new FormData();
+          docFd.set("address_line1", address_line1.trim());
+          docFd.set("address_line2", address_line2.trim());
+          docFd.set("city", city.trim());
+          docFd.set("state", state.trim());
+          docFd.set("postal_code", postal_code.trim());
+          docFd.set(docType, files[docType]!);
 
-      if (!res.ok) {
-        t.error(json?.error || "Something went wrong — try again.");
-        return;
+          const docRes = await fetch(editUrl, { method: "PATCH", body: docFd });
+          const docJson = await docRes.json().catch(() => null);
+          if (!docRes.ok) {
+            t.error(
+              docJson?.error ||
+                `Failed to upload ${docType.replace("_", " ")} — try again.`,
+            );
+            return;
+          }
+        }
+      } else {
+        const fd = new FormData();
+        fd.set("address_line1", address_line1.trim());
+        fd.set("address_line2", address_line2.trim());
+        fd.set("city", city.trim());
+        fd.set("state", state.trim());
+        fd.set("postal_code", postal_code.trim());
+
+        for (const docType of Object.keys(DOC_LABELS) as DocType[]) {
+          if (files[docType]) fd.set(docType, files[docType]!);
+        }
+
+        const res = await fetch("/api/me/properties", { method: "POST", body: fd });
+        const json = await res.json().catch(() => null);
+
+        if (!res.ok) {
+          t.error(json?.error || "Something went wrong — try again.");
+          return;
+        }
       }
 
       t.success(isEdit ? "Property updated." : "Submitted for verification.");
