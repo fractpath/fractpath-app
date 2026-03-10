@@ -75,3 +75,4 @@ FractPath is built with Next.js, leveraging API routes for backend logic and Sup
 - **@fractpath/compute:** Canonical compute engine.
 - **fractpath-calculator-widget:** UI components and compute utilities.
 - **sharp:** Server-side image processing for document uploads.
+- **DocuSign (scaffolding only):** Server-side JWT auth and API client in `src/lib/docusign/`. Health check at `GET /api/admin/docusign/health` (admin-gated). Env vars: `DOCUSIGN_ACCOUNT_ID`, `DOCUSIGN_BASE_PATH`, `DOCUSIGN_AUTH_SERVER`, `DOCUSIGN_INTEGRATION_KEY`, `DOCUSIGN_USER_ID`, `DOCUSIGN_PRIVATE_KEY`, `DOCUSIGN_ENV`. No envelope/webhook/UI logic yet.
