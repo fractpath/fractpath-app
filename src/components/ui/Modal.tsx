@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 export type ModalProps = {
   open: boolean;
@@ -40,6 +41,11 @@ export function Modal({
   footer,
 }: ModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -58,9 +64,9 @@ export function Modal({
     };
   }, [open, handleKeyDown]);
 
-  if (!open) return null;
+  if (!open || !mounted) return null;
 
-  return (
+  const content = (
     <div
       ref={overlayRef}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
@@ -114,4 +120,6 @@ export function Modal({
       </div>
     </div>
   );
+
+  return createPortal(content, document.body);
 }

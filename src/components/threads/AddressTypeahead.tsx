@@ -205,13 +205,15 @@ export function AddressTypeahead({
         ) : null}
       </div>
 
-      {fetching ? (
-        <p className="mt-1 text-xs text-gray-400">Searching addresses…</p>
-      ) : fetchError ? (
-        <p className="mt-1 text-xs text-amber-600">Address lookup unavailable — you can enter the address manually.</p>
-      ) : resolving ? (
-        <p className="mt-1 text-xs text-gray-500">Resolving property…</p>
-      ) : null}
+      <div className="mt-1 h-4">
+        {fetching ? (
+          <p className="text-xs text-gray-400 leading-4">Searching addresses…</p>
+        ) : fetchError ? (
+          <p className="text-xs text-amber-600 leading-4">Address lookup unavailable — you can enter the address manually.</p>
+        ) : resolving ? (
+          <p className="text-xs text-gray-500 leading-4">Resolving property…</p>
+        ) : null}
+      </div>
 
       {showDropdown && suggestions.length > 0 ? (
         <ul
