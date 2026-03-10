@@ -247,7 +247,22 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       ? personaFromMeta
       : "homeowner";
 
-  const welcome = PERSONA_WELCOME[persona];
+  const { data: profileRow } = await supabase
+    .from("profiles")
+    .select("nickname")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  const nickname: string | null =
+    typeof profileRow?.nickname === "string" && profileRow.nickname.trim()
+      ? profileRow.nickname.trim()
+      : null;
+
+  const baseWelcome = PERSONA_WELCOME[persona];
+  const welcome = {
+    ...baseWelcome,
+    tagline: nickname ? `Welcome, ${nickname}` : baseWelcome.tagline,
+  };
 
   let steps: any[] = NEXT_STEPS[persona] as any[];
 

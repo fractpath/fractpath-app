@@ -27,6 +27,14 @@ export default async function LoginPage({ searchParams }: PageProps) {
 
   return (
     <main style={{ maxWidth: 420, margin: "48px auto", padding: 16 }}>
+      <div style={{ textAlign: "center", marginBottom: 32 }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/brand/FractPath_Logo_Black.png"
+          alt="FractPath"
+          style={{ height: 36, display: "inline-block" }}
+        />
+      </div>
       <h1 style={{ fontSize: 28, marginBottom: 8 }}>Login</h1>
       <p style={{ opacity: 0.8, marginBottom: 24 }}>Sign in to continue.</p>
 

@@ -5,6 +5,7 @@ import {
   AddressTypeahead,
   type ResolvedProperty,
 } from "@/components/threads/AddressTypeahead";
+import { Modal } from "@/components/ui/Modal";
 
 type Mode = "investor" | "owner";
 
@@ -19,19 +20,15 @@ type Props = {
 
   context: "profile" | "deal";
 
-  // Called after resolve succeeds (existing or newly created property)
   onResolved: (r: ResolvedProperty & ResolveExtras) => void;
 
-  // Optional: prefill and/or lock mode selection
   initialMode?: Mode;
 };
 
 type ResolveExtras = {
-  // optional extras (if resolve route returns them)
   normalized_address?: string | null;
   claimed_by_user_id?: string | null;
 
-  // for microcopy
   property_exists?: boolean | null;
   has_blocking_deal?: boolean | null;
   blocking_reason?: string | null;
@@ -73,18 +70,16 @@ function Segmented({
 }
 
 function statusCopy(r: ResolvedProperty & ResolveExtras) {
-  // Blocking deal gate first
   if (r.has_blocking_deal) {
     return {
       tone: "error" as const,
       title: "This property already has an active opportunity",
       body:
         r.blocking_reason ??
-        "There’s already an active or pending agreement workflow on this property. A new offer can’t be started until the existing agreement is closed and the payout is completed.",
+        "There's already an active or pending agreement workflow on this property. A new offer can't be started until the existing agreement is closed and the payout is completed.",
     };
   }
 
-  // Property exists + verified
   if (r.property_status === "verified") {
     return {
       tone: "success" as const,
@@ -93,7 +88,6 @@ function statusCopy(r: ResolvedProperty & ResolveExtras) {
     };
   }
 
-  // Exists but unverified / under_review / etc.
   if (r.property_exists) {
     if (r.ownership_status === "unclaimed") {
       return {
@@ -118,7 +112,6 @@ function statusCopy(r: ResolvedProperty & ResolveExtras) {
     };
   }
 
-  // Not found -> created
   return {
     tone: "success" as const,
     title: "Property added",
@@ -144,7 +137,6 @@ export function PropertyCaptureModal({
 
   useEffect(() => {
     if (!open) return;
-    // reset each open
     setMode(defaultMode);
     setResolved(null);
     setOwnerNoteChecked(false);
@@ -156,7 +148,7 @@ export function PropertyCaptureModal({
   const investorMicrocopy = useMemo(() => {
     return (
       <div className="text-sm text-muted-foreground">
-        You’re adding an address to draft an offer.{" "}
+        You're adding an address to draft an offer.{" "}
         <span className="font-medium text-foreground">
           Nothing is binding until all parties sign a formal agreement.
         </span>{" "}
@@ -169,149 +161,136 @@ export function PropertyCaptureModal({
   const ownerMicrocopy = useMemo(() => {
     return (
       <div className="text-sm text-muted-foreground">
-        You’re adding a home you own. To unlock full features, you’ll complete a
+        You're adding a home you own. To unlock full features, you'll complete a
         quick verification step after saving the address.
       </div>
     );
   }, []);
 
-  if (!open) return null;
-
   const status = resolved ? statusCopy(resolved) : null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-xl rounded-md bg-white shadow-xl">
-        <div className="flex items-start justify-between border-b p-4">
-          <div className="space-y-1">
-            <div className="text-base font-semibold">{headline}</div>
-            <div className="text-xs text-muted-foreground">
-              Use the address search to select a canonical property record.
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md border px-2 py-1 text-sm"
-          >
-            Close
-          </button>
-        </div>
+  const canSubmit =
+    !!resolved?.property_id && (mode !== "owner" || ownerNoteChecked);
 
-        <div className="space-y-4 p-4">
-          <div className="flex items-center justify-between gap-3">
-            <Segmented value={mode} onChange={setMode} />
-            <div className="text-xs text-muted-foreground">
-              {mode === "investor" ? "Draft an offer" : "Claim & verify"}
-            </div>
-          </div>
-
-          {mode === "investor" ? investorMicrocopy : ownerMicrocopy}
-
-          <AddressTypeahead
-            onResolved={(r) => {
-              const merged: ResolvedProperty & ResolveExtras = {
-                property_id: r.property_id,
-                display_address: r.display_address,
-                property_status: r.property_status ?? null,
-                ownership_status: r.ownership_status ?? null,
-                normalized_address: r.normalized_address ?? null,
-                claimed_by_user_id: r.claimed_by_user_id ?? null,
-                property_exists: r.property_exists ?? null,
-                has_blocking_deal: r.has_blocking_deal ?? null,
-                blocking_reason: r.blocking_reason ?? null,
-              };
-              setResolved(merged);
-            }}
-            inputTestId={
-              context === "deal"
-                ? "deal-address-input"
-                : "profile-address-input"
-            }
-            placeholder="Search street address…"
-            showLabel={false}
-          />
-
-          {mode === "owner" ? (
-            <div className="rounded-md border bg-muted/20 p-3 text-sm">
-              <div className="font-medium">Owner verification</div>
-              <div className="mt-1 text-muted-foreground">
-                After saving the address, you’ll be guided to upload
-                verification documents. (No offers can be accepted until
-                verification is complete.)
-              </div>
-
-              <label className="mt-3 flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={ownerNoteChecked}
-                  onChange={(e) => setOwnerNoteChecked(e.target.checked)}
-                />
-                I understand verification is required.
-              </label>
-            </div>
-          ) : null}
-
-          {status ? (
-            <div
-              className={`rounded-md border p-3 text-sm ${
-                status.tone === "success"
-                  ? "bg-green-50"
-                  : status.tone === "error"
-                    ? "bg-red-50"
-                    : "bg-blue-50"
-              }`}
-            >
-              <div className="font-medium">{status.title}</div>
-              <div className="mt-1 text-muted-foreground">{status.body}</div>
-            </div>
-          ) : null}
-        </div>
-
-        <div className="flex items-center justify-between gap-3 border-t p-4">
-          <div className="text-xs text-muted-foreground">
-            {resolved?.property_id ? (
-              <>
-                Property ID:{" "}
-                <span className="font-mono">{resolved.property_id}</span>
-              </>
-            ) : (
-              "Select an address to continue."
-            )}
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="rounded-md border px-3 py-2 text-sm"
-              onClick={onClose}
-            >
-              Cancel
-            </button>
-
-            <button
-              type="button"
-              className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50"
-              disabled={
-                !resolved?.property_id ||
-                (mode === "owner" && !ownerNoteChecked)
-              }
-              onClick={() => {
-                if (!resolved) return;
-                onResolved(resolved);
-                onClose();
-              }}
-              data-testid={
-                context === "deal"
-                  ? "deal-add-property-submit"
-                  : "profile-add-property-submit"
-              }
-            >
-              Add property
-            </button>
-          </div>
-        </div>
+  const footerContent = (
+    <div className="flex items-center justify-between gap-3">
+      <div className="text-xs text-muted-foreground">
+        {resolved?.property_id ? (
+          <>
+            Property ID:{" "}
+            <span className="font-mono">{resolved.property_id}</span>
+          </>
+        ) : (
+          "Select an address to continue."
+        )}
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          className="rounded-lg border px-3 py-2 text-sm font-medium hover:bg-muted/50"
+          onClick={onClose}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="rounded-lg bg-foreground px-3 py-2 text-sm font-medium text-background disabled:opacity-50"
+          disabled={!canSubmit}
+          onClick={() => {
+            if (!resolved) return;
+            onResolved(resolved);
+            onClose();
+          }}
+          data-testid={
+            context === "deal"
+              ? "deal-add-property-submit"
+              : "profile-add-property-submit"
+          }
+        >
+          Add property
+        </button>
       </div>
     </div>
+  );
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={headline}
+      description="Use the address search to select a canonical property record."
+      size="lg"
+      footer={footerContent}
+    >
+      <div className="space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <Segmented value={mode} onChange={setMode} />
+          <div className="text-xs text-muted-foreground">
+            {mode === "investor" ? "Draft an offer" : "Claim & verify"}
+          </div>
+        </div>
+
+        {mode === "investor" ? investorMicrocopy : ownerMicrocopy}
+
+        <AddressTypeahead
+          onResolved={(r) => {
+            const merged: ResolvedProperty & ResolveExtras = {
+              property_id: r.property_id,
+              display_address: r.display_address,
+              property_status: r.property_status ?? null,
+              ownership_status: r.ownership_status ?? null,
+              normalized_address: r.normalized_address ?? null,
+              claimed_by_user_id: r.claimed_by_user_id ?? null,
+              property_exists: r.property_exists ?? null,
+              has_blocking_deal: r.has_blocking_deal ?? null,
+              blocking_reason: r.blocking_reason ?? null,
+            };
+            setResolved(merged);
+          }}
+          inputTestId={
+            context === "deal"
+              ? "deal-address-input"
+              : "profile-address-input"
+          }
+          placeholder="Search street address…"
+          showLabel={false}
+        />
+
+        {mode === "owner" ? (
+          <div className="rounded-md border bg-muted/20 p-3 text-sm">
+            <div className="font-medium">Owner verification</div>
+            <div className="mt-1 text-muted-foreground">
+              After saving the address, you'll be guided to upload
+              verification documents. (No offers can be accepted until
+              verification is complete.)
+            </div>
+
+            <label className="mt-3 flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={ownerNoteChecked}
+                onChange={(e) => setOwnerNoteChecked(e.target.checked)}
+              />
+              I understand verification is required.
+            </label>
+          </div>
+        ) : null}
+
+        {status ? (
+          <div
+            className={`rounded-md border p-3 text-sm ${
+              status.tone === "success"
+                ? "bg-green-50"
+                : status.tone === "error"
+                  ? "bg-red-50"
+                  : "bg-blue-50"
+            }`}
+          >
+            <div className="font-medium">{status.title}</div>
+            <div className="mt-1 text-muted-foreground">{status.body}</div>
+          </div>
+        ) : null}
+      </div>
+    </Modal>
   );
 }

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { DealSnapshotView } from "fractpath-calculator-widget";
 import { normalizeDealTermsForWidget } from "@/lib/normalizeDealTermsForWidget";
 import { DealWidgetShell } from "@/components/deal/DealWidgetShell";
+import { usePageLoading } from "@/components/ui/PageLoadingOverlay";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -104,6 +105,7 @@ export function DealDetailWidgetPanel({
   persona = "homeowner",
 }: DealDetailWidgetPanelProps) {
   const router = useRouter();
+  const pageLoading = usePageLoading();
 
   const hasData =
     hasSubstantiveData(safeRecord(initialSnapshot)) || !!inputs || !!results;
@@ -176,26 +178,31 @@ export function DealDetailWidgetPanel({
 
   const handleSave = useCallback(
     async (parsed: { deal_terms: AnyRecord; scenario: AnyRecord }) => {
-      const payload: AnyRecord = { inputs: parsed };
+      pageLoading.show("Saving…");
+      try {
+        const payload: AnyRecord = { inputs: parsed };
 
-      const res = await fetch(`/api/deals/${dealId}/snapshot/compute`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+        const res = await fetch(`/api/deals/${dealId}/snapshot/compute`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
 
-      const body = await res
-        .json()
-        .catch(() => ({ ok: false, error: "Invalid response" }));
+        const body = await res
+          .json()
+          .catch(() => ({ ok: false, error: "Invalid response" }));
 
-      if (!res.ok || body.ok === false) {
-        throw new Error(body.error ?? `Save failed (${res.status})`);
+        if (!res.ok || body.ok === false) {
+          throw new Error(body.error ?? `Save failed (${res.status})`);
+        }
+
+        setOpenEditorImmediately(false);
+        router.refresh();
+      } finally {
+        pageLoading.hide();
       }
-
-      setOpenEditorImmediately(false);
-      router.refresh();
     },
-    [dealId, router],
+    [dealId, router, pageLoading],
   );
 
   const openHeaderPropertyModal = useCallback(() => {

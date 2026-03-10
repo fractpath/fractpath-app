@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DealEditModal as EditModalMount } from "fractpath-calculator-widget";
 import { normalizeDealTermsForWidget } from "@/lib/normalizeDealTermsForWidget";
+import { usePageLoading } from "@/components/ui/PageLoadingOverlay";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -33,6 +34,7 @@ export function CounterOfferModal({
   termsSnapshot,
 }: Props) {
   const router = useRouter();
+  const pageLoading = usePageLoading();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -63,6 +65,7 @@ export function CounterOfferModal({
     async (saved: { deal_terms: AnyRecord; scenario: AnyRecord }) => {
       setBusy(true);
       setError(null);
+      pageLoading.show("Sending counter-offer…");
 
       try {
         const counterTerms = {
@@ -91,9 +94,10 @@ export function CounterOfferModal({
         setError(err?.message ?? "Network error");
       } finally {
         setBusy(false);
+        pageLoading.hide();
       }
     },
-    [proposalId, onClose, router],
+    [proposalId, onClose, router, pageLoading],
   );
 
   if (!open) return null;

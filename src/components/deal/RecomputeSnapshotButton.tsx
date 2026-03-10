@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { usePageLoading } from "@/components/ui/PageLoadingOverlay";
 
 type Props = {
   dealId: string;
@@ -11,10 +12,12 @@ type Props = {
 export function RecomputeSnapshotButton({ dealId, initialInputs, disabled }: Props) {
   const [state, setState] = useState<"idle" | "loading" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState("");
+  const pageLoading = usePageLoading();
 
   async function handleRecompute() {
     setState("loading");
     setErrorMsg("");
+    pageLoading.show("Rendering snapshot…");
 
     try {
       const body: Record<string, unknown> = {};
@@ -43,6 +46,8 @@ export function RecomputeSnapshotButton({ dealId, initialInputs, disabled }: Pro
     } catch {
       setState("error");
       setErrorMsg("Network error. Please try again.");
+    } finally {
+      pageLoading.hide();
     }
   }
 

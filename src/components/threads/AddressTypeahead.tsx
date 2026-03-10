@@ -53,6 +53,7 @@ export function AddressTypeahead({
   const [showDropdown, setShowDropdown] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [locked, setLocked] = useState(false);
+  const [fetching, setFetching] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
   const lastFetchedRef = useRef<string>("");
@@ -66,6 +67,7 @@ export function AddressTypeahead({
     const controller = new AbortController();
     abortRef.current = controller;
 
+    setFetching(true);
     try {
       const res = await fetch(
         `/api/geo/address-autocomplete?q=${encodeURIComponent(q)}`,
@@ -80,6 +82,8 @@ export function AddressTypeahead({
       }
     } catch {
       // aborted or network error — ignore
+    } finally {
+      if (!controller.signal.aborted) setFetching(false);
     }
   }, []);
 
@@ -164,17 +168,24 @@ export function AddressTypeahead({
         </label>
       ) : null}
 
-      <input
-        type="text"
-        value={query}
-        onChange={(e) => handleInputChange(e.target.value)}
-        placeholder={placeholder}
-        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        data-testid={inputTestId}
-      />
+      <div className="relative">
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => handleInputChange(e.target.value)}
+          placeholder={placeholder}
+          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          data-testid={inputTestId}
+        />
+        {fetching ? (
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
+        ) : null}
+      </div>
 
-      {resolving ? (
-        <p className="mt-1 text-xs text-gray-500">Resolving property...</p>
+      {fetching ? (
+        <p className="mt-1 text-xs text-gray-400">Searching addresses…</p>
+      ) : resolving ? (
+        <p className="mt-1 text-xs text-gray-500">Resolving property…</p>
       ) : null}
 
       {showDropdown && suggestions.length > 0 ? (

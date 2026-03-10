@@ -17,6 +17,11 @@ FractPath is built with Next.js, leveraging API routes for backend logic and Sup
 - **Deal Viewing:** Emphasizes immutable calculator snapshots and an audit trail, with share links providing read-only access.
 - **Snapshot History:** Navigable multiple snapshots for a deal with an option to revert to the latest.
 - **Unified Property Form:** A single `PropertyForm` modal handles property addition for both profile and deal contexts, featuring address typeahead and investor/owner toggles.
+- **Dashboard Greeting:** Shows user's nickname from profile when available, falls back to persona-based greeting.
+- **Address Typeahead Loading:** Shows inline spinner + "Searching addresses…" text during autocomplete API calls, plus "Resolving property…" during property resolution.
+- **Login Branding:** Login page displays FractPath logo centered above the form.
+- **Page-Level Loading Overlay:** `PageLoadingProvider` in `Providers.tsx` provides `usePageLoading()` hook (`show(msg)` / `hide()`) for async DB-backed actions. Used in RecomputeSnapshotButton, DealDetailWidgetPanel save, SubmitOfferModal submit, and CounterOfferModal counter-offer.
+- **Shared Modal Shell:** `Modal` component (`src/components/ui/Modal.tsx`) provides consistent overlay/header/body/footer layout with `size` (sm/md/lg) and `footer` props. Used by EditDealNameModal, ArchiveDealModal, ShareDealModal, OwnerDecisionModal, DealTitleModal, SubmitOfferModal, and PropertyCaptureModal.
 
 **Technical Implementations:**
 - **Authentication:** Supabase manages user authentication, roles, and metadata.

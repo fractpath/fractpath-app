@@ -14,6 +14,14 @@ export type ModalProps = {
   onPrimary?: () => void;
   secondaryLabel?: string;
   onSecondary?: () => void;
+  size?: "sm" | "md" | "lg";
+  footer?: React.ReactNode;
+};
+
+const SIZE_CLASSES = {
+  sm: "max-w-sm",
+  md: "max-w-md",
+  lg: "max-w-xl",
 };
 
 export function Modal({
@@ -28,6 +36,8 @@ export function Modal({
   onPrimary,
   secondaryLabel,
   onSecondary,
+  size = "md",
+  footer,
 }: ModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
 
@@ -62,22 +72,26 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="w-full max-w-md rounded-lg border bg-background p-6 shadow-lg"
+        className={`w-full ${SIZE_CLASSES[size]} rounded-xl border bg-background shadow-xl`}
       >
-        <h2 className="text-lg font-semibold">{title}</h2>
-        {description ? (
-          <p className="mt-1 text-sm text-muted-foreground">{description}</p>
-        ) : null}
+        <div className="border-b px-6 py-4">
+          <h2 className="text-lg font-semibold">{title}</h2>
+          {description ? (
+            <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+          ) : null}
+        </div>
 
-        {children ? <div className="mt-4">{children}</div> : null}
+        {children ? <div className="px-6 py-4">{children}</div> : null}
 
-        {(primaryLabel || secondaryLabel) ? (
-          <div className="mt-6 flex items-center justify-end gap-3">
+        {footer ? (
+          <div className="border-t px-6 py-4">{footer}</div>
+        ) : (primaryLabel || secondaryLabel) ? (
+          <div className="flex items-center justify-end gap-3 border-t px-6 py-4">
             {secondaryLabel ? (
               <button
                 type="button"
                 onClick={onSecondary ?? onClose}
-                className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted/50"
+                className="rounded-lg border px-4 py-2 text-sm font-medium hover:bg-muted/50"
               >
                 {secondaryLabel}
               </button>
@@ -87,7 +101,7 @@ export function Modal({
                 type="button"
                 onClick={onPrimary}
                 disabled={primaryLoading || primaryDisabled}
-                className="inline-flex items-center gap-2 rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
+                className="inline-flex items-center gap-2 rounded-lg bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
               >
                 {primaryLoading ? (
                   <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-background border-t-transparent" />
