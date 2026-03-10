@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { EditModalMount } from "fractpath-calculator-widget";
+import { DealEditModal as EditModalMount } from "fractpath-calculator-widget";
 import { extractDealDisplayModel } from "@/lib/dealSnapshotDisplay";
 import { normalizeDealTermsForWidget } from "@/lib/normalizeDealTermsForWidget";
 

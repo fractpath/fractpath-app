@@ -109,7 +109,7 @@ function relativeAge(dateStr: string | null, nowMs: number): string {
 type SearchParams = Record<string, string | string[] | undefined>;
 
 type PageProps = {
-  searchParams?: SearchParams | Promise<SearchParams>;
+  searchParams?: Promise<SearchParams>;
 };
 
 type CardVm = {

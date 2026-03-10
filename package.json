@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "sh -lc 'next dev --webpack -H 0.0.0.0 -p ${PORT:-5000}'",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
     "predev": "node scripts/check-env.mjs",
@@ -17,7 +17,7 @@
     "@supabase/auth-helpers-nextjs": "^0.15.0",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.97.0",
-    "fractpath-calculator-widget": "https://github.com/fractpath/fractpath-calculator-widget/archive/refs/tags/v1.0.3.tar.gz",
+    "fractpath-calculator-widget": "git+https://github.com/fractpath/fractpath-calculator-widget.git#v1.0.4",
     "heic2any": "^0.0.4",
     "next": "16.1.6",
     "node-fetch": "^3.3.2",

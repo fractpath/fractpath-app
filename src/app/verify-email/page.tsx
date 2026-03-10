@@ -3,8 +3,7 @@ export const dynamic = "force-dynamic";
 type SP = Record<string, string | string[] | undefined>;
 
 type Props = {
-  // Next.js may pass searchParams as a Promise in newer versions.
-  searchParams?: SP | Promise<SP>;
+  searchParams?: Promise<SP>;
 };
 
 function getParam(searchParams: SP | undefined, key: string): string | null {
@@ -14,7 +13,7 @@ function getParam(searchParams: SP | undefined, key: string): string | null {
 }
 
 export default async function VerifyEmailPage({ searchParams }: Props) {
-  const sp: SP = (await (searchParams as any)) ?? {};
+  const sp: SP = searchParams ? await searchParams : {};
 
   const status = getParam(sp, "status");
   const email = getParam(sp, "email");

@@ -38,8 +38,8 @@ function humanLabel(key: string): string {
 type SearchParams = Record<string, string | string[] | undefined>;
 
 type PageProps = {
-  params: { dealId?: string } | Promise<{ dealId?: string }>;
-  searchParams?: SearchParams | Promise<SearchParams>;
+  params: Promise<{ dealId?: string }>;
+  searchParams?: Promise<SearchParams>;
 };
 
 function getParam(
@@ -61,8 +61,8 @@ function isUuid(v: string | undefined | null): v is string {
 }
 
 export default async function ComparePage({ params, searchParams }: PageProps) {
-  const resolvedParams = await Promise.resolve(params as any);
-  const resolvedSearchParams = await Promise.resolve(searchParams as any);
+  const resolvedParams = await params;
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
 
   const dealId = resolvedParams?.dealId as string | undefined;
 

@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 type SP = Record<string, string | string[] | undefined>;
 
 type Props = {
-  searchParams?: SP | Promise<SP>;
+  searchParams?: Promise<SP>;
 };
 
 function getParam(sp: SP, key: string): string | null {
@@ -32,7 +32,7 @@ const PERSONA_DESCRIPTIONS: Record<Persona, string> = {
 };
 
 export default async function SignupPage({ searchParams }: Props) {
-  const sp: SP = await Promise.resolve(searchParams ?? {});
+  const sp: SP = searchParams ? await searchParams : {};
   const error = getParam(sp, "error");
   const personaParam = getParam(sp, "persona")?.toLowerCase() ?? null;
   const prefilledPersona = isValidPersona(personaParam) ? personaParam : null;

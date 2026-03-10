@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { EditModalMount } from "fractpath-calculator-widget";
+import { DealEditModal as EditModalMount } from "fractpath-calculator-widget";
 import { normalizeDealTermsForWidget } from "@/lib/normalizeDealTermsForWidget";
 
 type AnyRecord = Record<string, unknown>;

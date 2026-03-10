@@ -27,11 +27,13 @@ function isFilter(v: unknown): v is Filter {
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
-export default async function AdminPropertiesPage({
-  searchParams,
-}: {
-  searchParams?: SearchParams | Promise<SearchParams>;
-}) {
+  type PageProps = {
+    searchParams?: Promise<SearchParams>;
+  };
+
+  export default async function AdminPropertiesPage({
+    searchParams,
+  }: PageProps) {
   const admin = await requireAdmin();
 
   if (!admin.ok) {
