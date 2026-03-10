@@ -18,8 +18,8 @@ importers:
         specifier: ^2.97.0
         version: 2.99.0
       fractpath-calculator-widget:
-        specifier: git+https://github.com/fractpath/fractpath-calculator-widget.git#v1.0.4
-        version: https://codeload.github.com/fractpath/fractpath-calculator-widget/tar.gz/7e945bf45054776a7ad332d0c811e75e150d08fb(@types/node@20.19.37)(jiti@1.21.7)(tsx@4.21.0)(yaml@2.8.2)
+        specifier: git+https://github.com/fractpath/fractpath-calculator-widget.git#v1.0.5
+        version: https://codeload.github.com/fractpath/fractpath-calculator-widget/tar.gz/e4d6790c7562908ba87d767867eacb7dc37ee88b(@types/node@20.19.37)(jiti@1.21.7)(tsx@4.21.0)(yaml@2.8.2)
       heic2any:
         specifier: ^0.0.4
         version: 0.0.4
@@ -1201,9 +1201,6 @@ packages:
     resolution: {integrity: sha512-NOKm8xhkzAjzFx8B2v5OAHT+u5pRQc2UCa2Vq9jYL/31o2wi9mxBA7LIFs3sV5VSC49z6pEhfbMULvShKj26WA==}
     engines: {node: '>= 6'}
 
-  compute@file:packages/compute:
-    resolution: {directory: packages/compute, type: directory}
-
   concat-map@0.0.1:
     resolution: {integrity: sha512-/Srv4dswyQNBfohGpz9o6Yb3Gz3SrUDqBH5rTuhGR7ahtlbYKnVxw2bCFMRljaA7EXHaXZ8wsHdodFvbkhKmqg==}
 
@@ -1539,8 +1536,8 @@ packages:
   fraction.js@4.3.7:
     resolution: {integrity: sha512-ZsDfxO51wGAXREY55a7la9LScWpwv9RxIrYABrlvOFBlH/ShPnrtsXeuUIfXKKOVicNxQ+o8JTbJvjS4M89yew==}
 
-  fractpath-calculator-widget@https://codeload.github.com/fractpath/fractpath-calculator-widget/tar.gz/7e945bf45054776a7ad332d0c811e75e150d08fb:
-    resolution: {tarball: https://codeload.github.com/fractpath/fractpath-calculator-widget/tar.gz/7e945bf45054776a7ad332d0c811e75e150d08fb}
+  fractpath-calculator-widget@https://codeload.github.com/fractpath/fractpath-calculator-widget/tar.gz/e4d6790c7562908ba87d767867eacb7dc37ee88b:
+    resolution: {tarball: https://codeload.github.com/fractpath/fractpath-calculator-widget/tar.gz/e4d6790c7562908ba87d767867eacb7dc37ee88b}
     version: 1.0.0
 
   fsevents@2.3.3:
@@ -3576,8 +3573,6 @@ snapshots:
 
   commander@4.1.1: {}
 
-  compute@file:packages/compute: {}
-
   concat-map@0.0.1: {}
 
   convert-source-map@2.0.0: {}
@@ -4072,9 +4067,8 @@ snapshots:
 
   fraction.js@4.3.7: {}
 
-  fractpath-calculator-widget@https://codeload.github.com/fractpath/fractpath-calculator-widget/tar.gz/7e945bf45054776a7ad332d0c811e75e150d08fb(@types/node@20.19.37)(jiti@1.21.7)(tsx@4.21.0)(yaml@2.8.2):
+  fractpath-calculator-widget@https://codeload.github.com/fractpath/fractpath-calculator-widget/tar.gz/e4d6790c7562908ba87d767867eacb7dc37ee88b(@types/node@20.19.37)(jiti@1.21.7)(tsx@4.21.0)(yaml@2.8.2):
     dependencies:
-      '@fractpath/compute': compute@file:packages/compute
       react: 19.2.3
       react-dom: 19.2.3(react@19.2.3)
       vitest: 4.0.18(@types/node@20.19.37)(jiti@1.21.7)(tsx@4.21.0)(yaml@2.8.2)
