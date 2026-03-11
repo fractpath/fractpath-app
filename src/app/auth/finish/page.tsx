@@ -1,17 +1,23 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/app/lib/supabaseBrowser";
 
-type State =
-  | { status: "loading" }
-  | { status: "error"; message: string };
+type State = { status: "loading" } | { status: "error"; message: string };
 
-export default function AuthFinishPage() {
+function sanitizeNext(value: string | null): string {
+  if (!value) return "/dashboard";
+  if (!value.startsWith("/")) return "/dashboard";
+  if (value.startsWith("//")) return "/dashboard";
+  if (value.startsWith("/\\")) return "/dashboard";
+  if (value.includes("://")) return "/dashboard";
+  return value;
+}
+
+function AuthFinishInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const supabase = typeof window !== "undefined" ? createSupabaseBrowserClient() : null;
   const [state, setState] = useState<State>({ status: "loading" });
 
   useEffect(() => {
@@ -19,15 +25,8 @@ export default function AuthFinishPage() {
 
     async function run() {
       try {
-        const rawNext = searchParams.get("next") || "/dashboard";
-        const next =
-          typeof rawNext === "string" &&
-          rawNext.startsWith("/") &&
-          !rawNext.startsWith("//") &&
-          !rawNext.startsWith("/\\") &&
-          !rawNext.includes("://")
-            ? rawNext
-            : "/dashboard";
+        const supabase = createSupabaseBrowserClient();
+        const next = sanitizeNext(searchParams.get("next"));
 
         const hash = new URLSearchParams(
           window.location.hash.startsWith("#")
@@ -49,31 +48,32 @@ export default function AuthFinishPage() {
         }
 
         const code = searchParams.get("code");
+        if (code) {
+          const { error: exchangeError } =
+            await supabase.auth.exchangeCodeForSession(code);
 
-        const access_token = hash.get("access_token");
-        const refresh_token = hash.get("refresh_token");
-
-        if (!supabase) {
-          if (!cancelled) {
-            setState({
-              status: "error",
-              message: "Supabase browser client is unavailable.",
-            });
-          }
-          return;
-        }
-
-        if (access_token && refresh_token) {
-          const { error: sessionError } = await supabase.auth.setSession({
-            access_token,
-            refresh_token,
-          });
-
-          if (sessionError) {
+          if (exchangeError) {
             if (!cancelled) {
-              setState({ status: "error", message: sessionError.message });
+              setState({ status: "error", message: exchangeError.message });
             }
             return;
+          }
+        } else {
+          const access_token = hash.get("access_token");
+          const refresh_token = hash.get("refresh_token");
+
+          if (access_token && refresh_token) {
+            const { error: sessionError } = await supabase.auth.setSession({
+              access_token,
+              refresh_token,
+            });
+
+            if (sessionError) {
+              if (!cancelled) {
+                setState({ status: "error", message: sessionError.message });
+              }
+              return;
+            }
           }
         }
 
@@ -83,7 +83,8 @@ export default function AuthFinishPage() {
           if (!cancelled) {
             setState({
               status: "error",
-              message: userError?.message || "Authentication could not be completed.",
+              message:
+                userError?.message || "Authentication could not be completed.",
             });
           }
           return;
@@ -94,7 +95,8 @@ export default function AuthFinishPage() {
         if (!cancelled) {
           setState({
             status: "error",
-            message: err instanceof Error ? err.message : "Authentication failed.",
+            message:
+              err instanceof Error ? err.message : "Authentication failed.",
           });
         }
       }
@@ -105,7 +107,7 @@ export default function AuthFinishPage() {
     return () => {
       cancelled = true;
     };
-  }, [router, searchParams, supabase]);
+  }, [router, searchParams]);
 
   return (
     <main style={{ maxWidth: 560, margin: "40px auto", padding: "0 16px" }}>
@@ -130,5 +132,24 @@ export default function AuthFinishPage() {
         </div>
       )}
     </main>
+  );
+}
+
+export default function AuthFinishPage() {
+  return (
+    <Suspense
+      fallback={
+        <main style={{ maxWidth: 560, margin: "40px auto", padding: "0 16px" }}>
+          <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 8 }}>
+            Finishing sign-in
+          </h1>
+          <p style={{ marginTop: 0, opacity: 0.8 }}>
+            Completing authentication and loading your deal…
+          </p>
+        </main>
+      }
+    >
+      <AuthFinishInner />
+    </Suspense>
   );
 }
