@@ -11,7 +11,7 @@ type State =
 export default function AuthFinishPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+  const supabase = typeof window !== "undefined" ? createSupabaseBrowserClient() : null;
   const [state, setState] = useState<State>({ status: "loading" });
 
   useEffect(() => {
@@ -53,6 +53,16 @@ export default function AuthFinishPage() {
         const access_token = hash.get("access_token");
         const refresh_token = hash.get("refresh_token");
 
+        if (!supabase) {
+          if (!cancelled) {
+            setState({
+              status: "error",
+              message: "Supabase browser client is unavailable.",
+            });
+          }
+          return;
+        }
+
         if (access_token && refresh_token) {
           const { error: sessionError } = await supabase.auth.setSession({
             access_token,
@@ -62,16 +72,6 @@ export default function AuthFinishPage() {
           if (sessionError) {
             if (!cancelled) {
               setState({ status: "error", message: sessionError.message });
-            }
-            return;
-          }
-        } else if (code) {
-          const { error: codeError } =
-            await supabase.auth.exchangeCodeForSession(code);
-
-          if (codeError) {
-            if (!cancelled) {
-              setState({ status: "error", message: codeError.message });
             }
             return;
           }
