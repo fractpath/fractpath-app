@@ -19,6 +19,7 @@ export default async function VerifyEmailPage({ searchParams }: Props) {
   const email = getParam(sp, "email");
   const retryIn = getParam(sp, "retry_in");
   const msg = getParam(sp, "msg") || getParam(sp, "error");
+  const returnTo = getParam(sp, "returnTo") ?? "";
 
   const isThrottled = status === "throttled";
   const retryInNum = retryIn ? Number(retryIn) : NaN;
@@ -57,27 +58,29 @@ export default async function VerifyEmailPage({ searchParams }: Props) {
 
         <hr style={{ border: "none", borderTop: "1px solid rgba(0,0,0,0.12)" }} />
 
-        <form
-          method="post"
-          action="/auth/resend-confirmation"
-          style={{ display: "grid", gap: 10 }}
-        >
-          <label style={{ display: "grid", gap: 6 }}>
-            <span style={{ fontWeight: 600 }}>Resend confirmation email</span>
-            <input
-              name="email"
-              type="email"
-              required
-              defaultValue={email ?? ""}
-              placeholder="you@example.com"
-              autoComplete="email"
-              style={{
-                padding: "10px 12px",
-                borderRadius: 10,
-                border: "1px solid rgba(0,0,0,0.2)",
-              }}
-            />
-          </label>
+          <form
+            method="post"
+            action="/auth/resend-confirmation"
+            style={{ display: "grid", gap: 10 }}
+          >
+            {returnTo ? <input type="hidden" name="returnTo" value={returnTo} /> : null}
+
+            <label style={{ display: "grid", gap: 6 }}>
+              <span style={{ fontWeight: 600 }}>Resend confirmation email</span>
+              <input
+                name="email"
+                type="email"
+                required
+                defaultValue={email ?? ""}
+                placeholder="you@example.com"
+                autoComplete="email"
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(0,0,0,0.2)",
+                }}
+              />
+            </label>
 
           <button
             type="submit"
@@ -95,9 +98,15 @@ export default async function VerifyEmailPage({ searchParams }: Props) {
             {isThrottled ? "Please wait…" : "Resend email"}
           </button>
 
-          <p style={{ margin: "4px 0 0", fontSize: 13, opacity: 0.75 }}>
-            Already confirmed? <a href="/login">Log in</a>
-          </p>
+          {returnTo ? (
+            <p style={{ margin: "4px 0 0", fontSize: 13, opacity: 0.75 }}>
+              Email confirmed? <a href={returnTo}>Continue to your deal</a>
+            </p>
+          ) : (
+            <p style={{ margin: "4px 0 0", fontSize: 13, opacity: 0.75 }}>
+              Already confirmed? <a href="/login">Log in</a>
+            </p>
+          )}
         </form>
       </div>
     </main>

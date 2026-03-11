@@ -3,6 +3,7 @@ import {
   createSupabaseRouteClient,
   getRequestOrigin,
 } from "@/app/lib/supabaseRoute";
+import { getAppBaseUrlServer } from "@/lib/appBaseUrl";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +41,7 @@ function checkThrottle(key: string, windowSec: number) {
 export async function POST(req: Request) {
   const formData = await req.formData();
   const email = String(formData.get("email") || "").trim();
+  const returnTo = String(formData.get("returnTo") || "").trim();
 
   if (!email) {
     return NextResponse.redirect(
@@ -56,20 +58,37 @@ export async function POST(req: Request) {
         req,
         `/verify-email?status=throttled&email=${encodeURIComponent(
           email,
-        )}&retry_in=${th.retryInSec}`,
+        )}&retry_in=${th.retryInSec}${
+          returnTo ? `&returnTo=${encodeURIComponent(returnTo)}` : ""
+        }`,
       ),
       { status: 303 },
     );
   }
 
   const res = NextResponse.redirect(
-    abs(req, `/verify-email?status=resent&email=${encodeURIComponent(email)}`),
+    abs(
+      req,
+      `/verify-email?status=resent&email=${encodeURIComponent(email)}${
+        returnTo ? `&returnTo=${encodeURIComponent(returnTo)}` : ""
+      }`,
+    ),
     { status: 303 },
   );
 
   const supabase = await createSupabaseRouteClient(req, res);
+  const emailOrigin = getAppBaseUrlServer();
+  const emailRedirectTo =
+    returnTo && returnTo.startsWith("/")
+      ? `${emailOrigin}/auth/finish?next=${encodeURIComponent(returnTo)}`
+      : undefined;
 
-  const { error } = await supabase.auth.resend({ type: "signup", email });
+  const { error } = await supabase.auth.resend({
+    type: "signup",
+    email,
+    options: emailRedirectTo ? { emailRedirectTo } : undefined,
+  });
+
   if (error) {
     const msg = encodeURIComponent(error.message || "resend_failed");
     return NextResponse.redirect(
@@ -77,7 +96,9 @@ export async function POST(req: Request) {
         req,
         `/verify-email?status=error&email=${encodeURIComponent(
           email,
-        )}&error=${msg}`,
+        )}&error=${msg}${
+          returnTo ? `&returnTo=${encodeURIComponent(returnTo)}` : ""
+        }`,
       ),
       { status: 303 },
     );

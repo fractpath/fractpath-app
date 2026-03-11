@@ -60,8 +60,6 @@ function resolveCanonicalInputs(
   if (isRecord(dealTerms)) {
     const resolved: Record<string, unknown> = { deal_terms: dealTerms };
 
-    // Canonical compute in your app expects "scenario" today in several places,
-    // but we accept either key and map to "scenario" inside inputs.
     const scen = isRecord(scenario)
       ? scenario
       : isRecord(assumptions)
@@ -75,27 +73,114 @@ function resolveCanonicalInputs(
   return {};
 }
 
-function synthesizeCanonicalSnapshot(
+function resolveOutputs(
   snapshotJson: Record<string, unknown>,
-): SynthesizedCanonicalSnapshot {
-  const computeVersion = computeVersionFallback(snapshotJson);
-
-  const inputs = resolveCanonicalInputs(snapshotJson);
-
-  const outputs =
+): Record<string, unknown> {
+  return ((snapshotJson.outputs && isRecord(snapshotJson.outputs)
+    ? snapshotJson.outputs
+    : null) ??
     (snapshotJson.result && isRecord(snapshotJson.result)
       ? snapshotJson.result
       : null) ??
     (snapshotJson.basic_results && isRecord(snapshotJson.basic_results)
       ? snapshotJson.basic_results
-      : {});
+      : {}) ??
+    {}) as Record<string, unknown>;
+}
+
+function synthesizeCanonicalSnapshot(
+  snapshotJson: Record<string, unknown>,
+): SynthesizedCanonicalSnapshot {
+  const computeVersion = computeVersionFallback(snapshotJson);
+  const inputs = resolveCanonicalInputs(snapshotJson);
+  const outputs = resolveOutputs(snapshotJson);
 
   return {
     compute_version: computeVersion,
     computed_at: new Date().toISOString(),
     inputs,
     assumptions: {},
-    outputs: outputs as Record<string, unknown>,
+    outputs,
+  };
+}
+
+/**
+ * Accept either:
+ * - modern body: { snapshot_json, canonicalSnapshot?, source? }
+ * - legacy marketing body: { draftSnapshot?, canonicalSnapshot?, canonicalInputs?, ... }
+ *
+ * This preserves existing contract while restoring backward compatibility.
+ */
+function resolveSnapshotJsonFromBody(
+  body: unknown,
+): Record<string, unknown> | null {
+  if (!isRecord(body)) return null;
+
+  if (isRecord(body.snapshot_json)) {
+    return { ...body.snapshot_json };
+  }
+
+  const snapshot: Record<string, unknown> = {};
+
+  if (isRecord(body.draftSnapshot)) {
+    snapshot.draftSnapshot = body.draftSnapshot;
+    Object.assign(snapshot, body.draftSnapshot);
+  }
+
+  if (isRecord(body.canonicalInputs)) {
+    snapshot.canonicalInputs = body.canonicalInputs;
+  }
+
+  if (isRecord(body.canonicalSnapshot)) {
+    snapshot.canonicalSnapshot = body.canonicalSnapshot;
+  }
+
+  if (typeof body.persona === "string") {
+    snapshot.persona = body.persona;
+  }
+
+  return Object.keys(snapshot).length > 0 ? snapshot : null;
+}
+
+/**
+ * Ensure the stored canonicalSnapshot always has canonicalSnapshot.inputs
+ * in the exact shape resume expects.
+ */
+function normalizeCanonicalSnapshot(
+  candidate: unknown,
+  snapshotJson: Record<string, unknown>,
+): Record<string, unknown> {
+  const base = isRecord(candidate) ? { ...candidate } : {};
+
+  const candidateInputs = resolveCanonicalInputs(base);
+  const fallbackInputs = resolveCanonicalInputs(snapshotJson);
+  const inputs =
+    Object.keys(candidateInputs).length > 0 ? candidateInputs : fallbackInputs;
+
+  const outputs =
+    (isRecord(base.outputs) ? base.outputs : null) ??
+    resolveOutputs(snapshotJson);
+
+  const compute_version =
+    typeof base.compute_version === "string" &&
+    base.compute_version.trim().length > 0
+      ? base.compute_version
+      : computeVersionFallback(snapshotJson);
+
+  const computed_at =
+    typeof base.computed_at === "string" && base.computed_at.trim().length > 0
+      ? base.computed_at
+      : new Date().toISOString();
+
+  const assumptions = isRecord(base.assumptions) ? base.assumptions : {};
+
+  return {
+    ...base,
+    compute_version,
+    computed_at,
+    inputs,
+    assumptions,
+    outputs,
   };
 }
 
@@ -108,7 +193,6 @@ function isUniqueViolation(err: any): boolean {
     msg.toLowerCase().includes("unique")
   );
 }
-
 export async function POST(request: NextRequest) {
   let body: any;
   try {
@@ -117,40 +201,31 @@ export async function POST(request: NextRequest) {
     return jsonError("Invalid JSON body", 400);
   }
 
-  if (!body?.snapshot_json || !isRecord(body.snapshot_json)) {
+  const snapshotJson = resolveSnapshotJsonFromBody(body);
+  if (!snapshotJson) {
     return jsonError(
       "snapshot_json is required and must be a JSON object",
       400,
     );
   }
 
-  const source: string = body.source === "app" ? "app" : "marketing";
-  const snapshotJson: Record<string, unknown> = { ...body.snapshot_json };
+  const source: string = body?.source === "app" ? "app" : "marketing";
 
   // Precedence rule (anti-drift):
   // body.canonicalSnapshot wins; else use snapshot_json.canonicalSnapshot; else synthesize.
   const providedCanonical: unknown =
-    body.canonicalSnapshot ?? snapshotJson.canonicalSnapshot ?? null;
+    body?.canonicalSnapshot ?? snapshotJson.canonicalSnapshot ?? null;
 
-  const resolvedCanonical: Record<string, unknown> = isRecord(providedCanonical)
-    ? (providedCanonical as Record<string, unknown>)
-    : (synthesizeCanonicalSnapshot(snapshotJson) as unknown as Record<
-        string,
-        unknown
-      >);
-
-  // Backfill inputs if caller gave us a canonicalSnapshot with empty inputs.
-  if (
-    !isRecord(resolvedCanonical.inputs) ||
-    Object.keys(resolvedCanonical.inputs).length === 0
-  ) {
-    resolvedCanonical.inputs = resolveCanonicalInputs(snapshotJson);
-  }
+  const resolvedCanonical = normalizeCanonicalSnapshot(
+    isRecord(providedCanonical)
+      ? providedCanonical
+      : synthesizeCanonicalSnapshot(snapshotJson),
+    snapshotJson,
+  );
 
   // Store nested + verbatim (never spread)
   snapshotJson.canonicalSnapshot = resolvedCanonical;
 
-  // contract_version drift containment:
   const contractVersion =
     typeof resolvedCanonical.compute_version === "string" &&
     resolvedCanonical.compute_version.trim().length > 0

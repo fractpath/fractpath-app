@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRequestOrigin } from "@/app/lib/supabaseRoute";
+import { getAppBaseUrlServer } from "@/lib/appBaseUrl";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -85,7 +86,10 @@ export async function POST(req: Request) {
   }
 
   if (!persona) {
-    return NextResponse.redirect(abs(req, "/signup?error=please_select_role"), 303);
+    return NextResponse.redirect(
+      abs(req, "/signup?error=please_select_role"),
+      303,
+    );
   }
 
   const tk = throttleKey(req, email);
@@ -94,37 +98,54 @@ export async function POST(req: Request) {
     return NextResponse.redirect(
       abs(
         req,
-        "/verify-email?status=throttled&email=" + encodeURIComponent(email) + "&retry_in=" + String(th.retryInSec)
+        "/verify-email?status=throttled&email=" +
+          encodeURIComponent(email) +
+          "&retry_in=" +
+          String(th.retryInSec) +
+          (returnTo !== "/dashboard"
+            ? "&returnTo=" + encodeURIComponent(returnTo)
+            : ""),
       ),
-      303
+      303,
     );
   }
 
   const supabaseUrl =
     process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "";
   const anonKey =
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "";
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    "";
 
   if (!supabaseUrl || !anonKey) {
     return NextResponse.redirect(
       abs(req, "/verify-email?status=error&msg=missing_supabase_env"),
-      303
+      303,
     );
   }
 
   const origin = getRequestOrigin(req);
+  const emailOrigin = getAppBaseUrlServer();
   const base = supabaseUrl.replace(/\/+$/, "");
-  const callbackPath = returnTo !== "/dashboard"
-    ? "/auth/callback?next=" + encodeURIComponent(returnTo)
-    : "/auth/callback";
-  const redirectTo = origin + callbackPath;
+  const callbackPath =
+    returnTo !== "/dashboard"
+      ? "/auth/finish?next=" + encodeURIComponent(returnTo)
+      : "/auth/finish";
+  const redirectTo = emailOrigin + callbackPath;
   const endpoint =
     base + "/auth/v1/signup?redirect_to=" + encodeURIComponent(redirectTo);
+
+  console.log("[signup] origin =", origin);
+  console.log("[signup] emailOrigin =", emailOrigin);
+  console.log("[signup] returnTo =", returnTo);
+  console.log("[signup] redirectTo =", redirectTo);
+  console.log("[signup] endpoint =", endpoint);
 
   const payload = JSON.stringify({
     email,
     password,
     options: {
+      emailRedirectTo: redirectTo,
       data: {
         role: persona,
         source: "marketing",
@@ -132,34 +153,40 @@ export async function POST(req: Request) {
     },
   });
 
+  console.log("[signup] payload keys =", Object.keys(JSON.parse(payload)));
+
   try {
-    const { stdout } = await withTimeout(execFileAsync("curl", [
-      "-sS",
-      "--http1.1",
-      "-4",
-      "--connect-timeout",
-      "5",
-      "--max-time",
-      "8",
-      "--retry",
-      "1",
-      "--retry-all-errors",
-      "--retry-max-time",
-      "10",
-      "-X",
-      "POST",
-      endpoint,
-      "-H",
-      "Content-Type: application/json",
-      "-H",
-      `apikey: ${anonKey}`,
-      "-H",
-      `Authorization: Bearer ${anonKey}`,
-      "-H",
-      "Expect:",
-      "--data",
-      payload,
-    ]), SIGNUP_HARD_TIMEOUT_MS, "signup_hard_timeout");
+    const { stdout } = await withTimeout(
+      execFileAsync("curl", [
+        "-sS",
+        "--http1.1",
+        "-4",
+        "--connect-timeout",
+        "5",
+        "--max-time",
+        "8",
+        "--retry",
+        "1",
+        "--retry-all-errors",
+        "--retry-max-time",
+        "10",
+        "-X",
+        "POST",
+        endpoint,
+        "-H",
+        "Content-Type: application/json",
+        "-H",
+        `apikey: ${anonKey}`,
+        "-H",
+        `Authorization: Bearer ${anonKey}`,
+        "-H",
+        "Expect:",
+        "--data",
+        payload,
+      ]),
+      SIGNUP_HARD_TIMEOUT_MS,
+      "signup_hard_timeout",
+    );
 
     let msg: string | null = null;
     try {
@@ -174,17 +201,22 @@ export async function POST(req: Request) {
     if (msg) {
       return NextResponse.redirect(
         abs(req, "/verify-email?status=error&msg=" + encodeURIComponent(msg)),
-        303
+        303,
       );
     }
 
-    return NextResponse.redirect(abs(req, "/verify-email?status=sent"), 303);
+    const redirectPath =
+      "/verify-email?status=sent" + "&returnTo=" + encodeURIComponent(returnTo);
+
+    return NextResponse.redirect(abs(req, redirectPath), 303);
   } catch (e: any) {
     const msg = String(e?.message || "");
-    const reason = encodeURIComponent(msg.includes("(28)") ? "signup_curl_timeout" : "signup_curl_failed");
+    const reason = encodeURIComponent(
+      msg.includes("(28)") ? "signup_curl_timeout" : "signup_curl_failed",
+    );
     return NextResponse.redirect(
       abs(req, "/verify-email?status=timeout&reason=" + reason),
-      303
+      303,
     );
   }
 }
