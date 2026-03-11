@@ -279,7 +279,7 @@ export async function POST(request: NextRequest) {
     )
       .insert({
         owner_user_id: user.id,
-        status: "IMPORTED",
+        status: "DRAFT",
         created_from: "resume",
         source_ref: `draft_token:${draft.id}`,
         mode: "app",
