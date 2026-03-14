@@ -1,12 +1,31 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import { getAppBaseUrlServer } from "@/lib/appBaseUrl";
+import { sendTemplateEmail } from "@/lib/email/sendTemplateEmail";
 import { computeDealAdapter as computeDeal } from "@/lib/computeAdapter";
 import { ensureScenario } from "@/lib/defaultScenario";
 import { CONTRACT_VERSION, SCHEMA_VERSION } from "@/lib/contractVersion";
 
 function json(status: number, body: any) {
   return NextResponse.json(body, { status });
+}
+
+function normalizeEmail(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().toLowerCase();
+  return trimmed && trimmed.includes("@") ? trimmed : null;
+}
+
+function resolvePropertyAddress(
+  canonicalHeader: Record<string, unknown> | undefined,
+): string {
+  const displayAddress =
+    typeof canonicalHeader?.display_address === "string"
+      ? canonicalHeader.display_address.trim()
+      : "";
+
+  return displayAddress || "this property";
 }
 
 export async function POST(
@@ -44,7 +63,8 @@ export async function POST(
               ? termsSnapshot.deal_terms
               : null,
           scenario:
-            termsSnapshot?.scenario && typeof termsSnapshot.scenario === "object"
+            termsSnapshot?.scenario &&
+            typeof termsSnapshot.scenario === "object"
               ? termsSnapshot.scenario
               : null,
         };
@@ -92,7 +112,8 @@ export async function POST(
   if (proposal.created_by_user_id === user.id) {
     return json(403, {
       ok: false,
-      error: "Cannot counter your own proposal. Wait for the other party to respond.",
+      error:
+        "Cannot counter your own proposal. Wait for the other party to respond.",
     });
   }
 
@@ -143,7 +164,8 @@ export async function POST(
     }
   }
 
-  const hasAccess = isBuyer || isThreadOwner || isPropertyOwner || isInvitedOwner;
+  const hasAccess =
+    isBuyer || isThreadOwner || isPropertyOwner || isInvitedOwner;
   if (!hasAccess) {
     return json(403, { ok: false, error: "Access denied" });
   }
@@ -173,7 +195,10 @@ export async function POST(
       }
     }
   } catch (headerReadErr: any) {
-    console.error("counter_canonical_header_read_error", headerReadErr?.message);
+    console.error(
+      "counter_canonical_header_read_error",
+      headerReadErr?.message,
+    );
   }
 
   const computedAt = new Date().toISOString();
@@ -241,6 +266,88 @@ export async function POST(
     },
     created_by: user.id,
   });
+
+  const propertyAddress = resolvePropertyAddress(canonicalHeader);
+  const appBase = getAppBaseUrlServer();
+  const actionUrl = `${appBase}/deal/${dealId}`;
+  const fromEmail =
+    process.env.RESEND_FROM_EMAIL ?? "notifications@notify.fractpath.com";
+
+  const finalOwnerUserId =
+    (isPropertyOwner || isInvitedOwner) && !thread.owner_user_id
+      ? user.id
+      : (thread.owner_user_id as string | null);
+
+  async function sendEmailToUserId(params: {
+    userId: string | null | undefined;
+    templateId: string | undefined;
+    fallbackTemplate: string;
+    subject: string;
+    logKey: string;
+  }) {
+    if (!params.userId) return;
+
+    try {
+      const { data: targetUser } = await svc.auth.admin.getUserById(
+        params.userId,
+      );
+      const targetEmail = normalizeEmail(targetUser?.user?.email);
+
+      if (!targetEmail) {
+        console.warn(`${params.logKey}_missing_email`, {
+          dealId,
+          userId: params.userId,
+        });
+        return;
+      }
+
+      await sendTemplateEmail({
+        to: targetEmail,
+        from: fromEmail,
+        subject: params.subject,
+        template: {
+          id: params.templateId ?? params.fallbackTemplate,
+          variables: {
+            property_address: propertyAddress,
+            ACTION_URL: actionUrl,
+          },
+        },
+      });
+    } catch (emailErr: any) {
+      console.error(`${params.logKey}_failed`, {
+        dealId,
+        userId: params.userId,
+        error: emailErr?.message,
+      });
+    }
+  }
+
+  console.log("COUNTER_EMAIL_ROUTING", {
+    dealId,
+    buyerUserId: thread.buyer_user_id,
+    ownerUserId: finalOwnerUserId,
+    buyerTemplate: process.env.RESEND_TEMPLATE_BUYER_OFFER_COUNTERED_ID,
+    homeownerTemplate: process.env.RESEND_TEMPLATE_HOMEOWNER_OFFER_COUNTERED_ID,
+    propertyAddress,
+    counteredBy: user.id,
+  });
+
+  await Promise.all([
+    sendEmailToUserId({
+      userId: thread.buyer_user_id,
+      templateId: process.env.RESEND_TEMPLATE_BUYER_OFFER_COUNTERED_ID,
+      fallbackTemplate: "fractpath-buyer-offer-countered",
+      subject: "A counteroffer is ready for review",
+      logKey: "buyer_offer_countered_email",
+    }),
+    sendEmailToUserId({
+      userId: finalOwnerUserId,
+      templateId: process.env.RESEND_TEMPLATE_HOMEOWNER_OFFER_COUNTERED_ID,
+      fallbackTemplate: "fractpath-homeowner-offer-countered",
+      subject: "Your counteroffer was sent",
+      logKey: "homeowner_offer_countered_email",
+    }),
+  ]);
 
   return json(200, {
     ok: true,

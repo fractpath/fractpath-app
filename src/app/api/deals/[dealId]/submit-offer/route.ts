@@ -16,6 +16,23 @@ function json(status: number, body: any) {
   return NextResponse.json(body, { status });
 }
 
+function normalizeEmail(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().toLowerCase();
+  return trimmed && trimmed.includes("@") ? trimmed : null;
+}
+
+function resolvePropertyAddress(
+  canonicalHeader: Record<string, unknown> | undefined,
+): string {
+  const displayAddress =
+    typeof canonicalHeader?.display_address === "string"
+      ? canonicalHeader.display_address.trim()
+      : "";
+
+  return displayAddress || "this property";
+}
+
 export async function POST(
   req: NextRequest,
   ctx: { params: Promise<{ dealId: string }> },
@@ -136,7 +153,8 @@ export async function POST(
   const computeResult = await computeDeal(normalizedInputs);
   if (!computeResult.ok) {
     return json(500, {
-      error: computeResult.error ?? "Failed to compute submitted offer snapshot",
+      error:
+        computeResult.error ?? "Failed to compute submitted offer snapshot",
     });
   }
 
@@ -207,7 +225,10 @@ export async function POST(
       }
     }
   } catch (headerReadErr: any) {
-    console.error("submit_offer_canonical_header_read_error", headerReadErr?.message);
+    console.error(
+      "submit_offer_canonical_header_read_error",
+      headerReadErr?.message,
+    );
   }
 
   const computedAt = new Date().toISOString();
@@ -250,67 +271,66 @@ export async function POST(
     .update({ current_proposal_id: proposal.id })
     .eq("id", thread.id);
 
-  if (mode === "known_email") {
-    const email =
-      typeof body?.invitee_email === "string"
-        ? body.invitee_email.trim().toLowerCase()
-        : "";
-    if (email && email.includes("@")) {
-      const crypto = await import("crypto");
-      const token = crypto.randomBytes(32).toString("hex");
-      const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+  const knownInviteeEmail =
+    mode === "known_email" ? normalizeEmail(body?.invitee_email) : null;
 
-      await (svc.from("thread_invites") as any).insert({
-        thread_id: thread.id,
-        intended_role: "owner",
-        invitee_email: email,
-        token_hash: tokenHash,
-        expires_at: new Date(
-          Date.now() + 7 * 24 * 60 * 60 * 1000,
-        ).toISOString(),
-        created_by_user_id: user.id,
-      });
+  if (mode === "known_email" && knownInviteeEmail) {
+    const crypto = await import("crypto");
+    const token = crypto.randomBytes(32).toString("hex");
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
 
-      try {
-        let inviteeUserId: string | null = null;
-        let page = 1;
-        const perPage = 100;
-        while (!inviteeUserId) {
-          const { data: listData } = await svc.auth.admin.listUsers({
-            page,
-            perPage,
-          });
-          const users = listData?.users ?? [];
-          const match = users.find(
-            (u: any) => u.email?.toLowerCase() === email,
-          );
-          if (match) {
-            inviteeUserId = match.id;
-            break;
-          }
-          if (users.length < perPage) break;
-          page++;
-        }
-        if (inviteeUserId && inviteeUserId !== user.id) {
-          await (svc.from("deal_access_grants") as any).upsert(
-            {
-              deal_id: dealId,
-              user_id: inviteeUserId,
-              role: "VIEWER",
-              created_by: user.id,
-              revoked_at: null,
-              expires_at: null,
-            },
-            { onConflict: "deal_id,user_id" },
-          );
-        }
-      } catch (grantErr: any) {
-        console.error("submit_offer_known_email_grant_error", {
-          dealId,
-          email,
-          error: grantErr?.message,
+    await (svc.from("thread_invites") as any).insert({
+      thread_id: thread.id,
+      intended_role: "owner",
+      invitee_email: knownInviteeEmail,
+      token_hash: tokenHash,
+      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      created_by_user_id: user.id,
+    });
+
+    try {
+      let inviteeUserId: string | null = null;
+      let page = 1;
+      const perPage = 100;
+
+      while (!inviteeUserId) {
+        const { data: listData } = await svc.auth.admin.listUsers({
+          page,
+          perPage,
         });
+        const users = listData?.users ?? [];
+        const match = users.find(
+          (u: any) => u.email?.toLowerCase() === knownInviteeEmail,
+        );
+
+        if (match) {
+          inviteeUserId = match.id;
+          break;
+        }
+
+        if (users.length < perPage) break;
+        page++;
       }
+
+      if (inviteeUserId && inviteeUserId !== user.id) {
+        await (svc.from("deal_access_grants") as any).upsert(
+          {
+            deal_id: dealId,
+            user_id: inviteeUserId,
+            role: "VIEWER",
+            created_by: user.id,
+            revoked_at: null,
+            expires_at: null,
+          },
+          { onConflict: "deal_id,user_id" },
+        );
+      }
+    } catch (grantErr: any) {
+      console.error("submit_offer_known_email_grant_error", {
+        dealId,
+        email: knownInviteeEmail,
+        error: grantErr?.message,
+      });
     }
   }
 
@@ -328,6 +348,7 @@ export async function POST(
       created_by_user_id: user.id,
     });
   }
+
   if (prop.owner_user_id && prop.owner_user_id !== user.id) {
     const { error: dealOwnerUpdErr } = await (svc.from("deals") as any)
       .update({ owner_user_id: prop.owner_user_id })
@@ -359,48 +380,104 @@ export async function POST(
     }
   }
 
-  // IMPORTANT: move the deal out of DRAFT into the review state expected by the DB transition guard.
-  // This prevents invalid transition DRAFT -> ACTIVE on owner accept.
-  // Sprint 13: do NOT update deals.status here.
-  // The DB transition guard does not allow DRAFT -> UNDER_REVIEW (or DRAFT -> ACTIVE).
-  // Deal lifecycle alignment will be handled in a future sprint.
-
-  await (svc.from("deal_events") as any).insert({
+  const { error: eventErr } = await (svc.from("deal_events") as any).insert({
     deal_id: dealId,
     event_type: "offer_submitted",
     payload: { thread_id: thread.id, proposal_id: proposal.id, mode },
     created_by: user.id,
   });
 
-  if (prop.owner_user_id) {
+  if (eventErr) {
+    console.error("submit_offer_event_insert_error", eventErr);
+    return json(500, { error: eventErr.message });
+  }
+
+  const APP = getAppBaseUrlServer();
+  const fromEmail =
+    process.env.RESEND_FROM_EMAIL ?? "notifications@notify.fractpath.com";
+  const propertyAddress = resolvePropertyAddress(canonicalHeader);
+
+  const buyerEmail = normalizeEmail(user.email);
+  const buyerActionUrl = `${APP}/deal/${dealId}`;
+
+  let homeownerEmail: string | null = null;
+
+  if (prop.owner_user_id && prop.owner_user_id !== user.id) {
     try {
       const { data: ownerUser } = await svc.auth.admin.getUserById(
         prop.owner_user_id,
       );
-      const ownerEmail = ownerUser?.user?.email;
-      if (ownerEmail) {
-        const fromEmail =
-          process.env.RESEND_FROM_EMAIL ?? "notifications@notify.fractpath.com";
-        const templateId =
-          process.env.RESEND_TEMPLATE_OFFER_SUBMITTED_ID ??
-          "fractpath-offer-submitted";
-        const APP = getAppBaseUrlServer();
-        await sendTemplateEmail({
-          to: ownerEmail,
-          from: fromEmail,
-          subject: "New offer on your property — FractPath",
-          template: {
-            id: templateId,
-            variables: {
-              ACTION_URL: `${APP}/deal/${dealId}#offer`,
-            },
-          },
-        });
-      }
-    } catch (emailErr: any) {
-      console.error("submit_offer_email_failed", {
+      homeownerEmail = normalizeEmail(ownerUser?.user?.email);
+    } catch (emailLookupErr: any) {
+      console.error("submit_offer_owner_email_lookup_failed", {
         dealId,
         ownerUserId: prop.owner_user_id,
+        error: emailLookupErr?.message,
+      });
+    }
+  }
+
+  if (!homeownerEmail && knownInviteeEmail) {
+    homeownerEmail = knownInviteeEmail;
+  }
+
+  const homeownerActionUrl = `${APP}/deal/${dealId}#offer`;
+
+  console.log("SUBMIT_EMAIL_ROUTING", {
+    dealId,
+    mode,
+    buyerEmail,
+    homeownerEmail,
+    buyerTemplate: process.env.RESEND_TEMPLATE_BUYER_OFFER_SUBMITTED_ID,
+    homeownerTemplate: process.env.RESEND_TEMPLATE_HOMEOWNER_OFFER_SUBMITTED_ID,
+    propertyAddress,
+  });
+
+  if (buyerEmail) {
+    try {
+      await sendTemplateEmail({
+        to: buyerEmail,
+        from: fromEmail,
+        subject: "Your FractPath offer was submitted",
+        template: {
+          id:
+            process.env.RESEND_TEMPLATE_BUYER_OFFER_SUBMITTED_ID ??
+            "fractpath-buyer-offer-submitted-1",
+          variables: {
+            property_address: propertyAddress,
+            ACTION_URL: buyerActionUrl,
+          },
+        },
+      });
+    } catch (emailErr: any) {
+      console.error("submit_offer_buyer_email_failed", {
+        dealId,
+        buyerEmail,
+        error: emailErr?.message,
+      });
+    }
+  }
+
+  if (homeownerEmail) {
+    try {
+      await sendTemplateEmail({
+        to: homeownerEmail,
+        from: fromEmail,
+        subject: "A new FractPath offer is ready for review",
+        template: {
+          id:
+            process.env.RESEND_TEMPLATE_HOMEOWNER_OFFER_SUBMITTED_ID ??
+            "fractpath-homeowner-offer-submitted",
+          variables: {
+            property_address: propertyAddress,
+            ACTION_URL: homeownerActionUrl,
+          },
+        },
+      });
+    } catch (emailErr: any) {
+      console.error("submit_offer_homeowner_email_failed", {
+        dealId,
+        homeownerEmail,
         error: emailErr?.message,
       });
     }

@@ -8,6 +8,23 @@ function json(status: number, body: any) {
   return NextResponse.json(body, { status });
 }
 
+function normalizeEmail(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().toLowerCase();
+  return trimmed && trimmed.includes("@") ? trimmed : null;
+}
+
+function resolvePropertyAddress(
+  canonicalHeader: Record<string, unknown> | undefined,
+): string {
+  const displayAddress =
+    typeof canonicalHeader?.display_address === "string"
+      ? canonicalHeader.display_address.trim()
+      : "";
+
+  return displayAddress || "this property";
+}
+
 export async function POST(
   req: Request,
   ctx: { params: Promise<{ proposalId: string }> },
@@ -149,43 +166,80 @@ export async function POST(
     });
   }
 
-  const otherPartyId = isBuyer
-    ? (thread.owner_user_id ?? null)
-    : thread.buyer_user_id;
+  let canonicalHeader: Record<string, unknown> | undefined;
+  try {
+    const { data: headerEv } = await (svc.from("deal_events") as any)
+      .select("payload")
+      .eq("deal_id", resolvedDealId)
+      .eq("event_type", "DEAL_HEADER_UPDATED")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-  async function sendNotificationEmail(
-    eventType: "accepted" | "rejected",
-    templateEnvKey: string,
-    templateAlias: string,
-    subject: string,
-  ) {
-    if (!otherPartyId) return;
+    if (headerEv?.payload && typeof headerEv.payload === "object") {
+      const p = headerEv.payload;
+      if (p.property_id || p.display_address || p.title) {
+        canonicalHeader = {
+          title: p.title ?? null,
+          property_id: p.property_id ?? null,
+          display_address: p.display_address ?? null,
+          property_status: p.property_status ?? null,
+          ownership_status: p.ownership_status ?? null,
+        };
+      }
+    }
+  } catch (headerReadErr: any) {
+    console.error(
+      "owner_decision_canonical_header_read_error",
+      headerReadErr?.message,
+    );
+  }
+
+  const propertyAddress = resolvePropertyAddress(canonicalHeader);
+  const appBase = getAppBaseUrlServer();
+  const actionUrl = `${appBase}/deal/${resolvedDealId}`;
+  const fromEmail =
+    process.env.RESEND_FROM_EMAIL ?? "notifications@notify.fractpath.com";
+
+  async function sendEmailToUserId(params: {
+    userId: string | null | undefined;
+    templateId: string | undefined;
+    fallbackTemplate: string;
+    subject: string;
+    logKey: string;
+  }) {
+    if (!params.userId) return;
+
     try {
-      const { data: otherUser } = await svc.auth.admin.getUserById(
-        otherPartyId,
+      const { data: targetUser } = await svc.auth.admin.getUserById(
+        params.userId,
       );
-      const otherEmail = otherUser?.user?.email;
-      if (!otherEmail) return;
+      const targetEmail = normalizeEmail(targetUser?.user?.email);
 
-      const fromEmail =
-        process.env.RESEND_FROM_EMAIL ?? "notifications@notify.fractpath.com";
-      const templateId = process.env[templateEnvKey] ?? templateAlias;
-      const APP = getAppBaseUrlServer();
+      if (!targetEmail) {
+        console.warn(`${params.logKey}_missing_email`, {
+          dealId: resolvedDealId,
+          userId: params.userId,
+        });
+        return;
+      }
+
       await sendTemplateEmail({
-        to: otherEmail,
+        to: targetEmail,
         from: fromEmail,
-        subject,
+        subject: params.subject,
         template: {
-          id: templateId,
+          id: params.templateId ?? params.fallbackTemplate,
           variables: {
-            ACTION_URL: `${APP}/deal/${resolvedDealId}`,
+            property_address: propertyAddress,
+            ACTION_URL: actionUrl,
           },
         },
       });
     } catch (emailErr: any) {
-      console.error(`decision_${eventType}_email_failed`, {
+      console.error(`${params.logKey}_failed`, {
         dealId: resolvedDealId,
-        otherPartyId,
+        userId: params.userId,
         error: emailErr?.message,
       });
     }
@@ -238,12 +292,35 @@ export async function POST(
       return json(500, { ok: false, error: tUpdErr.message });
     }
 
-    await sendNotificationEmail(
-      "accepted",
-      "RESEND_TEMPLATE_OFFER_ACCEPTED_ID",
-      "fractpath-offer-accepted",
-      "Your offer has been accepted — FractPath",
-    );
+    const finalOwnerUserId =
+      (threadPatch.owner_user_id as string | undefined) ??
+      (thread.owner_user_id as string | null);
+
+    console.log("OWNER_DECISION_ACCEPT_EMAIL_ROUTING", {
+      dealId: resolvedDealId,
+      buyerUserId: thread.buyer_user_id,
+      ownerUserId: finalOwnerUserId,
+      buyerTemplate: process.env.RESEND_TEMPLATE_BUYER_OFFER_ACCEPTED_ID,
+      homeownerTemplate: process.env.RESEND_TEMPLATE_HOMEOWNER_OFFER_ACCEPTED_ID,
+      propertyAddress,
+    });
+
+    await Promise.all([
+      sendEmailToUserId({
+        userId: thread.buyer_user_id,
+        templateId: process.env.RESEND_TEMPLATE_BUYER_OFFER_ACCEPTED_ID,
+        fallbackTemplate: "fractpath-buyer-offer-accepted",
+        subject: "Your FractPath offer was accepted",
+        logKey: "buyer_offer_accepted_email",
+      }),
+      sendEmailToUserId({
+        userId: finalOwnerUserId,
+        templateId: process.env.RESEND_TEMPLATE_HOMEOWNER_OFFER_ACCEPTED_ID,
+        fallbackTemplate: "fractpath-homeowner-offer-accepted",
+        subject: "You accepted the FractPath offer",
+        logKey: "homeowner_offer_accepted_email",
+      }),
+    ]);
 
     return json(200, {
       ok: true,
@@ -297,12 +374,35 @@ export async function POST(
     return json(500, { ok: false, error: tUpdErr.message });
   }
 
-  await sendNotificationEmail(
-    "rejected",
-    "RESEND_TEMPLATE_OFFER_REJECTED_ID",
-    "fractpath-offer-rejected",
-    "Update on your offer — FractPath",
-  );
+  const finalOwnerUserId =
+    (threadPatch.owner_user_id as string | undefined) ??
+    (thread.owner_user_id as string | null);
+
+  console.log("OWNER_DECISION_REJECT_EMAIL_ROUTING", {
+    dealId: resolvedDealId,
+    buyerUserId: thread.buyer_user_id,
+    ownerUserId: finalOwnerUserId,
+    buyerTemplate: process.env.RESEND_TEMPLATE_BUYER_OFFER_REJECTED_ID,
+    homeownerTemplate: process.env.RESEND_TEMPLATE_HOMEOWNER_OFFER_REJECTED_ID,
+    propertyAddress,
+  });
+
+  await Promise.all([
+    sendEmailToUserId({
+      userId: thread.buyer_user_id,
+      templateId: process.env.RESEND_TEMPLATE_BUYER_OFFER_REJECTED_ID,
+      fallbackTemplate: "fractpath-buyer-offer-rejected",
+      subject: "Your FractPath offer was declined",
+      logKey: "buyer_offer_rejected_email",
+    }),
+    sendEmailToUserId({
+      userId: finalOwnerUserId,
+      templateId: process.env.RESEND_TEMPLATE_HOMEOWNER_OFFER_REJECTED_ID,
+      fallbackTemplate: "fractpath-homeowner-offer-rejected",
+      subject: "You declined the FractPath offer",
+      logKey: "homeowner_offer_rejected_email",
+    }),
+  ]);
 
   return json(200, {
     ok: true,
