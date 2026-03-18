@@ -1,5 +1,34 @@
 import type { DocuSignEnvConfig, DocuSignTokenResult } from "./types";
 
+// ============================================================
+// In-memory token cache (simple — safe for single-process server)
+// ============================================================
+let _cachedToken: DocuSignTokenResult | null = null;
+let _cachedTokenExpiry = 0; // Unix seconds
+
+const TOKEN_BUFFER_SECONDS = 120; // refresh 2 min before expiry
+
+/**
+ * Returns a valid DocuSign access token, using the in-memory cache
+ * when the token is still valid.  Falls through to JWT grant if not.
+ */
+export async function getDocusignAccessToken(
+  config: DocuSignEnvConfig,
+): Promise<DocuSignTokenResult> {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if (_cachedToken && nowSeconds < _cachedTokenExpiry - TOKEN_BUFFER_SECONDS) {
+    return _cachedToken;
+  }
+  const result = await getJwtToken(config);
+  _cachedToken = result;
+  _cachedTokenExpiry = nowSeconds + result.expires_in;
+  return result;
+}
+
+/**
+ * Performs a DocuSign JWT Bearer grant and returns the token response.
+ * Errors do NOT include secret values (key, token) in the message.
+ */
 export async function getJwtToken(
   config: DocuSignEnvConfig,
 ): Promise<DocuSignTokenResult> {
@@ -34,20 +63,32 @@ export async function getJwtToken(
     assertion: jwt,
   });
 
-  const res = await fetch(tokenUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-  });
+  let res: Response;
+  try {
+    res = await fetch(tokenUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    });
+  } catch (networkErr) {
+    throw new Error(
+      `DocuSign JWT auth: network error reaching ${tokenUrl}. ` +
+      `Check DOCUSIGN_AUTH_SERVER. Details: ${networkErr instanceof Error ? networkErr.message : String(networkErr)}`
+    );
+  }
 
   const rawBody = await res.text();
 
   if (!res.ok) {
+    // Log status + body excerpt; never log the JWT assertion or private key
     console.error("docusign_jwt_auth_error", {
       status: res.status,
-      body: rawBody,
+      body: rawBody.slice(0, 400),
     });
-    throw new Error(`DocuSign JWT auth failed (${res.status}): ${rawBody}`);
+    throw new Error(
+      `DocuSign JWT auth failed (HTTP ${res.status}). ` +
+      `Ensure the integration key has user consent and the key pair is valid.`
+    );
   }
 
   const result = JSON.parse(rawBody) as DocuSignTokenResult;
