@@ -257,7 +257,7 @@ function buildTrackerStages(
             : "An error occurred. Contact support.",
         timestamp:
           state === "declined"
-            ? fmt(packet?.voided_at)
+            ? fmt(packet?.declined_at)
             : state === "voided"
             ? fmt(packet?.voided_at)
             : undefined,
@@ -521,8 +521,8 @@ export function SignatureCard({
         <p className="text-xs text-muted-foreground">{copy}</p>
       )}
 
-      {/* Tracker — shown in all states except pre-acceptance */}
-      {state !== "pre_acceptance" && stages.length > 0 && (
+      {/* Tracker — always shown; pre-acceptance uses a muted preview state */}
+      {stages.length > 0 && (
         <div className="pt-1">
           <SignatureTracker stages={stages} />
         </div>

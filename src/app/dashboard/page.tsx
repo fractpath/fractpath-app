@@ -711,19 +711,43 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   const allKnownDealIds = Array.from(byId.keys());
   const headerEventByDeal = new Map<string, Record<string, any>>();
+  const sigPacketsByDealId = new Map<string, any>();
 
-  if (allKnownDealIds.length > 0) {
-    const svcHeaders = createServiceClient();
-    const { data: headerEvents } = await (svcHeaders.from("deal_events") as any)
-      .select("deal_id, payload")
-      .in("deal_id", allKnownDealIds)
-      .eq("event_type", "DEAL_HEADER_UPDATED")
-      .order("created_at", { ascending: false });
+  const acceptedDealIdsForSig = Array.from(acceptedThreadDealIds);
 
-    for (const ev of headerEvents ?? []) {
-      if (ev?.deal_id && ev?.payload && !headerEventByDeal.has(ev.deal_id)) {
-        headerEventByDeal.set(ev.deal_id, ev.payload);
-      }
+  const [headerFetchResult, sigFetchResult] = await Promise.all([
+    allKnownDealIds.length > 0
+      ? ((): Promise<any> => {
+          const svcHeaders = createServiceClient();
+          return (svcHeaders.from("deal_events") as any)
+            .select("deal_id, payload")
+            .in("deal_id", allKnownDealIds)
+            .eq("event_type", "DEAL_HEADER_UPDATED")
+            .order("created_at", { ascending: false });
+        })()
+      : Promise.resolve({ data: [] }),
+    acceptedDealIdsForSig.length > 0
+      ? ((): Promise<any> => {
+          const svcSig = createServiceClient();
+          return (svcSig.from("deal_signature_packets") as any)
+            .select(
+              "deal_id, status, packet_version, sent_at, completed_at, declined_at, voided_at, updated_at, created_at",
+            )
+            .in("deal_id", acceptedDealIdsForSig)
+            .order("created_at", { ascending: false });
+        })()
+      : Promise.resolve({ data: [] }),
+  ]);
+
+  for (const ev of headerFetchResult.data ?? []) {
+    if (ev?.deal_id && ev?.payload && !headerEventByDeal.has(ev.deal_id)) {
+      headerEventByDeal.set(ev.deal_id, ev.payload);
+    }
+  }
+
+  for (const pkt of sigFetchResult.data ?? []) {
+    if (pkt?.deal_id && !sigPacketsByDealId.has(pkt.deal_id)) {
+      sigPacketsByDealId.set(pkt.deal_id, pkt);
     }
   }
 
@@ -756,6 +780,75 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         (typeof h?.ownership_status === "string" ? h.ownership_status : null),
     };
   }
+
+  type SigNotificationVm = {
+    dealId: string;
+    href: string;
+    dealTitle: string;
+    dealAddress: string | null;
+    milestoneLabel: string;
+    tone: string;
+    timestamp: string | null;
+    priority: number;
+  };
+
+  const SIG_MILESTONE_MAP: Record<
+    string,
+    { label: string; tone: string; priority: number }
+  > = {
+    prepared: { label: "Agreement prepared", tone: "amber", priority: 2 },
+    sent: { label: "Signature request sent", tone: "blue", priority: 2 },
+    delivered: { label: "Signature request sent", tone: "blue", priority: 2 },
+    partially_signed: { label: "Partially signed", tone: "blue", priority: 2 },
+    completed: {
+      label: "Agreement fully executed",
+      tone: "emerald",
+      priority: 1,
+    },
+    declined: { label: "Signature declined", tone: "red", priority: 1 },
+    voided: { label: "Signature voided", tone: "gray", priority: 3 },
+    error: { label: "Signature needs attention", tone: "red", priority: 1 },
+  };
+
+  const SIG_TONE_CLASSES: Record<string, string> = {
+    amber: "bg-amber-100 text-amber-800",
+    blue: "bg-blue-100 text-blue-800",
+    emerald: "bg-emerald-100 text-emerald-800",
+    red: "bg-red-100 text-red-800",
+    gray: "bg-gray-100 text-gray-700",
+  };
+
+  const sigNotifications: SigNotificationVm[] = [];
+  for (const [dealId, pkt] of sigPacketsByDealId.entries()) {
+    const milestone = SIG_MILESTONE_MAP[pkt.status as string];
+    if (!milestone) continue;
+    const header = getHeaderForDeal(dealId);
+    const ts: string | null =
+      pkt.completed_at ??
+      pkt.declined_at ??
+      pkt.voided_at ??
+      pkt.sent_at ??
+      pkt.updated_at ??
+      pkt.created_at ??
+      null;
+    sigNotifications.push({
+      dealId,
+      href: `/deal/${dealId}`,
+      dealTitle:
+        (header.title ?? "").trim() !== "" ? header.title! : "Untitled deal",
+      dealAddress: header.display_address,
+      milestoneLabel: milestone.label,
+      tone: milestone.tone,
+      timestamp: ts,
+      priority: milestone.priority,
+    });
+  }
+  sigNotifications.sort((a, b) => {
+    if (a.priority !== b.priority) return a.priority - b.priority;
+    const ta = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+    const tb = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+    return tb - ta;
+  });
 
   function buildCardVm(
     dealId: string,
@@ -1092,6 +1185,54 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                   statusTone={vm.statusTone}
                   roleChipLabel={vm.roleChipLabel}
                 />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {sigNotifications.length > 0 && (
+          <section className="space-y-4" data-testid="signature-milestones-section">
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-semibold">Signature milestones</h2>
+                <span className="inline-flex items-center justify-center rounded-full bg-blue-100 text-blue-800 text-xs font-semibold min-w-[20px] h-5 px-1.5">
+                  {sigNotifications.length}
+                </span>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Agreement signature status for your active deals
+              </p>
+            </div>
+
+            <div className="rounded-lg border divide-y overflow-hidden">
+              {sigNotifications.map((n) => (
+                <a
+                  key={n.dealId}
+                  href={n.href}
+                  className="flex items-start justify-between p-4 hover:bg-muted/50 transition-colors"
+                  data-testid="sig-notification-row"
+                >
+                  <div className="space-y-0.5 min-w-0 mr-3">
+                    <div className="text-sm font-medium truncate">{n.dealTitle}</div>
+                    {n.dealAddress && (
+                      <div className="text-xs text-muted-foreground truncate">
+                        {n.dealAddress}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span
+                      className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${SIG_TONE_CLASSES[n.tone] ?? "bg-gray-100 text-gray-700"}`}
+                    >
+                      {n.milestoneLabel}
+                    </span>
+                    {n.timestamp && (
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">
+                        {relativeAge(n.timestamp, NOW_MS)}
+                      </span>
+                    )}
+                  </div>
+                </a>
               ))}
             </div>
           </section>
