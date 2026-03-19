@@ -54,7 +54,10 @@ export function loadConfig(): DocuSignEnvConfig {
   const privateKey = rawKey.replace(/\\n/g, "\n");
 
   const rawBasePath = process.env.DOCUSIGN_BASE_PATH!.replace(/\/+$/, "");
-  const rawAuthServer = process.env.DOCUSIGN_AUTH_SERVER!.replace(/\/+$/, "");
+  const authServerInput = process.env.DOCUSIGN_AUTH_SERVER!.trim().replace(/\/+$/, "");
+  const rawAuthServer = /^https?:\/\//i.test(authServerInput)
+    ? authServerInput
+    : `https://${authServerInput}`;
 
   const env = process.env.DOCUSIGN_ENV === "production" ? "production" : "demo";
 

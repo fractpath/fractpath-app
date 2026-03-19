@@ -199,23 +199,9 @@ CREATE POLICY "sig_recipients_deny_delete"
 
 -- ============================================================
 -- 7. RLS: deal_signature_events
---    SELECT: user has active grant on the parent deal (join through packet)
+--    No end-user SELECT access
 --    No client INSERT / UPDATE / DELETE
 -- ============================================================
-DROP POLICY IF EXISTS "sig_events_select_via_deal_grant" ON public.deal_signature_events;
-CREATE POLICY "sig_events_select_via_deal_grant"
-  ON public.deal_signature_events
-  FOR SELECT
-  TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1
-      FROM public.deal_signature_packets p
-      WHERE p.id = packet_id
-        AND public.has_active_deal_grant(p.deal_id, auth.uid())
-    )
-  );
-
 DROP POLICY IF EXISTS "sig_events_deny_insert" ON public.deal_signature_events;
 CREATE POLICY "sig_events_deny_insert"
   ON public.deal_signature_events
