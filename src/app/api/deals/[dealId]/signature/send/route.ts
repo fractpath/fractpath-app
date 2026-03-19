@@ -144,19 +144,20 @@ export async function POST(
         meta: { reason: "docusign_api_error" },
       }, sendError);
 
-      // Persist error state so packet is not stuck as 'prepared' after a failed send
+      
+      // Preserve the prepared packet for safe operator retry; record only the last error.
       await (svc.from("deal_signature_packets") as any)
         .update({
-          status: "error",
           last_error: sendError.message.slice(0, 2000),
         })
         .eq("id", latestPacket.id);
 
       return jsonError(
-        "Failed to send envelope through DocuSign. The packet has been marked as error. Check logs and try again.",
+        "Failed to send envelope through DocuSign. The packet remains in prepared status so it can be retried after the issue is fixed.",
         500,
         { packetId: latestPacket.id, detail: sendError.message },
       );
+
     }
 
     const providerEnvelopeId = envelopeSummary.envelopeId ?? null;
