@@ -171,16 +171,8 @@ export async function POST(request: NextRequest) {
   }
 
   // 8. Persist raw event row BEFORE any reconciliation
-  const eventPayload: Record<string, unknown> = {
-    event: providerEventType,
-    envelopeId,
-    envelopeStatus: parsed.envelopeStatus,
-    // Deliberately minimal — do not store full payload to avoid PII exposure
-    signerCount: parsed.signers.length,
-    completedAt: parsed.completedAt,
-    declinedAt: parsed.declinedAt,
-    voidedAt: parsed.voidedAt,
-  };
+  const eventPayload = parsed.raw as Record<string, unknown>;
+
 
   const { error: eventInsertErr } = await (
     svc.from("deal_signature_events") as any
@@ -211,6 +203,8 @@ export async function POST(request: NextRequest) {
   });
 
   // 9. Reconcile packet status
+  let didTransitionToCompleted = false;
+
   const nextStatus = reconcilePacketStatus(
     currentStatus as any,
     parsed,
@@ -241,15 +235,22 @@ export async function POST(request: NextRequest) {
       .eq("id", packetId);
 
     if (packetUpdateErr) {
-      logSigError("docusign_packet_reconciled", {
-        packetId,
-        dealId,
-        envelopeId,
-        status: nextStatus,
-        meta: { reason: "packet_update_failed" },
-      }, new Error(packetUpdateErr.message));
+      logSigError(
+        "docusign_packet_reconciled",
+        {
+          packetId,
+          dealId,
+          envelopeId,
+          status: nextStatus,
+          meta: { reason: "packet_update_failed" },
+        },
+        new Error(packetUpdateErr.message),
+      );
     } else {
       reconciledStatus = nextStatus;
+      if (nextStatus === "completed" && currentStatus !== "completed") {
+        didTransitionToCompleted = true;
+      }
       logSigInfo("docusign_packet_reconciled", {
         packetId,
         dealId,
@@ -265,6 +266,8 @@ export async function POST(request: NextRequest) {
       .update({ provider_last_status: parsed.envelopeStatus })
       .eq("id", packetId);
   }
+
+
 
   // 10. Reconcile recipient rows
   if (parsed.signers.length > 0) {
@@ -323,7 +326,9 @@ export async function POST(request: NextRequest) {
   }
 
   // 11. Completion hook
-  if (reconciledStatus === "completed") {
+    // 11. Completion hook (transition-only)
+    if (didTransitionToCompleted) {
+
     try {
       await onPacketCompleted({
         packet: {

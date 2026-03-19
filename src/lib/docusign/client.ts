@@ -149,7 +149,6 @@ export async function listEnvelopeRecipients(
 
 /**
  * Lists documents attached to a completed envelope.
- * Used later for artifact retrieval (Prompt 2+).
  */
 export async function getEnvelopeDocuments(
   client: DocuSignClient,
@@ -159,6 +158,46 @@ export async function getEnvelopeDocuments(
     client,
     `/envelopes/${envelopeId}/documents`
   );
+}
+
+export interface DocuSignDocumentDownload {
+  bytes: Buffer;
+  contentType: string;
+  filename?: string;
+}
+
+/**
+ * Downloads raw document bytes for a specific document in an envelope.
+ * documentId: "combined" = merged completed agreement, "certificate" = completion certificate,
+ * or a numeric string for an individual uploaded document.
+ * Returns raw bytes — never logs them.
+ */
+export async function downloadEnvelopeDocument(
+  client: DocuSignClient,
+  envelopeId: string,
+  documentId: string,
+): Promise<DocuSignDocumentDownload> {
+  const url = `${accountBase(client)}/envelopes/${envelopeId}/documents/${documentId}`;
+  const res = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${client.accessToken}`,
+      Accept: "application/pdf, application/octet-stream, */*",
+    },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "(no body)");
+    throw new Error(
+      `DocuSign document download failed [envelopeId=${envelopeId}, documentId=${documentId}] ` +
+      `(${res.status}): ${body.slice(0, 400)}`
+    );
+  }
+  const arrayBuffer = await res.arrayBuffer();
+  const bytes = Buffer.from(arrayBuffer);
+  const contentType = res.headers.get("Content-Type") ?? "application/pdf";
+  const cd = res.headers.get("Content-Disposition") ?? "";
+  const filenameMatch = cd.match(/filename[^;=\n]*=["']?([^"'\n]*)["']?/i);
+  const filename = filenameMatch?.[1]?.trim() || undefined;
+  return { bytes, contentType, filename };
 }
 
 // ============================================================
