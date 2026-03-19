@@ -23,6 +23,15 @@ const LABELS: Record<string, string> = {
   ACCESS_REVOKED: "Access revoked",
   SHARE_TOKEN_MINTED: "Share link created",
   SHARE_TOKEN_REDEEMED: "Share link redeemed",
+  // Signature lifecycle events
+  signature_agreement_prepared: "Agreement prepared",
+  signature_request_sent: "Signature request sent",
+  signature_buyer_signed: "Buyer signed",
+  signature_owner_signed: "Owner signed",
+  signature_fully_executed: "Agreement fully executed",
+  signature_documents_stored: "Executed documents stored",
+  signature_declined: "Signature declined",
+  signature_voided: "Signature voided",
 };
 
 const TONES: Record<string, string> = {
@@ -30,6 +39,15 @@ const TONES: Record<string, string> = {
   offer_withdrawn: "bg-amber-100 text-amber-800",
   offer_accepted: "bg-green-100 text-green-800",
   offer_declined: "bg-red-100 text-red-800",
+  // Signature lifecycle tones
+  signature_agreement_prepared: "bg-amber-100 text-amber-800",
+  signature_request_sent: "bg-blue-100 text-blue-800",
+  signature_buyer_signed: "bg-blue-100 text-blue-800",
+  signature_owner_signed: "bg-blue-100 text-blue-800",
+  signature_fully_executed: "bg-green-100 text-green-800",
+  signature_documents_stored: "bg-green-100 text-green-800",
+  signature_declined: "bg-red-100 text-red-800",
+  signature_voided: "bg-gray-100 text-gray-600",
 };
 
 function detailLine(payload: Record<string, any> | null, eventType: string): string | null {

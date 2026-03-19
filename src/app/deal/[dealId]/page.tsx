@@ -9,6 +9,10 @@ import { DealActivityFeed } from "@/components/deal/DealActivityFeed";
 import { NegotiationSection } from "@/components/deal/NegotiationSection";
 import { WaitingBanner } from "@/components/deal/WaitingBanner";
 import { RecomputeSnapshotButton } from "@/components/deal/RecomputeSnapshotButton";
+import { SignatureCard } from "@/components/deal/SignatureCard";
+import type { SignaturePacketView, SignatureRecipientView } from "@/components/deal/SignatureCard";
+import { requireAdmin } from "@/lib/auth/requireAdmin";
+import { getArtifactSignedUrls } from "@/lib/signature/artifacts";
 
 type PageProps = {
   params: Promise<{ dealId: string }>;
@@ -117,6 +121,84 @@ async function loadNegotiationState(
     isBuyer,
     isOwnerSide: !isBuyer,
   };
+}
+
+// ============================================================
+// Signature data helper
+// ============================================================
+
+type SignatureData = {
+  packet: SignaturePacketView | null;
+  recipients: SignatureRecipientView[];
+  execAgreementUrl: string | null;
+  certificateUrl: string | null;
+};
+
+async function loadSignatureData(
+  svc: ReturnType<typeof createServiceClient>,
+  dealId: string,
+): Promise<SignatureData> {
+  try {
+    const { data: packet } = await (svc.from("deal_signature_packets") as any)
+      .select(
+        "id, status, provider, sent_at, completed_at, voided_at, declined_at, " +
+        "executed_document_path, certificate_document_path"
+      )
+      .eq("deal_id", dealId)
+      .order("packet_version", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!packet) return { packet: null, recipients: [], execAgreementUrl: null, certificateUrl: null };
+
+    const { data: recipRows } = await (svc.from("deal_signature_recipients") as any)
+      .select("role, display_name, email, provider_status, signed_at")
+      .eq("packet_id", packet.id)
+      .order("routing_order", { ascending: true });
+
+    const recipients: SignatureRecipientView[] = (recipRows ?? []).map((r: any) => ({
+      role: r.role,
+      display_name: r.display_name ?? null,
+      email: r.email ?? null,
+      provider_status: r.provider_status ?? null,
+      signed_at: r.signed_at ?? null,
+    }));
+
+    let execAgreementUrl: string | null = null;
+    let certificateUrl: string | null = null;
+
+    if (packet.status === "completed") {
+      try {
+        const urls = await getArtifactSignedUrls(
+          packet.executed_document_path ?? null,
+          packet.certificate_document_path ?? null,
+        );
+        execAgreementUrl = urls.executed_agreement_url;
+        certificateUrl = urls.certificate_url;
+      } catch {
+        // non-fatal
+      }
+    }
+
+    return {
+      packet: {
+        id: packet.id,
+        status: packet.status,
+        provider: packet.provider ?? "docusign",
+        sent_at: packet.sent_at ?? null,
+        completed_at: packet.completed_at ?? null,
+        voided_at: packet.voided_at ?? null,
+        declined_at: packet.declined_at ?? null,
+        executed_document_path: packet.executed_document_path ?? null,
+        certificate_document_path: packet.certificate_document_path ?? null,
+      },
+      recipients,
+      execAgreementUrl,
+      certificateUrl,
+    };
+  } catch {
+    return { packet: null, recipients: [], execAgreementUrl: null, certificateUrl: null };
+  }
 }
 
 export default async function DealPage(ctx: PageProps) {
@@ -283,6 +365,12 @@ export default async function DealPage(ctx: PageProps) {
       .order("created_at", { ascending: false })
       .limit(50);
 
+    const [sigData, adminResult] = await Promise.all([
+      loadSignatureData(svc, dealId),
+      requireAdmin(),
+    ]);
+    const isAdmin = adminResult.ok;
+
     return (
       <div className="min-h-screen">
         <AppHeader />
@@ -319,6 +407,16 @@ export default async function DealPage(ctx: PageProps) {
                 isOwnerSide={negState.isOwnerSide}
               />
             )}
+
+          <SignatureCard
+            dealId={dealId}
+            threadStatus={effectiveThread?.status ?? null}
+            packet={sigData.packet}
+            recipients={sigData.recipients}
+            isAdmin={isAdmin}
+            execAgreementUrl={sigData.execAgreementUrl}
+            certificateUrl={sigData.certificateUrl}
+          />
 
           <DealDetailWidgetPanel
             dealId={dealId}
@@ -667,6 +765,12 @@ export default async function DealPage(ctx: PageProps) {
     const fallbackIsOwner =
       directOwnerMatches || threadOwnerMatches || grantMatches;
 
+    const [fallbackSigData, fallbackAdminResult] = await Promise.all([
+      loadSignatureData(svc, dealId),
+      requireAdmin(),
+    ]);
+    const fallbackIsAdmin = fallbackAdminResult.ok;
+
     return (
       <div className="min-h-screen">
         <AppHeader />
@@ -703,6 +807,16 @@ export default async function DealPage(ctx: PageProps) {
                 isOwnerSide={negState.isOwnerSide}
               />
             )}
+
+          <SignatureCard
+            dealId={dealId}
+            threadStatus={effectiveThread?.status ?? null}
+            packet={fallbackSigData.packet}
+            recipients={fallbackSigData.recipients}
+            isAdmin={fallbackIsAdmin}
+            execAgreementUrl={fallbackSigData.execAgreementUrl}
+            certificateUrl={fallbackSigData.certificateUrl}
+          />
 
           <DealDetailWidgetPanel
             dealId={dealId}
