@@ -628,7 +628,17 @@ export default async function DealPage(ctx: PageProps) {
     grantMatches ||
     inviteMatches;
 
-  const allowDealFallback = ownerMatches;
+  let allowDealFallback = ownerMatches;
+
+  // Admin override: if no normal entitlement path matches, allow authenticated
+  // admins to view the deal via the service-client fallback path.
+  // fallbackIsOwner will be false (no edit rights), fallbackIsAdmin will be true.
+  if (!allowDealFallback) {
+    const adminCheck = await requireAdmin();
+    if (adminCheck.ok) {
+      allowDealFallback = true;
+    }
+  }
 
   if (allowDealFallback) {
     const { data: archivedCheck } = await (svc.from("deals") as any)
