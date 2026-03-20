@@ -10,6 +10,7 @@ import {
   logSigInfo,
   logSigError,
 } from "@/lib/signature/logging";
+import { insertSigDealEventIfMissing } from "@/lib/signature/dealEvents";
 import { loadConfig } from "@/lib/docusign/config";
 import { createDocusignClient, createEnvelopeFromTemplate } from "@/lib/docusign/client";
 
@@ -211,6 +212,16 @@ export async function POST(
       provider: "docusign",
       status: "sent",
       meta: { packetVersion: updatedPacket.packet_version },
+    });
+
+    // Write normalized deal event (non-fatal, idempotent)
+    await insertSigDealEventIfMissing({
+      svc,
+      dealId,
+      eventType: "signature_request_sent",
+      packetId: updatedPacket.id as string,
+      packetVersion: updatedPacket.packet_version as number,
+      envelopeId: providerEnvelopeId,
     });
 
     return NextResponse.json({

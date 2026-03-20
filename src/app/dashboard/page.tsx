@@ -715,28 +715,30 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   const acceptedDealIdsForSig = Array.from(acceptedThreadDealIds);
 
-  const [headerFetchResult, sigFetchResult] = await Promise.all([
+  const svcDash = createServiceClient();
+
+  const headerFetchPromise: Promise<{ data: any[] | null }> =
     allKnownDealIds.length > 0
-      ? ((): Promise<any> => {
-          const svcHeaders = createServiceClient();
-          return (svcHeaders.from("deal_events") as any)
-            .select("deal_id, payload")
-            .in("deal_id", allKnownDealIds)
-            .eq("event_type", "DEAL_HEADER_UPDATED")
-            .order("created_at", { ascending: false });
-        })()
-      : Promise.resolve({ data: [] }),
+      ? (svcDash.from("deal_events") as any)
+          .select("deal_id, payload")
+          .in("deal_id", allKnownDealIds)
+          .eq("event_type", "DEAL_HEADER_UPDATED")
+          .order("created_at", { ascending: false })
+      : Promise.resolve({ data: [] });
+
+  const sigFetchPromise: Promise<{ data: any[] | null }> =
     acceptedDealIdsForSig.length > 0
-      ? ((): Promise<any> => {
-          const svcSig = createServiceClient();
-          return (svcSig.from("deal_signature_packets") as any)
-            .select(
-              "deal_id, status, packet_version, sent_at, completed_at, declined_at, voided_at, updated_at, created_at",
-            )
-            .in("deal_id", acceptedDealIdsForSig)
-            .order("created_at", { ascending: false });
-        })()
-      : Promise.resolve({ data: [] }),
+      ? (svcDash.from("deal_signature_packets") as any)
+          .select(
+            "deal_id, status, packet_version, sent_at, completed_at, declined_at, voided_at, updated_at, created_at",
+          )
+          .in("deal_id", acceptedDealIdsForSig)
+          .order("created_at", { ascending: false })
+      : Promise.resolve({ data: [] });
+
+  const [headerFetchResult, sigFetchResult] = await Promise.all([
+    headerFetchPromise,
+    sigFetchPromise,
   ]);
 
   for (const ev of headerFetchResult.data ?? []) {

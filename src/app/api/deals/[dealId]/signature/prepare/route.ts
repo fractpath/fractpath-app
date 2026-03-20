@@ -18,6 +18,7 @@ import {
   logSigWarn,
   logSigError,
 } from "@/lib/signature/logging";
+import { insertSigDealEventIfMissing } from "@/lib/signature/dealEvents";
 
 export const runtime = "nodejs";
 
@@ -268,6 +269,15 @@ export async function POST(
       provider: "docusign",
       status: "prepared",
       meta: { packetVersion },
+    });
+
+    // Write normalized deal event (non-fatal, idempotent)
+    await insertSigDealEventIfMissing({
+      svc,
+      dealId,
+      eventType: "signature_agreement_prepared",
+      packetId: newPacket.id as string,
+      packetVersion,
     });
 
     return NextResponse.json({

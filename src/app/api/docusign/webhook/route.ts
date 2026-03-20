@@ -24,6 +24,7 @@ import {
   logSigError,
 } from "@/lib/signature/logging";
 import { onPacketCompleted } from "@/lib/signature/completion";
+import { insertSigDealEventIfMissing } from "@/lib/signature/dealEvents";
 
 export const runtime = "nodejs";
 
@@ -259,6 +260,36 @@ export async function POST(request: NextRequest) {
         status: nextStatus,
         meta: { prevStatus: currentStatus },
       });
+
+      // Emit normalized packet-level deal_events on terminal status transitions
+      if (nextStatus === "completed") {
+        await insertSigDealEventIfMissing({
+          svc,
+          dealId,
+          eventType: "signature_fully_executed",
+          packetId,
+          packetVersion: packet.packet_version as number,
+          envelopeId,
+        });
+      } else if (nextStatus === "declined") {
+        await insertSigDealEventIfMissing({
+          svc,
+          dealId,
+          eventType: "signature_declined",
+          packetId,
+          packetVersion: packet.packet_version as number,
+          envelopeId,
+        });
+      } else if (nextStatus === "voided") {
+        await insertSigDealEventIfMissing({
+          svc,
+          dealId,
+          eventType: "signature_voided",
+          packetId,
+          packetVersion: packet.packet_version as number,
+          envelopeId,
+        });
+      }
     }
   } else if (parsed.envelopeStatus) {
     // Always update provider_last_status even when local status doesn't change
@@ -323,12 +354,30 @@ export async function POST(request: NextRequest) {
         },
       });
     }
+
+    // Emit normalized signer deal_events for any recipient that has signed.
+    // Idempotency in insertSigDealEventIfMissing prevents duplicates on
+    // repeated webhook deliveries that re-include all signer statuses.
+    for (const role of ["Buyer", "Owner"] as const) {
+      const update = roleMap[role];
+      if (update?.signedAt) {
+        await insertSigDealEventIfMissing({
+          svc,
+          dealId,
+          eventType:
+            role === "Buyer" ? "signature_buyer_signed" : "signature_owner_signed",
+          packetId,
+          packetVersion: packet.packet_version as number,
+          envelopeId,
+          role,
+          meta: { signed_at: update.signedAt },
+        });
+      }
+    }
   }
 
-  // 11. Completion hook
-    // 11. Completion hook (transition-only)
-    if (didTransitionToCompleted) {
-
+  // 11. Completion hook (transition-only)
+  if (didTransitionToCompleted) {
     try {
       await onPacketCompleted({
         packet: {

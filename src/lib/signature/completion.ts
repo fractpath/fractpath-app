@@ -9,6 +9,8 @@
 import { logSigInfo, logSigError } from "@/lib/signature/logging";
 import type { SignaturePacketRow } from "@/lib/signature/types";
 import { retrieveAndStoreArtifacts } from "@/lib/signature/artifacts";
+import { createServiceClient } from "@/lib/supabase/service";
+import { insertSigDealEventIfMissing } from "@/lib/signature/dealEvents";
 
 export interface PacketCompletedContext {
   packet: Pick<
@@ -72,6 +74,17 @@ export async function onPacketCompleted(ctx: PacketCompletedContext): Promise<vo
         },
         new Error(result.errors.join("; ")),
       );
+    } else {
+      // Artifacts successfully stored (or already were from a prior run).
+      // Emit normalized deal_event. Idempotency check prevents duplicates on retries.
+      await insertSigDealEventIfMissing({
+        svc: createServiceClient(),
+        dealId: dealId ?? "",
+        eventType: "signature_documents_stored",
+        packetId,
+        packetVersion: packet.packet_version,
+        envelopeId,
+      });
     }
   } catch (err: any) {
     logSigError("docusign_artifact_retrieval_failed", { packetId, dealId, envelopeId }, err);
