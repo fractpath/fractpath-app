@@ -51,7 +51,16 @@ export function loadConfig(): DocuSignEnvConfig {
   }
 
   const rawKey = process.env.DOCUSIGN_PRIVATE_KEY!;
-  const privateKey = rawKey.replace(/\\n/g, "\n");
+
+  const privateKey = rawKey
+    .trim()
+    .replace(/^\uFEFF/, "")
+    .replace(/\r/g, "")
+    .replace(/\\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .join("\n");
 
   const rawBasePath = process.env.DOCUSIGN_BASE_PATH!.replace(/\/+$/, "");
   const authServerInput = process.env.DOCUSIGN_AUTH_SERVER!.trim().replace(/\/+$/, "");

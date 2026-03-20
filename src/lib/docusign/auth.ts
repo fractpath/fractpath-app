@@ -51,9 +51,15 @@ export async function getJwtToken(
   const payloadB64 = base64url(JSON.stringify(payload));
   const signingInput = `${headerB64}.${payloadB64}`;
 
+  const keyObject = crypto.createPrivateKey({
+    key: config.privateKey,
+    format: "pem",
+  });
+
   const sign = crypto.createSign("RSA-SHA256");
   sign.update(signingInput);
-  const signature = sign.sign(config.privateKey, "base64url");
+  sign.end();
+  const signature = sign.sign(keyObject, "base64url");
 
   const jwt = `${signingInput}.${signature}`;
 
