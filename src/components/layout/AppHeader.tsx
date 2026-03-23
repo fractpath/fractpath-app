@@ -4,7 +4,7 @@ import Image from "next/image";
 export function AppHeader() {
   return (
     <header className="border-b bg-background">
-      <div className="mx-auto flex h-16 max-w-3xl items-center justify-between px-6">
+      <div className="mx-auto flex h-16 w-full max-w-5xl items-center justify-between px-6">
         <Link href="/dashboard" className="flex items-center gap-2">
           <Image
             src="/brand/FractPath_Logo_Black.png"
