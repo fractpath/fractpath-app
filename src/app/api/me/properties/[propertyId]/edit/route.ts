@@ -85,13 +85,23 @@ export async function PATCH(
           updatePayload.secured_property_debt_amount = amount;
         }
       }
+
       if (formData.get("secured_debt_certified") === "true") {
-        updatePayload.secured_debt_certified_at = new Date().toISOString();
+        const nowIso = new Date().toISOString();
+        const freshUntilIso = new Date(
+          Date.now() + 90 * 24 * 60 * 60 * 1000,
+        ).toISOString();
+
+        updatePayload.secured_debt_certified_at = nowIso;
+        updatePayload.secured_debt_last_verified_at = nowIso;
+        updatePayload.secured_debt_fresh_until = freshUntilIso;
       }
     } else {
       // Clearing debt declaration
       updatePayload.secured_property_debt_amount = null;
       updatePayload.secured_debt_certified_at = null;
+      updatePayload.secured_debt_last_verified_at = null;
+      updatePayload.secured_debt_fresh_until = null;
     }
   }
 

@@ -16,7 +16,9 @@ export type LtvPolicyInputs = {
   latest_verified_fmv: number | null;
   secured_debt_amount: number | null; // pass 0 if no debt; null treated as 0
   ltv_policy_ratio: number; // default 0.75
-  secured_debt_certified_at: string | null; // ISO8601 timestamp of last certification
+  secured_debt_certified_at: string | null; // fallback only
+  secured_debt_last_verified_at: string | null;
+  secured_debt_fresh_until: string | null;
 };
 
 export type LtvPolicyResult = {
@@ -62,17 +64,29 @@ export function computeLtvPolicy(inputs: LtvPolicyInputs): LtvPolicyResult {
   const exceedsExecutable =
     executableMax !== null && totalCommitted > executableMax;
 
-  // Stale = debt certification is older than DEBT_FRESHNESS_DAYS
-  let debtIsStale = false;
-  if (inputs.secured_debt_certified_at) {
-    try {
-      const certifiedAt = new Date(inputs.secured_debt_certified_at);
-      const ageMs = Date.now() - certifiedAt.getTime();
-      const ageDays = ageMs / (1000 * 60 * 60 * 24);
-      debtIsStale = ageDays > LTV_DEBT_FRESHNESS_DAYS;
-    } catch {
-      debtIsStale = false;
-    }
+  // Freshness precedence:
+  // 1) secured_debt_fresh_until
+  // 2) secured_debt_last_verified_at + LTV_DEBT_FRESHNESS_DAYS
+  // 3) secured_debt_certified_at + LTV_DEBT_FRESHNESS_DAYS
+  // 4) otherwise stale / fail closed
+  let debtIsStale = true;
+  const nowMs = Date.now();
+
+  if (inputs.secured_debt_fresh_until) {
+    const freshUntilMs = new Date(inputs.secured_debt_fresh_until).getTime();
+    debtIsStale = !Number.isFinite(freshUntilMs) || freshUntilMs < nowMs;
+  } else if (inputs.secured_debt_last_verified_at) {
+    const verifiedAtMs = new Date(
+      inputs.secured_debt_last_verified_at,
+    ).getTime();
+    debtIsStale =
+      !Number.isFinite(verifiedAtMs) ||
+      nowMs - verifiedAtMs > LTV_DEBT_FRESHNESS_DAYS * 24 * 60 * 60 * 1000;
+  } else if (inputs.secured_debt_certified_at) {
+    const certifiedAtMs = new Date(inputs.secured_debt_certified_at).getTime();
+    debtIsStale =
+      !Number.isFinite(certifiedAtMs) ||
+      nowMs - certifiedAtMs > LTV_DEBT_FRESHNESS_DAYS * 24 * 60 * 60 * 1000;
   }
 
   const verifiedFmvMissing = verifiedFmv === null;

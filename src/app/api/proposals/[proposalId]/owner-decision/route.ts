@@ -175,7 +175,7 @@ export async function POST(
       if (thread.property_id) {
         const { data: pu } = await (svc.from("properties") as any)
           .select(
-            "has_secured_property_debt, secured_property_debt_amount, secured_debt_certified_at, latest_verified_fmv, ltv_policy_ratio",
+            "has_secured_property_debt, secured_property_debt_amount, secured_debt_certified_at, secured_debt_last_verified_at, secured_debt_fresh_until, latest_verified_fmv, ltv_policy_ratio",
           )
           .eq("id", thread.property_id)
           .maybeSingle();
@@ -191,10 +191,7 @@ export async function POST(
       let dealTerms: Record<string, unknown> | null = null;
       if (propTermsRow?.terms_snapshot) {
         const ts = propTermsRow.terms_snapshot;
-        dealTerms =
-          ts?.inputs?.deal_terms ??
-          ts?.deal_terms ??
-          null;
+        dealTerms = ts?.inputs?.deal_terms ?? ts?.deal_terms ?? null;
       }
 
       // Fall back to latest deal snapshot if proposal has no terms
@@ -222,12 +219,15 @@ export async function POST(
         monthly_payment: (dealTerms?.monthly_payment as number | null) ?? null,
         number_of_payments:
           (dealTerms?.number_of_payments as number | null) ?? null,
-        latest_verified_fmv:
-          propUnderwriting?.latest_verified_fmv ?? null,
+        latest_verified_fmv: propUnderwriting?.latest_verified_fmv ?? null,
         secured_debt_amount: debtAmount,
         ltv_policy_ratio: propUnderwriting?.ltv_policy_ratio ?? 0.75,
         secured_debt_certified_at:
           propUnderwriting?.secured_debt_certified_at ?? null,
+        secured_debt_last_verified_at:
+          propUnderwriting?.secured_debt_last_verified_at ?? null,
+        secured_debt_fresh_until:
+          propUnderwriting?.secured_debt_fresh_until ?? null,
       });
 
       if (ltvResult.execution_readiness_blocked_by_underwriting) {

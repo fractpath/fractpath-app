@@ -393,9 +393,22 @@ export async function POST(req: Request) {
   if (hasSecuredDebt !== null) {
     debtColumns.has_secured_property_debt = hasSecuredDebt;
     debtColumns.secured_debt_verification_status = debtVerificationStatus;
+
     if (hasSecuredDebt === true) {
+      const nowIso = new Date().toISOString();
+      const freshUntilIso = new Date(
+        Date.now() + 90 * 24 * 60 * 60 * 1000,
+      ).toISOString();
+
       debtColumns.secured_property_debt_amount = securedDebtAmount;
-      debtColumns.secured_debt_certified_at = new Date().toISOString();
+      debtColumns.secured_debt_certified_at = nowIso;
+      debtColumns.secured_debt_last_verified_at = nowIso;
+      debtColumns.secured_debt_fresh_until = freshUntilIso;
+    } else {
+      debtColumns.secured_property_debt_amount = null;
+      debtColumns.secured_debt_certified_at = null;
+      debtColumns.secured_debt_last_verified_at = null;
+      debtColumns.secured_debt_fresh_until = null;
     }
   }
 

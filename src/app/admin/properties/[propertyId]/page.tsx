@@ -199,6 +199,8 @@ export default async function AdminPropertyAuditPage({
     secured_debt_amount: adminPolicyDebtAmount,
     ltv_policy_ratio: p.ltv_policy_ratio ?? 0.75,
     secured_debt_certified_at: p.secured_debt_certified_at ?? null,
+    secured_debt_last_verified_at: p.secured_debt_last_verified_at ?? null,
+    secured_debt_fresh_until: p.secured_debt_fresh_until ?? null,
   });
 
   return (

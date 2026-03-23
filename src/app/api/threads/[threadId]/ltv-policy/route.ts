@@ -13,7 +13,7 @@ function jsonError(msg: string, status: number) {
 
 // GET /api/threads/[threadId]/ltv-policy
 // Returns LTV policy status for a thread.
-// Accessible to owner-side participants only — buyers are rejected.
+// OWNER-SIDE ONLY — buyers are explicitly rejected at the first auth check.
 // Buyers must NEVER see debt/LTV/underwriting reasons.
 export async function GET(_req: Request, ctx: { params: Promise<Params> }) {
   const { threadId } = await ctx.params;
@@ -27,22 +27,28 @@ export async function GET(_req: Request, ctx: { params: Promise<Params> }) {
 
   const svc = createServiceClient();
 
+  // Fetch thread with buyer_user_id so we can reject buyers immediately
   const { data: thread, error: threadErr } = await (
     svc.from("deal_threads") as any
   )
-    .select("id, property_id, buyer_user_id, owner_user_id, deal_id, status")
+    .select(
+      "id, property_id, deal_id, owner_user_id, buyer_user_id",
+    )
     .eq("id", threadId)
     .maybeSingle();
 
   if (threadErr) return jsonError(threadErr.message, 500);
   if (!thread) return jsonError("Thread not found", 404);
 
-  // Reject buyers immediately — no debt/LTV data for buyer-facing paths
+  // Reject buyers immediately — no debt/LTV data must reach buyer-facing paths
   if (thread.buyer_user_id === user.id) {
     return jsonError("Forbidden", 403);
   }
 
-  // Check owner-side access: thread owner_user_id, property owner, or invited owner
+  // Check owner-side access using the same precedence as owner-decision route:
+  // 1) thread.owner_user_id
+  // 2) property owner_user_id
+  // 3) active thread_invite (intended_role = owner)
   let isOwnerSide = thread.owner_user_id === user.id;
 
   if (!isOwnerSide && thread.property_id) {
@@ -50,7 +56,9 @@ export async function GET(_req: Request, ctx: { params: Promise<Params> }) {
       .select("owner_user_id")
       .eq("id", thread.property_id)
       .maybeSingle();
-    isOwnerSide = propRow?.owner_user_id === user.id;
+    if (propRow?.owner_user_id === user.id) {
+      isOwnerSide = true;
+    }
   }
 
   if (!isOwnerSide && user.email) {
@@ -78,19 +86,21 @@ export async function GET(_req: Request, ctx: { params: Promise<Params> }) {
   if (thread.property_id) {
     const { data: pu } = await (svc.from("properties") as any)
       .select(
-        "id, has_secured_property_debt, secured_property_debt_amount, secured_debt_certified_at, secured_debt_verification_status, latest_verified_fmv, fmv_verified_at, ltv_policy_ratio, max_accessible_cash_current, status",
+        "id, has_secured_property_debt, secured_property_debt_amount, " +
+          "secured_debt_certified_at, secured_debt_last_verified_at, secured_debt_fresh_until, " +
+          "secured_debt_verification_status, latest_verified_fmv, fmv_verified_at, " +
+          "ltv_policy_ratio, max_accessible_cash_current, status",
       )
       .eq("id", thread.property_id)
       .maybeSingle();
     propUnderwriting = pu ?? null;
   }
 
-  // Load deal terms from active proposal or latest snapshot
+  // Load deal terms: prefer active submitted proposal, fall back to latest snapshot
   let dealTerms: Record<string, unknown> | null = null;
   const dealId = thread.deal_id as string | null;
 
   if (dealId) {
-    // Prefer active proposal terms
     const { data: proposals } = await (svc.from("deal_proposals") as any)
       .select("terms_snapshot")
       .eq("thread_id", threadId)
@@ -104,7 +114,6 @@ export async function GET(_req: Request, ctx: { params: Promise<Params> }) {
       dealTerms = ts?.inputs?.deal_terms ?? ts?.deal_terms ?? null;
     }
 
-    // Fall back to latest deal snapshot
     if (!dealTerms) {
       const { data: snap } = await (svc.from("deal_snapshots") as any)
         .select("snapshot_json")
@@ -140,12 +149,16 @@ export async function GET(_req: Request, ctx: { params: Promise<Params> }) {
     ltv_policy_ratio: ltvRatio,
     secured_debt_certified_at:
       propUnderwriting?.secured_debt_certified_at ?? null,
+    secured_debt_last_verified_at:
+      propUnderwriting?.secured_debt_last_verified_at ?? null,
+    secured_debt_fresh_until:
+      propUnderwriting?.secured_debt_fresh_until ?? null,
   });
 
   return NextResponse.json({
     ok: true,
     ...policy,
-    // Owner-only supplemental context
+    // Owner-only supplemental context (never returned to buyers — endpoint is owner-only)
     latest_verified_fmv: propUnderwriting?.latest_verified_fmv ?? null,
     fmv_verified_at: propUnderwriting?.fmv_verified_at ?? null,
     secured_debt_amount: debtAmount,
