@@ -83,12 +83,7 @@ const STATE_LABEL: Record<CardState, string> = {
   error: "Needs attention",
 };
 
-type BadgeTone =
-  | "gray"
-  | "amber"
-  | "blue"
-  | "green"
-  | "red";
+type BadgeTone = "gray" | "amber" | "blue" | "green" | "red";
 
 const STATE_BADGE: Record<CardState, BadgeTone> = {
   pre_acceptance: "gray",
@@ -108,7 +103,8 @@ const STATE_CARD_CLASSES: Record<CardState, string> = {
   prepared: "border-amber-200 bg-amber-50",
   sent: "border-blue-200 bg-blue-50",
   partially_signed: "border-blue-200 bg-blue-50",
-  completed: "border-green-300 bg-green-50",
+  // Neutral/record tone for completed — not a banner, not a success alert
+  completed: "border-gray-200 bg-white",
   declined: "border-red-200 bg-red-50",
   voided: "border-gray-200 bg-gray-50",
   error: "border-red-200 bg-red-50",
@@ -155,95 +151,86 @@ function buildTrackerStages(
   }
 
   const buyerLabel = buyer?.display_name
-    ? `${buyer.display_name}`
+    ? buyer.display_name
     : buyer?.email
-    ? buyer.email
-    : "Buyer";
+      ? buyer.email
+      : "Buyer";
 
   const ownerLabel = owner?.display_name
-    ? `${owner.display_name}`
+    ? owner.display_name
     : owner?.email
-    ? owner.email
-    : "Owner";
+      ? owner.email
+      : "Owner";
 
   type RawStage = TrackerStage & { stageState: TrackerStageState };
+
+  const dealAcceptedState: TrackerStageState =
+    state === "pre_acceptance" ? "pending" : "complete";
+
+  const agreementPreparedState: TrackerStageState =
+    state === "pre_acceptance" || state === "ready" ? "pending" : "complete";
+
+  const sentForSignatureState: TrackerStageState =
+    state === "sent" || state === "partially_signed" || state === "completed"
+      ? "complete"
+      : "pending";
+
+  const buyerStageState: TrackerStageState = buyerSigned
+    ? "complete"
+    : state === "sent" || state === "partially_signed"
+      ? "active"
+      : "pending";
+
+  const ownerStageState: TrackerStageState = ownerSigned
+    ? "complete"
+    : state === "sent" || state === "partially_signed"
+      ? "active"
+      : "pending";
 
   const stages: RawStage[] = [
     {
       label: "Deal accepted",
-      stageState:
-        state === "pre_acceptance"
-          ? "pending"
-          : "complete",
+      stageState: dealAcceptedState,
     },
     {
       label: "Agreement prepared",
-      stageState:
-        state === "pre_acceptance" || state === "ready"
-          ? "pending"
-          : "complete",
+      stageState: agreementPreparedState,
     },
     {
       label: "Sent for signature",
       timestamp:
-        state !== "pre_acceptance" && state !== "ready" && state !== "prepared"
+        state === "sent" ||
+        state === "partially_signed" ||
+        state === "completed"
           ? fmt(packet?.sent_at)
           : undefined,
-      stageState:
-        state === "pre_acceptance" || state === "ready" || state === "prepared"
-          ? state === "prepared"
-            ? "active"
-            : "pending"
-          : "complete",
+      stageState: sentForSignatureState,
     },
     {
-      label: buyerSigned
-        ? "Buyer signed"
-        : state === "sent" || state === "partially_signed"
-        ? `Waiting on Buyer`
-        : "Buyer signs",
-      sublabel: buyerSigned
-        ? buyerLabel
-        : state === "sent" || state === "partially_signed"
-        ? buyerLabel
-        : undefined,
-      timestamp: buyerSigned ? fmt(buyer?.signed_at) : undefined,
-      stageState:
-        buyerSigned
-          ? "complete"
-          : state === "sent" || state === "partially_signed"
-          ? "active"
-          : "pending",
-    },
-    {
-      label: ownerSigned
-        ? "Owner signed"
-        : state === "partially_signed" && buyerSigned
-        ? `Waiting on Owner`
-        : state === "sent"
-        ? `Waiting on Owner`
-        : "Owner signs",
+      label: buyerSigned ? "Buyer signed" : "Waiting on Buyer",
       sublabel:
-        ownerSigned || state === "partially_signed" || state === "sent"
+        state === "sent" || state === "partially_signed" || buyerSigned
+          ? buyerLabel
+          : undefined,
+      timestamp: buyerSigned ? fmt(buyer?.signed_at) : undefined,
+      stageState: buyerStageState,
+    },
+    {
+      label: ownerSigned ? "Owner signed" : "Waiting on Owner",
+      sublabel:
+        state === "sent" || state === "partially_signed" || ownerSigned
           ? ownerLabel
           : undefined,
       timestamp: ownerSigned ? fmt(owner?.signed_at) : undefined,
-      stageState:
-        ownerSigned
-          ? "complete"
-          : state === "partially_signed" || state === "sent"
-          ? "active"
-          : "pending",
+      stageState: ownerStageState,
     },
     {
       label: "Executed documents available",
-      timestamp:
-        state === "completed" ? fmt(packet?.completed_at) : undefined,
+      timestamp: state === "completed" ? fmt(packet?.completed_at) : undefined,
       stageState: state === "completed" ? "complete" : "pending",
     },
   ];
 
-  // For declined/voided/error, flatten the tracker to a minimal view
   if (state === "declined" || state === "voided" || state === "error") {
     return [
       { label: "Deal accepted", stageState: "complete" },
@@ -253,14 +240,14 @@ function buildTrackerStages(
           state === "declined"
             ? "One or more parties declined to sign."
             : state === "voided"
-            ? "The signature request was voided."
-            : "An error occurred. Contact support.",
+              ? "The signature request was voided."
+              : "An error occurred. Contact support.",
         timestamp:
           state === "declined"
             ? fmt(packet?.declined_at)
             : state === "voided"
-            ? fmt(packet?.voided_at)
-            : undefined,
+              ? fmt(packet?.voided_at)
+              : undefined,
         stageState: "active",
       },
     ];
@@ -317,22 +304,17 @@ function SignatureTracker({
         const isLast = idx === stages.length - 1;
         return (
           <div key={idx} className="relative flex gap-3">
-            {/* Vertical connecting line */}
             {!isLast && (
               <div className="absolute left-3 top-6 bottom-0 w-px bg-gray-200" />
             )}
-            {/* Stage indicator dot */}
             <div className="pt-0.5 pb-0">
               <StageIndicator stageState={stage.stageState} />
             </div>
-            {/* Stage content */}
             <div className={`flex-1 ${isLast ? "pb-0" : "pb-4"}`}>
               <p
                 className={`text-sm font-medium leading-tight ${
                   stage.stageState === "pending"
                     ? "text-muted-foreground"
-                    : stage.stageState === "active"
-                    ? "text-foreground"
                     : "text-foreground"
                 }`}
               >
@@ -440,9 +422,178 @@ function AdminActionButton({
           {busy ? "Sending…" : "Send with DocuSign"}
         </button>
       )}
-      {error && (
-        <p className="text-xs text-red-600">{error}</p>
+      {error && <p className="text-xs text-red-600">{error}</p>}
+    </div>
+  );
+}
+
+// ============================================================
+// Completed-state body: Executed Documents + Processing Status
+// ============================================================
+
+function DocIcon() {
+  return (
+    <svg
+      className="h-3.5 w-3.5 shrink-0"
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d="M3 2h7l3 3v9H3V2z"
+        stroke="currentColor"
+        strokeWidth="1.25"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M10 2v3h3"
+        stroke="currentColor"
+        strokeWidth="1.25"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+type ProcessingStep = {
+  label: string;
+  done: boolean;
+};
+
+const PROCESSING_STEPS: ProcessingStep[] = [
+  { label: "Agreement executed", done: true },
+  { label: "Documents under review", done: false },
+  { label: "Partner processing", done: false },
+  { label: "Activation complete", done: false },
+];
+
+function ProcessingStepRow({ label, done }: ProcessingStep) {
+  return (
+    <div className="flex items-center gap-2.5">
+      {done ? (
+        <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green-500">
+          <svg
+            className="h-2.5 w-2.5 text-white"
+            viewBox="0 0 12 12"
+            fill="none"
+            aria-hidden="true"
+          >
+            <path
+              d="M2 6l3 3 5-5"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </div>
+      ) : (
+        <div className="h-5 w-5 shrink-0 rounded-full border-2 border-gray-200 bg-white" />
       )}
+      <span
+        className={`text-xs ${done ? "text-foreground font-medium" : "text-muted-foreground"}`}
+      >
+        {label}
+      </span>
+    </div>
+  );
+}
+
+function CompletedStateBody({
+  packet,
+  execAgreementUrl,
+  certificateUrl,
+}: {
+  packet: SignaturePacketView | null;
+  execAgreementUrl: string | null;
+  certificateUrl: string | null;
+}) {
+  const hasDocuments = !!(execAgreementUrl || certificateUrl);
+
+  const completedDate = packet?.completed_at
+    ? new Date(packet.completed_at).toLocaleDateString(undefined, {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      })
+    : null;
+
+  return (
+    <div className="space-y-3" data-testid="completed-state-body">
+      {/* Section 1: Executed Documents */}
+      <div
+        className="rounded-md border border-gray-200 bg-gray-50 p-4 space-y-3"
+        data-testid="executed-documents-section"
+      >
+        <div>
+          <p className="text-sm font-semibold text-foreground">
+            Executed Documents
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {hasDocuments
+              ? "Your agreement has been fully executed and stored for future reference."
+              : "Documents are being finalized. Check back shortly or contact FractPath support."}
+          </p>
+        </div>
+
+        {hasDocuments ? (
+          <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
+            {execAgreementUrl ? (
+              <a
+                href={execAgreementUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-foreground hover:bg-gray-100"
+                data-testid="exec-agreement-btn"
+              >
+                <DocIcon />
+                View executed agreement
+              </a>
+            ) : null}
+            {certificateUrl ? (
+              <a
+                href={certificateUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-gray-100"
+                data-testid="certificate-btn"
+              >
+                <DocIcon />
+                View certificate of completion
+              </a>
+            ) : null}
+          </div>
+        ) : null}
+
+        {completedDate && (
+          <p className="text-[11px] text-muted-foreground">
+            Executed on {completedDate}
+            {packet?.provider ? ` via ${packet.provider}` : ""}
+          </p>
+        )}
+      </div>
+
+      {/* Section 2: Processing Status */}
+      <div
+        className="rounded-md border border-gray-200 bg-gray-50 p-4 space-y-3"
+        data-testid="processing-status-section"
+      >
+        <div>
+          <p className="text-sm font-semibold text-foreground">
+            Processing Status
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            FractPath is completing the next steps required to activate this
+            agreement.
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          {PROCESSING_STEPS.map((step) => (
+            <ProcessingStepRow key={step.label} {...step} />
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -464,32 +615,40 @@ export function SignatureCard({
   const label = STATE_LABEL[state];
   const badgeTone = STATE_BADGE[state];
   const cardClasses = STATE_CARD_CLASSES[state];
-  const stages = buildTrackerStages(state, packet, recipients);
 
-  // Explainer copy per state
   const explainerCopy: Record<CardState, string | null> = {
     pre_acceptance:
       "Once a deal is accepted, FractPath prepares the agreement, routes it for signature, and stores the executed documents here.",
-    ready: "The deal is accepted. The agreement will be prepared and sent for signature shortly.",
-    prepared: "The agreement is ready. It will be sent to both parties for electronic signature.",
+    ready:
+      "The deal is accepted. The agreement will be prepared and sent for signature shortly.",
+    prepared:
+      "The agreement is ready. It has not been sent yet. The next step is sending it to both parties for electronic signature.",
     sent: "Both parties have been sent a signature request. You will be notified when complete.",
-    partially_signed: "One party has signed. Waiting for the other party to complete their signature.",
-    completed: "The agreement has been fully executed and is stored securely.",
-    declined: "A party declined to sign. Please contact FractPath to discuss next steps.",
-    voided: "The signature request was voided. Please contact FractPath to discuss next steps.",
-    error: "An issue occurred with the signature request. Please contact FractPath support.",
+    partially_signed:
+      "One party has signed. Waiting for the other party to complete their signature.",
+    completed: null,
+    declined:
+      "A party declined to sign. Please contact FractPath to discuss next steps.",
+    voided:
+      "The signature request was voided. Please contact FractPath to discuss next steps.",
+    error:
+      "An issue occurred with the signature request. Please contact FractPath support.",
   };
 
   const copy = explainerCopy[state];
 
-  const hasDocuments = !!(execAgreementUrl || certificateUrl);
+  // For non-completed states, build the tracker as before
+  const stages =
+    state !== "completed"
+      ? buildTrackerStages(state, packet, recipients)
+      : [];
 
   return (
     <div
       className={`rounded-md border p-4 space-y-4 ${cardClasses}`}
       data-testid="signature-card"
     >
-      {/* Header */}
+      {/* Card header — always rendered */}
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-1">
           <h2 className="text-sm font-semibold text-foreground">
@@ -501,9 +660,8 @@ export function SignatureCard({
             {label}
           </span>
         </div>
-
-        {/* View documents CTA — completed state */}
-        {state === "completed" && (execAgreementUrl || certificateUrl) && (
+        {/* Top-right CTA: only for non-completed states with documents */}
+        {state !== "completed" && (execAgreementUrl || certificateUrl) && (
           <a
             href={execAgreementUrl ?? certificateUrl ?? "#"}
             target="_blank"
@@ -516,98 +674,38 @@ export function SignatureCard({
         )}
       </div>
 
-      {/* Explainer copy */}
-      {copy && (
-        <p className="text-xs text-muted-foreground">{copy}</p>
+      {/* Non-completed body: explainer + tracker + legacy doc links + admin actions */}
+      {state !== "completed" && (
+        <>
+          {copy && <p className="text-xs text-muted-foreground">{copy}</p>}
+
+          {stages.length > 0 && (
+            <div className="pt-1">
+              <SignatureTracker stages={stages} />
+            </div>
+          )}
+
+          {isAdmin && (state === "ready" || state === "prepared") && (
+            <div className="border-t border-current/10 pt-3">
+              <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Admin
+              </p>
+              <AdminActionButton
+                dealId={dealId}
+                packetStatus={packet?.status ?? null}
+              />
+            </div>
+          )}
+        </>
       )}
 
-      {/* Tracker — always shown; pre-acceptance uses a muted preview state */}
-      {stages.length > 0 && (
-        <div className="pt-1">
-          <SignatureTracker stages={stages} />
-        </div>
-      )}
-
-      {/* Document links — completed state with multiple documents */}
-      {state === "completed" && hasDocuments && (
-        <div className="space-y-1 border-t border-green-200 pt-3">
-          <p className="text-xs font-medium text-foreground">Executed documents</p>
-          <div className="space-y-1">
-            {execAgreementUrl && (
-              <a
-                href={execAgreementUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1.5 text-xs text-blue-700 hover:underline"
-                data-testid="exec-agreement-link"
-              >
-                <svg
-                  className="h-3.5 w-3.5 shrink-0"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M3 2h7l3 3v9H3V2z"
-                    stroke="currentColor"
-                    strokeWidth="1.25"
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M10 2v3h3"
-                    stroke="currentColor"
-                    strokeWidth="1.25"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-                Executed agreement
-              </a>
-            )}
-            {certificateUrl && (
-              <a
-                href={certificateUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1.5 text-xs text-blue-700 hover:underline"
-                data-testid="certificate-link"
-              >
-                <svg
-                  className="h-3.5 w-3.5 shrink-0"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M3 2h7l3 3v9H3V2z"
-                    stroke="currentColor"
-                    strokeWidth="1.25"
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M10 2v3h3"
-                    stroke="currentColor"
-                    strokeWidth="1.25"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-                Certificate of completion
-              </a>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Admin-only actions */}
-      {isAdmin && (state === "ready" || state === "prepared") && (
-        <div className="border-t border-current/10 pt-3">
-          <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-            Admin
-          </p>
-          <AdminActionButton
-            dealId={dealId}
-            packetStatus={packet?.status ?? null}
-          />
-        </div>
+      {/* Completed body: Executed Documents + Processing Status */}
+      {state === "completed" && (
+        <CompletedStateBody
+          packet={packet}
+          execAgreementUrl={execAgreementUrl}
+          certificateUrl={certificateUrl}
+        />
       )}
     </div>
   );

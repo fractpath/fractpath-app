@@ -18,11 +18,7 @@ import {
   reconcilePacketStatus,
   extractRecipientStatuses,
 } from "@/lib/docusign/webhook";
-import {
-  logSigInfo,
-  logSigWarn,
-  logSigError,
-} from "@/lib/signature/logging";
+import { logSigInfo, logSigWarn, logSigError } from "@/lib/signature/logging";
 import { onPacketCompleted } from "@/lib/signature/completion";
 import { insertSigDealEventIfMissing } from "@/lib/signature/dealEvents";
 
@@ -46,7 +42,7 @@ export async function POST(request: NextRequest) {
   let rawBody: string;
   try {
     rawBody = await request.text();
-  } catch (err: any) {
+  } catch {
     logSigWarn("docusign_webhook_rejected", {
       meta: { reason: "body_read_failed" },
     });
@@ -68,12 +64,20 @@ export async function POST(request: NextRequest) {
   try {
     hmacKey = loadWebhookHmacKey();
   } catch (err: any) {
-    logSigError("docusign_webhook_rejected", { meta: { reason: "hmac_key_missing" } }, err);
+    logSigError(
+      "docusign_webhook_rejected",
+      { meta: { reason: "hmac_key_missing" } },
+      err,
+    );
     return jsonReject("Webhook signing key not configured", 401);
   }
 
   // 4. Verify HMAC authenticity (fail closed)
-  const isValid = await verifyDocusignWebhookSignature(rawBody, signatureHeader, hmacKey);
+  const isValid = await verifyDocusignWebhookSignature(
+    rawBody,
+    signatureHeader,
+    hmacKey,
+  );
 
   if (!isValid) {
     logSigWarn("docusign_webhook_rejected", {
@@ -95,7 +99,20 @@ export async function POST(request: NextRequest) {
   }
 
   const parsed = parseResult.value;
+  const rawData = (parsed.raw?.data ?? {}) as Record<string, unknown>;
+  const thinRecipientId =
+    typeof rawData.recipientId === "string" ? rawData.recipientId : null;
   const { envelopeId, providerEventType, providerEventAt } = parsed;
+
+  let forcedNextStatus: string | null = null;
+
+  if (providerEventType === "envelope-completed") {
+    forcedNextStatus = "completed";
+  } else if (providerEventType === "envelope-delivered") {
+    forcedNextStatus = "delivered";
+  } else if (providerEventType === "recipient-completed") {
+    forcedNextStatus = "partially_signed";
+  }
 
   logSigInfo("docusign_webhook_received", {
     envelopeId,
@@ -103,6 +120,7 @@ export async function POST(request: NextRequest) {
       providerEventType,
       providerEventAt: providerEventAt ?? "unknown",
       envelopeStatus: parsed.envelopeStatus ?? "unknown",
+      thinRecipientId: thinRecipientId ?? null,
     },
   });
 
@@ -113,18 +131,21 @@ export async function POST(request: NextRequest) {
     svc.from("deal_signature_packets") as any
   )
     .select(
-      "id, deal_id, thread_id, provider, provider_envelope_id, status, packet_version"
+      "id, deal_id, thread_id, provider, provider_envelope_id, status, packet_version",
     )
     .eq("provider", "docusign")
     .eq("provider_envelope_id", envelopeId)
     .maybeSingle();
 
   if (packetErr) {
-    logSigError("docusign_webhook_rejected", {
-      envelopeId,
-      meta: { reason: "packet_lookup_failed" },
-    }, new Error(packetErr.message));
-    // Return 200 to stop DocuSign retrying — this is a transient error
+    logSigError(
+      "docusign_webhook_rejected",
+      {
+        envelopeId,
+        meta: { reason: "packet_lookup_failed" },
+      },
+      new Error(packetErr.message),
+    );
     return jsonOk({ warning: "Packet lookup error; event not persisted" });
   }
 
@@ -133,7 +154,6 @@ export async function POST(request: NextRequest) {
       envelopeId,
       meta: { reason: "no_matching_packet" },
     });
-    // Return 200 — unknown envelope is not a caller error; stop retries
     return jsonOk({ skipped: true, reason: "no_matching_packet" });
   }
 
@@ -141,9 +161,7 @@ export async function POST(request: NextRequest) {
   const dealId = packet.deal_id as string;
   const currentStatus = packet.status as string;
 
-  // 7. Idempotency check: look for existing event with same fingerprint
-  //    Fingerprint = (packet_id, provider_event_type, provider_event_at)
-  //    If provider_event_at is null, fall back to (packet_id, provider_event_type) only.
+  // 7. Idempotency check
   let isDuplicate = false;
   try {
     let dupQuery = (svc.from("deal_signature_events") as any)
@@ -174,7 +192,6 @@ export async function POST(request: NextRequest) {
   // 8. Persist raw event row BEFORE any reconciliation
   const eventPayload = parsed.raw as Record<string, unknown>;
 
-
   const { error: eventInsertErr } = await (
     svc.from("deal_signature_events") as any
   ).insert({
@@ -186,14 +203,19 @@ export async function POST(request: NextRequest) {
   });
 
   if (eventInsertErr) {
-    logSigError("docusign_webhook_received", {
-      packetId,
-      dealId,
-      envelopeId,
-      meta: { reason: "event_insert_failed" },
-    }, new Error(eventInsertErr.message));
-    // Return 200 to avoid DocuSign retrying into a permanent error
-    return jsonOk({ warning: "Event persistence failed; state not reconciled" });
+    logSigError(
+      "docusign_webhook_received",
+      {
+        packetId,
+        dealId,
+        envelopeId,
+        meta: { reason: "event_insert_failed" },
+      },
+      new Error(eventInsertErr.message),
+    );
+    return jsonOk({
+      warning: "Event persistence failed; state not reconciled",
+    });
   }
 
   logSigInfo("docusign_webhook_event_persisted", {
@@ -206,11 +228,22 @@ export async function POST(request: NextRequest) {
   // 9. Reconcile packet status
   let didTransitionToCompleted = false;
 
-  const nextStatus = reconcilePacketStatus(
-    currentStatus as any,
-    parsed,
-  );
+  const derivedNextStatus = reconcilePacketStatus(currentStatus as any, parsed);
 
+  const nextStatus =
+    forcedNextStatus === "completed" && currentStatus !== "completed"
+      ? "completed"
+      : forcedNextStatus === "delivered" &&
+          !["completed", "declined", "voided", "partially_signed"].includes(
+            currentStatus,
+          )
+        ? "delivered"
+        : forcedNextStatus === "partially_signed" &&
+            !["completed", "declined", "voided", "partially_signed"].includes(
+              currentStatus,
+            )
+          ? "partially_signed"
+          : derivedNextStatus;
   let reconciledStatus = currentStatus;
 
   if (nextStatus && nextStatus !== currentStatus) {
@@ -219,8 +252,9 @@ export async function POST(request: NextRequest) {
       provider_last_status: parsed.envelopeStatus ?? currentStatus,
     };
 
-    if (nextStatus === "completed" && parsed.completedAt) {
-      packetPatch.completed_at = parsed.completedAt;
+    if (nextStatus === "completed") {
+      packetPatch.completed_at =
+        parsed.completedAt ?? providerEventAt ?? new Date().toISOString();
     }
     if (nextStatus === "declined" && parsed.declinedAt) {
       packetPatch.declined_at = parsed.declinedAt;
@@ -249,9 +283,11 @@ export async function POST(request: NextRequest) {
       );
     } else {
       reconciledStatus = nextStatus;
+
       if (nextStatus === "completed" && currentStatus !== "completed") {
         didTransitionToCompleted = true;
       }
+
       logSigInfo("docusign_packet_reconciled", {
         packetId,
         dealId,
@@ -261,7 +297,6 @@ export async function POST(request: NextRequest) {
         meta: { prevStatus: currentStatus },
       });
 
-      // Emit normalized packet-level deal_events on terminal status transitions
       if (nextStatus === "completed") {
         await insertSigDealEventIfMissing({
           svc,
@@ -292,37 +327,58 @@ export async function POST(request: NextRequest) {
       }
     }
   } else if (parsed.envelopeStatus) {
-    // Always update provider_last_status even when local status doesn't change
     await (svc.from("deal_signature_packets") as any)
       .update({ provider_last_status: parsed.envelopeStatus })
       .eq("id", packetId);
   }
 
-
-
   // 10. Reconcile recipient rows
-  if (parsed.signers.length > 0) {
-    const roleMap = extractRecipientStatuses(parsed.signers);
+  if (parsed.signers.length > 0 || thinRecipientId) {
+    const recipientUpdates: Array<{
+      role: "Buyer" | "Owner";
+      patch: Record<string, unknown>;
+    }> = [];
 
-    const recipientUpdates: Array<{ role: "Buyer" | "Owner"; patch: Record<string, unknown> }> = [];
+    if (parsed.signers.length > 0) {
+      const roleMap = extractRecipientStatuses(parsed.signers);
 
-    for (const role of ["Buyer", "Owner"] as const) {
-      const update = roleMap[role];
-      if (!update) continue;
+      for (const role of ["Buyer", "Owner"] as const) {
+        const update = roleMap[role];
+        if (!update) continue;
 
-      const patch: Record<string, unknown> = {};
-      if (update.providerRecipientId != null) {
-        patch.provider_recipient_id = update.providerRecipientId;
+        const patch: Record<string, unknown> = {};
+        if (update.providerRecipientId != null) {
+          patch.provider_recipient_id = update.providerRecipientId;
+        }
+        if (update.providerStatus != null) {
+          patch.provider_status = update.providerStatus;
+        }
+        if (update.signedAt != null) {
+          patch.signed_at = update.signedAt;
+        }
+
+        if (Object.keys(patch).length > 0) {
+          recipientUpdates.push({ role, patch });
+        }
       }
-      if (update.providerStatus != null) {
-        patch.provider_status = update.providerStatus;
-      }
-      if (update.signedAt != null) {
-        patch.signed_at = update.signedAt;
+    } else if (providerEventType === "recipient-completed" && thinRecipientId) {
+      let role: "Buyer" | "Owner" | null = null;
+
+      if (thinRecipientId === "1") {
+        role = "Buyer";
+      } else if (thinRecipientId === "2" || thinRecipientId === "3") {
+        role = "Owner";
       }
 
-      if (Object.keys(patch).length > 0) {
-        recipientUpdates.push({ role, patch });
+      if (role) {
+        recipientUpdates.push({
+          role,
+          patch: {
+            provider_recipient_id: thinRecipientId,
+            provider_status: "completed",
+            signed_at: providerEventAt ?? new Date().toISOString(),
+          },
+        });
       }
     }
 
@@ -335,12 +391,16 @@ export async function POST(request: NextRequest) {
         .eq("role", role);
 
       if (recipUpdateErr) {
-        logSigError("docusign_recipients_reconciled", {
-          packetId,
-          dealId,
-          envelopeId,
-          meta: { role, reason: "recipient_update_failed" },
-        }, new Error(recipUpdateErr.message));
+        logSigError(
+          "docusign_recipients_reconciled",
+          {
+            packetId,
+            dealId,
+            envelopeId,
+            meta: { role, reason: "recipient_update_failed" },
+          },
+          new Error(recipUpdateErr.message),
+        );
       }
     }
 
@@ -355,22 +415,23 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Emit normalized signer deal_events for any recipient that has signed.
-    // Idempotency in insertSigDealEventIfMissing prevents duplicates on
-    // repeated webhook deliveries that re-include all signer statuses.
-    for (const role of ["Buyer", "Owner"] as const) {
-      const update = roleMap[role];
-      if (update?.signedAt) {
+    for (const { role, patch } of recipientUpdates) {
+      if (patch.provider_status === "completed") {
         await insertSigDealEventIfMissing({
           svc,
           dealId,
           eventType:
-            role === "Buyer" ? "signature_buyer_signed" : "signature_owner_signed",
+            role === "Buyer"
+              ? "signature_buyer_signed"
+              : "signature_owner_signed",
           packetId,
           packetVersion: packet.packet_version as number,
           envelopeId,
           role,
-          meta: { signed_at: update.signedAt },
+          meta: {
+            signed_at:
+              typeof patch.signed_at === "string" ? patch.signed_at : null,
+          },
         });
       }
     }
@@ -389,12 +450,15 @@ export async function POST(request: NextRequest) {
         },
       });
     } catch (hookErr: any) {
-      // Non-fatal — completion hook failure must not affect 200 response
-      logSigError("docusign_packet_completed_hook", {
-        packetId,
-        dealId,
-        envelopeId,
-      }, hookErr);
+      logSigError(
+        "docusign_packet_completed_hook",
+        {
+          packetId,
+          dealId,
+          envelopeId,
+        },
+        hookErr,
+      );
     }
   }
 
