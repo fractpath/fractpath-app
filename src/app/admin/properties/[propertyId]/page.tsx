@@ -10,6 +10,7 @@ import {
 } from "@/components/admin/PropertyDocumentsPreview";
 import { AdminPropertyStatusControls } from "@/components/admin/AdminPropertyStatusControls";
 import { AppHeader } from "@/components/layout/AppHeader";
+import { computeLtvPolicy } from "@/lib/ltvPolicy";
 
 function requirePreviewSecret(): string {
   const v = process.env.ADMIN_DOC_PREVIEW_SECRET;
@@ -184,6 +185,22 @@ export default async function AdminPropertyAuditPage({
       ? ((p.secured_property_debt_amount / p.latest_verified_fmv) * 100).toFixed(1)
       : null;
 
+  // Compute LTV policy limits from property underwriting data (property-level, no deal context)
+  const adminPolicyDebtAmount =
+    p.has_secured_property_debt === true
+      ? (p.secured_property_debt_amount ?? 0)
+      : 0;
+  const adminPolicy = computeLtvPolicy({
+    proposed_deal_fmv: null,
+    upfront_payment: null,
+    monthly_payment: null,
+    number_of_payments: null,
+    latest_verified_fmv: p.latest_verified_fmv ?? null,
+    secured_debt_amount: adminPolicyDebtAmount,
+    ltv_policy_ratio: p.ltv_policy_ratio ?? 0.75,
+    secured_debt_certified_at: p.secured_debt_certified_at ?? null,
+  });
+
   return (
     <main className="mx-auto max-w-4xl p-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -330,6 +347,67 @@ export default async function AdminPropertyAuditPage({
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Policy limits panel */}
+      <div className="rounded-lg border overflow-hidden">
+        <div
+          className={`px-4 py-2 text-sm font-medium border-b flex items-center gap-2 ${
+            adminPolicy.execution_readiness_blocked_by_underwriting
+              ? "bg-red-50 text-red-900 dark:bg-red-950 dark:text-red-100"
+              : "bg-muted/40"
+          }`}
+        >
+          LTV policy limits
+          {adminPolicy.execution_readiness_blocked_by_underwriting ? (
+            <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
+              execution blocked
+            </span>
+          ) : (
+            <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+              clear
+            </span>
+          )}
+        </div>
+        <div className="p-4 text-sm space-y-3">
+          <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+            <div>
+              <div className="text-muted-foreground text-xs">Executable max accessible cash</div>
+              <div className="font-medium">
+                {formatCurrency(adminPolicy.executable_max_accessible_cash)}
+              </div>
+            </div>
+            <div>
+              <div className="text-muted-foreground text-xs">Provisional max (deal FMV required)</div>
+              <div className="font-medium text-muted-foreground">
+                Requires active deal
+              </div>
+            </div>
+            <div>
+              <div className="text-muted-foreground text-xs">Debt data stale (&gt;90 days)</div>
+              <div className={`font-medium ${adminPolicy.secured_debt_data_is_stale ? "text-red-600 dark:text-red-400" : ""}`}>
+                {adminPolicy.secured_debt_data_is_stale ? "Yes — refresh required" : "No"}
+              </div>
+            </div>
+            <div>
+              <div className="text-muted-foreground text-xs">Verified FMV missing</div>
+              <div className={`font-medium ${adminPolicy.verified_fmv_required_for_execution ? "text-red-600 dark:text-red-400" : ""}`}>
+                {adminPolicy.verified_fmv_required_for_execution ? "Yes — required for execution" : "No"}
+              </div>
+            </div>
+          </div>
+
+          {adminPolicy.block_reasons_internal.length > 0 && (
+            <div className="border-t pt-3">
+              <div className="text-xs font-medium text-muted-foreground mb-1">Internal block reasons</div>
+              <ul className="list-disc list-inside space-y-0.5 text-xs text-red-700 dark:text-red-400">
+                {adminPolicy.block_reasons_internal.map((r) => (
+                  <li key={r} className="font-mono">{r}</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       </div>
 
