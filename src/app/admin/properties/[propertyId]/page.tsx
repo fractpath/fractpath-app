@@ -3,11 +3,13 @@ import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { createServiceClient } from "@/lib/supabase/service";
 import { AdminPropertyActions } from "@/components/admin/AdminPropertyActions";
-import { PropertyDocumentsPreview } from "@/components/admin/PropertyDocumentsPreview";
+import {
+  PropertyDocumentsPreview,
+  type DocType,
+  type DocRow,
+} from "@/components/admin/PropertyDocumentsPreview";
 import { AdminPropertyStatusControls } from "@/components/admin/AdminPropertyStatusControls";
 import { AppHeader } from "@/components/layout/AppHeader";
-
-type DocType = "selfie" | "drivers_license" | "utility_bill";
 
 function requirePreviewSecret(): string {
   const v = process.env.ADMIN_DOC_PREVIEW_SECRET;
@@ -37,6 +39,28 @@ function mintPreviewToken(args: {
   const msg = `${expStr}.${args.propertyId}.${args.docType}.${args.storagePath}`;
   const sig = b64url(crypto.createHmac("sha256", secret).update(msg).digest());
   return `${expStr}.${sig}`;
+}
+
+function formatCurrency(val: number | null | undefined): string {
+  if (val === null || val === undefined) return "—";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(val);
+}
+
+function formatDate(val: string | null | undefined): string {
+  if (!val) return "—";
+  try {
+    return new Date(val).toLocaleString("en-US", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+  } catch {
+    return String(val);
+  }
 }
 
 export default async function AdminPropertyAuditPage({
@@ -82,7 +106,7 @@ export default async function AdminPropertyAuditPage({
 
   const propRes = await (supabase.from("properties") as any)
     .select(
-      "id, owner_user_id, address_line1, address_line2, city, state, postal_code, status, created_at, updated_at, reviewed_at, reviewed_by, verified_at, verified_by, review_notes",
+      "id, owner_user_id, address_line1, address_line2, city, state, postal_code, status, created_at, updated_at, reviewed_at, reviewed_by, verified_at, verified_by, review_notes, has_secured_property_debt, secured_property_debt_amount, secured_debt_certified_at, secured_debt_last_verified_at, secured_debt_fresh_until, secured_debt_verification_status, latest_verified_fmv, fmv_verified_at, fmv_verification_source, ltv_policy_ratio, max_accessible_cash_current",
     )
     .eq("id", propertyId)
     .maybeSingle();
@@ -113,7 +137,7 @@ export default async function AdminPropertyAuditPage({
     .filter(Boolean)
     .join(", ");
 
-  const [auditRes, docsRes] = await Promise.all([
+  const [auditRes, docsRes, underwritingRes] = await Promise.all([
     (supabase.from("property_status_audit") as any)
       .select(
         "id, from_status, to_status, changed_by, actor_type, changed_at, notes",
@@ -123,9 +147,17 @@ export default async function AdminPropertyAuditPage({
     (supabase.from("property_documents") as any)
       .select("doc_type, storage_path, content_type, created_at")
       .eq("property_id", propertyId),
+    (supabase.from("property_underwriting_snapshots") as any)
+      .select(
+        "id, captured_at, actor_type, snapshot_source, has_secured_property_debt, secured_property_debt_amount, latest_verified_fmv, ltv_policy_ratio, max_accessible_cash_current, notes",
+      )
+      .eq("property_id", propertyId)
+      .order("captured_at", { ascending: false })
+      .limit(20),
   ]);
 
   const auditRows = (auditRes.data ?? []) as any[];
+  const underwritingRows = (underwritingRes.data ?? []) as any[];
 
   // Mint short-lived per-doc tokens (10 minutes)
   const docs = ((docsRes.data ?? []) as any[]).map((d) => {
@@ -143,6 +175,14 @@ export default async function AdminPropertyAuditPage({
       }),
     };
   });
+
+  // Derived debt metrics
+  const hasDebt = p.has_secured_property_debt;
+  const debtStatus = p.secured_debt_verification_status ?? null;
+  const computedLtv =
+    p.latest_verified_fmv && p.secured_property_debt_amount
+      ? ((p.secured_property_debt_amount / p.latest_verified_fmv) * 100).toFixed(1)
+      : null;
 
   return (
     <main className="mx-auto max-w-4xl p-6 space-y-6">
@@ -165,6 +205,7 @@ export default async function AdminPropertyAuditPage({
         </p>
       </div>
 
+      {/* Property overview */}
       <div className="rounded-lg border p-4 text-sm space-y-1">
         <div>
           <span className="text-muted-foreground">Status:</span>{" "}
@@ -182,15 +223,15 @@ export default async function AdminPropertyAuditPage({
         </div>
         <div>
           <span className="text-muted-foreground">Created:</span>{" "}
-          {p.created_at ? String(p.created_at) : "—"}
+          {formatDate(p.created_at)}
         </div>
         <div>
           <span className="text-muted-foreground">Reviewed:</span>{" "}
-          {p.reviewed_at ? String(p.reviewed_at) : "—"}
+          {formatDate(p.reviewed_at)}
         </div>
         <div>
           <span className="text-muted-foreground">Verified:</span>{" "}
-          {p.verified_at ? String(p.verified_at) : "—"}
+          {formatDate(p.verified_at)}
         </div>
         {p.review_notes && (
           <div className="pt-2">
@@ -198,6 +239,98 @@ export default async function AdminPropertyAuditPage({
             {p.review_notes}
           </div>
         )}
+      </div>
+
+      {/* Secured debt underwriting panel */}
+      <div className="rounded-lg border overflow-hidden">
+        <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b">
+          Secured debt underwriting
+          {debtStatus && (
+            <span
+              className={`ml-2 inline-block text-xs rounded-full px-2 py-0.5 font-normal ${
+                debtStatus === "verified"
+                  ? "bg-green-100 text-green-800"
+                  : debtStatus === "stale"
+                    ? "bg-yellow-100 text-yellow-800"
+                    : debtStatus === "pending"
+                      ? "bg-blue-100 text-blue-800"
+                      : "bg-gray-100 text-gray-600"
+              }`}
+            >
+              {debtStatus.replace("_", " ")}
+            </span>
+          )}
+        </div>
+        <div className="p-4 text-sm space-y-3">
+          <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+            <div>
+              <div className="text-muted-foreground text-xs">Secured debt declared</div>
+              <div className="font-medium">
+                {hasDebt === null ? "Not declared" : hasDebt ? "Yes" : "No"}
+              </div>
+            </div>
+            <div>
+              <div className="text-muted-foreground text-xs">Owner-declared balance</div>
+              <div className="font-medium">
+                {hasDebt === true
+                  ? formatCurrency(p.secured_property_debt_amount)
+                  : hasDebt === false
+                    ? "None"
+                    : "—"}
+              </div>
+            </div>
+            <div>
+              <div className="text-muted-foreground text-xs">Declaration certified</div>
+              <div className="font-medium">{formatDate(p.secured_debt_certified_at)}</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground text-xs">Admin verified</div>
+              <div className="font-medium">{formatDate(p.secured_debt_last_verified_at)}</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground text-xs">Freshness expires</div>
+              <div className="font-medium">{formatDate(p.secured_debt_fresh_until)}</div>
+            </div>
+          </div>
+
+          <div className="border-t pt-3">
+            <div className="text-xs font-medium text-muted-foreground mb-2">FMV / LTV</div>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+              <div>
+                <div className="text-muted-foreground text-xs">Verified FMV</div>
+                <div className="font-medium">{formatCurrency(p.latest_verified_fmv)}</div>
+              </div>
+              <div>
+                <div className="text-muted-foreground text-xs">FMV verified</div>
+                <div className="font-medium">{formatDate(p.fmv_verified_at)}</div>
+              </div>
+              <div>
+                <div className="text-muted-foreground text-xs">FMV source</div>
+                <div className="font-medium">{p.fmv_verification_source ?? "—"}</div>
+              </div>
+              <div>
+                <div className="text-muted-foreground text-xs">Policy LTV cap</div>
+                <div className="font-medium">
+                  {p.ltv_policy_ratio != null
+                    ? `${(p.ltv_policy_ratio * 100).toFixed(1)}%`
+                    : "—"}
+                </div>
+              </div>
+              <div>
+                <div className="text-muted-foreground text-xs">Current LTV (declared)</div>
+                <div className="font-medium">
+                  {computedLtv !== null ? `${computedLtv}%` : "—"}
+                </div>
+              </div>
+              <div>
+                <div className="text-muted-foreground text-xs">Max accessible cash</div>
+                <div className="font-medium">
+                  {formatCurrency(p.max_accessible_cash_current)}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <AdminPropertyActions propertyId={propertyId} status={p.status} />
@@ -209,14 +342,67 @@ export default async function AdminPropertyAuditPage({
         currentStatus={p.status}
       />
 
+      {/* Underwriting snapshots */}
+      {underwritingRows.length > 0 && (
+        <div className="rounded-lg border overflow-x-auto">
+          <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b">
+            Underwriting snapshot history
+          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left border-b">
+                <th className="p-3 text-xs text-muted-foreground">When</th>
+                <th className="p-3 text-xs text-muted-foreground">Source</th>
+                <th className="p-3 text-xs text-muted-foreground">Actor</th>
+                <th className="p-3 text-xs text-muted-foreground">Debt</th>
+                <th className="p-3 text-xs text-muted-foreground">Balance</th>
+                <th className="p-3 text-xs text-muted-foreground">FMV</th>
+                <th className="p-3 text-xs text-muted-foreground">Max cash</th>
+              </tr>
+            </thead>
+            <tbody>
+              {underwritingRows.map((snap: any) => (
+                <tr key={snap.id} className="border-t">
+                  <td className="p-3 whitespace-nowrap text-xs">
+                    {formatDate(snap.captured_at)}
+                  </td>
+                  <td className="p-3 text-xs">{snap.snapshot_source}</td>
+                  <td className="p-3 text-xs">{snap.actor_type}</td>
+                  <td className="p-3 text-xs">
+                    {snap.has_secured_property_debt === null
+                      ? "—"
+                      : snap.has_secured_property_debt
+                        ? "Yes"
+                        : "No"}
+                  </td>
+                  <td className="p-3 text-xs">
+                    {formatCurrency(snap.secured_property_debt_amount)}
+                  </td>
+                  <td className="p-3 text-xs">
+                    {formatCurrency(snap.latest_verified_fmv)}
+                  </td>
+                  <td className="p-3 text-xs">
+                    {formatCurrency(snap.max_accessible_cash_current)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Status audit log */}
       <div className="rounded-lg border overflow-x-auto">
+        <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b">
+          Status audit log
+        </div>
         <table className="w-full text-sm">
-          <thead className="bg-muted/40">
-            <tr className="text-left">
-              <th className="p-3">When</th>
-              <th className="p-3">Transition</th>
-              <th className="p-3">By</th>
-              <th className="p-3">Notes</th>
+          <thead>
+            <tr className="text-left border-b">
+              <th className="p-3 text-xs text-muted-foreground">When</th>
+              <th className="p-3 text-xs text-muted-foreground">Transition</th>
+              <th className="p-3 text-xs text-muted-foreground">By</th>
+              <th className="p-3 text-xs text-muted-foreground">Notes</th>
             </tr>
           </thead>
           <tbody>
@@ -235,12 +421,12 @@ export default async function AdminPropertyAuditPage({
             ) : (
               auditRows.map((a: any) => (
                 <tr key={a.id} className="border-t">
-                  <td className="p-3 whitespace-nowrap">
-                    {String(a.changed_at)}
+                  <td className="p-3 whitespace-nowrap text-xs">
+                    {formatDate(a.changed_at)}
                   </td>
-                  <td className="p-3 whitespace-nowrap">
+                  <td className="p-3 whitespace-nowrap text-xs">
                     {a.from_status} &rarr; {a.to_status}
-                    <span className="ml-2 text-xs text-muted-foreground">
+                    <span className="ml-2 text-muted-foreground">
                       ({a.actor_type})
                     </span>
                   </td>
@@ -249,7 +435,7 @@ export default async function AdminPropertyAuditPage({
                       {a.changed_by}
                     </span>
                   </td>
-                  <td className="p-3 break-words">{a.notes ?? ""}</td>
+                  <td className="p-3 text-xs break-words">{a.notes ?? ""}</td>
                 </tr>
               ))
             )}

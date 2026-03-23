@@ -147,6 +147,12 @@ function Segmented({
   );
 }
 
+function formatDebtAmount(val: string): string {
+  const num = parseFloat(val.replace(/[^0-9.]/g, ""));
+  if (isNaN(num)) return val;
+  return num.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
 export function PropertyForm(props: {
   context: "profile" | "deal";
   onSuccess?: () => void;
@@ -185,6 +191,13 @@ export function PropertyForm(props: {
     utility_bill: useRef<HTMLInputElement>(null),
   };
 
+  // Secured debt declaration state
+  const [hasSecuredDebt, setHasSecuredDebt] = useState<boolean | null>(null);
+  const [debtAmountStr, setDebtAmountStr] = useState("");
+  const [debtFiles, setDebtFiles] = useState<File[]>([]);
+  const [debtCertified, setDebtCertified] = useState(false);
+  const debtFileInputRef = useRef<HTMLInputElement>(null);
+
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -199,6 +212,10 @@ export function PropertyForm(props: {
       setZip("");
       setFiles({ selfie: null, drivers_license: null, utility_bill: null });
     }
+    setHasSecuredDebt(null);
+    setDebtAmountStr("");
+    setDebtFiles([]);
+    setDebtCertified(false);
   }, [props.open, defaultMode, isEdit]);
 
   const previews = useMemo(() => {
@@ -241,6 +258,22 @@ export function PropertyForm(props: {
     }
   }
 
+  async function handlePickDebtFile(raw: File | null) {
+    if (!raw) return;
+    try {
+      const normalized = await normalizeUploadToJpeg(raw);
+      setDebtFiles((prev) => [...prev, normalized]);
+      if (debtFileInputRef.current) debtFileInputRef.current.value = "";
+    } catch (e) {
+      console.error(e);
+      t.error("Could not process that file. Try a different file.");
+    }
+  }
+
+  function removeDebtFile(idx: number) {
+    setDebtFiles((prev) => prev.filter((_, i) => i !== idx));
+  }
+
   function handleAddressResolved(r: ResolvedProperty) {
     const merged: ResolvedFull = {
       property_id: r.property_id,
@@ -268,11 +301,26 @@ export function PropertyForm(props: {
   const addressValid =
     !!resolved?.property_id || (isEdit && !!address_line1.trim());
   const structuredReady = !!address_line1.trim() && !!state.trim();
+
+  // Debt section validation
+  const debtDeclared = isEdit || hasSecuredDebt !== null;
+  const debtAmountNum = parseFloat(debtAmountStr.replace(/[^0-9.]/g, ""));
+  const debtValid =
+    isEdit ||
+    hasSecuredDebt === false ||
+    (hasSecuredDebt === true &&
+      !isNaN(debtAmountNum) &&
+      debtAmountNum > 0 &&
+      debtFiles.length > 0 &&
+      debtCertified);
+
   const canSubmitOwner =
     isOwnerMode &&
     addressValid &&
     structuredReady &&
     allFilesPresent &&
+    debtDeclared &&
+    debtValid &&
     !submitting;
   const canSubmitInvestor =
     !isOwnerMode &&
@@ -290,6 +338,20 @@ export function PropertyForm(props: {
         metadataFd.set("city", city.trim());
         metadataFd.set("state", state.trim());
         metadataFd.set("postal_code", postal_code.trim());
+
+        // Include debt declaration if it was updated during edit
+        if (hasSecuredDebt !== null) {
+          metadataFd.set("has_secured_debt", hasSecuredDebt ? "true" : "false");
+          if (hasSecuredDebt && debtAmountStr.trim()) {
+            metadataFd.set(
+              "secured_debt_amount",
+              String(debtAmountNum > 0 ? debtAmountNum : 0),
+            );
+          }
+          if (hasSecuredDebt && debtCertified) {
+            metadataFd.set("secured_debt_certified", "true");
+          }
+        }
 
         const editUrl = `/api/me/properties/${props.editPrefill!.propertyId}/edit`;
         const metaRes = await fetch(editUrl, { method: "PATCH", body: metadataFd });
@@ -322,6 +384,24 @@ export function PropertyForm(props: {
             return;
           }
         }
+
+        // Upload any new debt statement files during edit
+        for (const debtFile of debtFiles) {
+          const debtFd = new FormData();
+          debtFd.set("address_line1", address_line1.trim());
+          debtFd.set("address_line2", address_line2.trim());
+          debtFd.set("city", city.trim());
+          debtFd.set("state", state.trim());
+          debtFd.set("postal_code", postal_code.trim());
+          debtFd.set("secured_debt_statement", debtFile);
+
+          const debtRes = await fetch(editUrl, { method: "PATCH", body: debtFd });
+          const debtJson = await debtRes.json().catch(() => null);
+          if (!debtRes.ok) {
+            t.error(debtJson?.error || "Failed to upload loan statement — try again.");
+            return;
+          }
+        }
       } else {
         const fd = new FormData();
         fd.set("address_line1", address_line1.trim());
@@ -332,6 +412,19 @@ export function PropertyForm(props: {
 
         for (const docType of Object.keys(DOC_LABELS) as DocType[]) {
           if (files[docType]) fd.set(docType, files[docType]!);
+        }
+
+        if (hasSecuredDebt !== null) {
+          fd.set("has_secured_debt", hasSecuredDebt ? "true" : "false");
+        }
+        if (hasSecuredDebt === true) {
+          fd.set("secured_debt_amount", String(debtAmountNum > 0 ? debtAmountNum : 0));
+          for (const debtFile of debtFiles) {
+            fd.append("secured_debt_statement", debtFile);
+          }
+          if (debtCertified) {
+            fd.set("secured_debt_certified", "true");
+          }
         }
 
         const res = await fetch("/api/me/properties", { method: "POST", body: fd });
@@ -587,6 +680,175 @@ export function PropertyForm(props: {
                 );
               })}
             </div>
+          </div>
+        )}
+
+        {/* Secured debt declaration — owner mode only */}
+        {isOwnerMode && (
+          <div className="border-t pt-4 space-y-3">
+            <div>
+              <div className="text-sm font-medium">
+                Loans secured by this property {isEdit ? "(optional update)" : "*"}
+              </div>
+              <div className="text-xs text-muted-foreground mt-0.5">
+                This information is kept private and used only for verification
+                purposes. It will never be shared with prospective buyers.
+              </div>
+            </div>
+
+            <div className="text-sm font-medium">
+              Do you currently owe money on any loans secured by this property?
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setHasSecuredDebt(false);
+                  setDebtAmountStr("");
+                  setDebtFiles([]);
+                  setDebtCertified(false);
+                }}
+                className={`px-4 py-2 rounded-md border text-sm font-medium transition-colors ${
+                  hasSecuredDebt === false
+                    ? "bg-foreground text-background border-foreground"
+                    : "bg-white hover:bg-muted/40"
+                }`}
+              >
+                No
+              </button>
+              <button
+                type="button"
+                onClick={() => setHasSecuredDebt(true)}
+                className={`px-4 py-2 rounded-md border text-sm font-medium transition-colors ${
+                  hasSecuredDebt === true
+                    ? "bg-foreground text-background border-foreground"
+                    : "bg-white hover:bg-muted/40"
+                }`}
+              >
+                Yes
+              </button>
+            </div>
+
+            {hasSecuredDebt === false && (
+              <div className="rounded-md bg-muted/40 border p-3 text-sm text-muted-foreground">
+                You&apos;ve indicated this property has no outstanding secured
+                loans. Your answer will be reviewed as part of the verification
+                process.
+              </div>
+            )}
+
+            {hasSecuredDebt === true && (
+              <div className="space-y-3">
+                <label className="block space-y-1">
+                  <span className="text-sm font-medium">
+                    Total amount currently owed *
+                  </span>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                      $
+                    </span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="w-full rounded-md border pl-7 pr-3 py-2 text-sm"
+                      placeholder="0"
+                      value={debtAmountStr}
+                      onChange={(e) => setDebtAmountStr(e.target.value)}
+                      onBlur={(e) => {
+                        const num = parseFloat(
+                          e.target.value.replace(/[^0-9.]/g, ""),
+                        );
+                        if (!isNaN(num)) setDebtAmountStr(formatDebtAmount(String(num)));
+                      }}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Include all mortgages, HELOCs, and other liens. Enter the
+                    combined outstanding principal balance.
+                  </p>
+                </label>
+
+                <div>
+                  <div className="text-sm font-medium mb-1">
+                    Loan statement(s) *
+                  </div>
+                  <div className="text-xs text-muted-foreground mb-2">
+                    Upload your most recent statement for each loan (mortgage,
+                    HELOC, etc.). Multiple files are accepted.
+                  </div>
+
+                  <input
+                    ref={debtFileInputRef}
+                    type="file"
+                    accept="image/*,.pdf"
+                    className="hidden"
+                    onChange={(e) =>
+                      handlePickDebtFile(e.target.files?.[0] ?? null)
+                    }
+                  />
+
+                  <div className="space-y-2">
+                    {debtFiles.map((f, idx) => {
+                      const isImage = f.type.startsWith("image/");
+                      const previewUrl = URL.createObjectURL(f);
+                      return (
+                        <div
+                          key={idx}
+                          className="flex items-center gap-2 rounded-md border p-2"
+                        >
+                          {isImage ? (
+                            <img
+                              src={previewUrl}
+                              alt={f.name}
+                              className="h-10 w-10 rounded object-cover border shrink-0"
+                              onLoad={() => URL.revokeObjectURL(previewUrl)}
+                            />
+                          ) : (
+                            <div className="h-10 w-10 rounded border flex items-center justify-center bg-muted text-xs shrink-0">
+                              PDF
+                            </div>
+                          )}
+                          <span className="text-xs text-muted-foreground truncate flex-1">
+                            {f.name}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => removeDebtFile(idx)}
+                            className="text-xs text-muted-foreground hover:text-foreground shrink-0 px-2"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <button
+                    type="button"
+                    className="mt-2 text-sm px-3 py-1.5 rounded-md border hover:bg-muted/40 transition-colors"
+                    onClick={() => debtFileInputRef.current?.click()}
+                  >
+                    + Add statement
+                  </button>
+                </div>
+
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 shrink-0"
+                    checked={debtCertified}
+                    onChange={(e) => setDebtCertified(e.target.checked)}
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    I certify that the loan information I have provided is
+                    accurate and complete to the best of my knowledge. I
+                    understand this information will be reviewed by FractPath
+                    for verification purposes only.
+                  </span>
+                </label>
+              </div>
+            )}
           </div>
         )}
       </div>

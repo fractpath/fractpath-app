@@ -58,20 +58,51 @@ export async function PATCH(
   const displayParts = [address_line1, address_line2, city, state, postal_code].filter(Boolean).join(", ");
   const computed_normalized = normalizeAddress(displayParts);
 
+  // Build update payload
+  const updatePayload: Record<string, any> = {
+    address_line1,
+    address_line2: address_line2 || null,
+    city: city || null,
+    state,
+    postal_code,
+    normalized_address: computed_normalized || null,
+  };
+
+  // Debt declaration update (optional during edit)
+  const hasSecuredDebtRaw = formData.get("has_secured_debt");
+  if (hasSecuredDebtRaw === "true" || hasSecuredDebtRaw === "false") {
+    const hasSecuredDebt = hasSecuredDebtRaw === "true";
+    updatePayload.has_secured_property_debt = hasSecuredDebt;
+    updatePayload.secured_debt_verification_status = hasSecuredDebt
+      ? "pending"
+      : "not_applicable";
+
+    if (hasSecuredDebt) {
+      const amountRaw = formData.get("secured_debt_amount");
+      if (amountRaw !== null) {
+        const amount = parseFloat(String(amountRaw));
+        if (!isNaN(amount) && amount >= 0) {
+          updatePayload.secured_property_debt_amount = amount;
+        }
+      }
+      if (formData.get("secured_debt_certified") === "true") {
+        updatePayload.secured_debt_certified_at = new Date().toISOString();
+      }
+    } else {
+      // Clearing debt declaration
+      updatePayload.secured_property_debt_amount = null;
+      updatePayload.secured_debt_certified_at = null;
+    }
+  }
+
   const { error: updateErr } = await (svc.from("properties") as any)
-    .update({
-      address_line1,
-      address_line2: address_line2 || null,
-      city: city || null,
-      state,
-      postal_code,
-      normalized_address: computed_normalized || null,
-    })
+    .update(updatePayload)
     .eq("id", propertyId)
     .eq("owner_user_id", user.id);
 
   if (updateErr) return jsonError(updateErr.message, 500);
 
+  // Process verification doc re-uploads (selfie, drivers_license, utility_bill)
   for (const docType of ALLOWED_DOC_TYPES) {
     const file = formData.get(docType);
     if (!file || !(file instanceof File) || file.size === 0) continue;
@@ -125,6 +156,51 @@ export async function PATCH(
     if (upsertErr) {
       return jsonError(`Document record failed for ${docType}: ${upsertErr.message}`, 500);
     }
+  }
+
+  // Process secured debt statement re-uploads (appended, not upserted)
+  const debtStatementFile = formData.get("secured_debt_statement");
+  if (debtStatementFile instanceof File && debtStatementFile.size > 0) {
+    const rawBuf = Buffer.from(await debtStatementFile.arrayBuffer());
+    const result = await enforceLimitsAndProcess(rawBuf, debtStatementFile.type);
+
+    if (!result.ok) {
+      return jsonError(`Loan statement: ${result.error}`, result.status);
+    }
+
+    const storagePath = `${user.id}/${propertyId}/secured_debt_statement_${Date.now()}.${result.ext}`;
+
+    const { error: uploadErr } = await svc.storage
+      .from(BUCKET)
+      .upload(storagePath, result.outBuf, {
+        contentType: result.storedContentType,
+        upsert: false,
+      });
+
+    if (uploadErr) {
+      return jsonError(`Loan statement upload failed: ${uploadErr.message}`, 500);
+    }
+
+    const { error: insertErr } = await (svc.from("property_documents") as any).insert({
+      property_id: propertyId,
+      doc_type: "secured_debt_statement",
+      storage_path: storagePath,
+      content_type: result.storedContentType,
+      byte_size: result.meta.byte_size,
+      sha256: result.meta.sha256,
+      width: result.meta.width ?? null,
+      height: result.meta.height ?? null,
+      original_content_type: result.meta.original_content_type,
+    });
+
+    if (insertErr) {
+      return jsonError(`Debt document record failed: ${insertErr.message}`, 500);
+    }
+
+    console.info("PROPERTY_DEBT_DOC_UPLOAD", {
+      property_id: propertyId,
+      doc_type: "secured_debt_statement",
+    });
   }
 
   return NextResponse.json({ ok: true });

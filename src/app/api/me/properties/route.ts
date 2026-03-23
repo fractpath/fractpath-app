@@ -6,6 +6,10 @@ import {
   type DocProcessingMeta,
 } from "@/lib/uploads/documentProcessing";
 import { normalizeAddress } from "@/lib/propertyResolve";
+import {
+  toHomeownerProperty,
+  toClaimableProperty,
+} from "@/lib/property/projections";
 
 export const runtime = "nodejs";
 
@@ -32,6 +36,14 @@ function formatAddress(row: Record<string, any>): string {
     .join(", ");
 }
 
+// Columns to fetch for properties owned by this user (includes homeowner-visible debt fields)
+const OWNED_SELECT =
+  "id, address_line1, address_line2, city, state, postal_code, status, ownership_status, is_private, owner_user_id, claimed_by_user_id, created_by_user_id, created_at, updated_at, has_secured_property_debt, secured_property_debt_amount, secured_debt_verification_status, secured_debt_fresh_until";
+
+// Columns to fetch for claimable properties (cross-user — no underwriting data)
+const CLAIMABLE_SELECT =
+  "id, address_line1, address_line2, city, state, postal_code, status, ownership_status, is_private, owner_user_id, claimed_by_user_id, created_by_user_id, created_at, updated_at";
+
 export async function GET() {
   const supabase = await createClient();
   const {
@@ -46,9 +58,7 @@ export async function GET() {
   const { data: ownedData, error: ownedErr } = await (
     svc.from("properties") as any
   )
-    .select(
-      "id, address_line1, address_line2, city, state, postal_code, status, ownership_status, is_private, owner_user_id, claimed_by_user_id, created_by_user_id, created_at, updated_at",
-    )
+    .select(OWNED_SELECT)
     .or(
       `owner_user_id.eq.${user.id},created_by_user_id.eq.${user.id},claimed_by_user_id.eq.${user.id}`,
     )
@@ -156,12 +166,11 @@ export async function GET() {
         .filter(Boolean);
 
       if (propertyIds.length > 0) {
+        // Use narrow claimable select — no underwriting data for cross-user properties
         const { data: props, error: propsErr } = await (
           svc.from("properties") as any
         )
-          .select(
-            "id, address_line1, address_line2, city, state, postal_code, status, ownership_status, is_private, owner_user_id, claimed_by_user_id, created_by_user_id, created_at, updated_at",
-          )
+          .select(CLAIMABLE_SELECT)
           .in("id", propertyIds);
 
         if (propsErr) return jsonError(propsErr.message, 500);
@@ -227,26 +236,33 @@ export async function GET() {
   const byId = new Map<string, any>();
 
   for (const r of ownedData ?? []) {
-    byId.set(r.id, {
-      ...r,
-      address_display: formatAddress(r),
-      visibility:
-        r.owner_user_id === user.id || r.claimed_by_user_id === user.id
-          ? "owned"
-          : "created",
-      claim_thread_id: null,
-      claim_deal_id: null,
-      claim_thread_status: null,
-    });
+    const addressDisplay = formatAddress(r);
+    const isOwnedByThisUser =
+      r.owner_user_id === user.id || r.claimed_by_user_id === user.id;
+    byId.set(
+      r.id,
+      toHomeownerProperty(r, {
+        address_display: addressDisplay,
+        visibility: isOwnedByThisUser ? "owned" : "created",
+        claim_thread_id: null,
+        claim_deal_id: null,
+        claim_thread_status: null,
+      }),
+    );
   }
 
   for (const r of claimableProperties) {
     if (!byId.has(r.id)) {
-      byId.set(r.id, {
-        ...r,
-        address_display: formatAddress(r),
-        visibility: "claimable",
-      });
+      const addressDisplay = formatAddress(r);
+      byId.set(
+        r.id,
+        toClaimableProperty(r, {
+          address_display: addressDisplay,
+          claim_thread_id: r.claim_thread_id ?? null,
+          claim_deal_id: r.claim_deal_id ?? null,
+          claim_thread_status: r.claim_thread_status ?? null,
+        }),
+      );
     }
   }
 
@@ -299,6 +315,51 @@ export async function POST(req: Request) {
     files[docType] = file;
   }
 
+  // --- Secured debt declaration ---
+  const hasSecuredDebtRaw = formData.get("has_secured_debt");
+  const hasSecuredDebt: boolean | null =
+    hasSecuredDebtRaw === "true"
+      ? true
+      : hasSecuredDebtRaw === "false"
+        ? false
+        : null;
+
+  const securedDebtAmountRaw = formData.get("secured_debt_amount");
+  const securedDebtAmount: number | null =
+    hasSecuredDebt === true && securedDebtAmountRaw !== null
+      ? parseFloat(String(securedDebtAmountRaw))
+      : null;
+
+  const securedDebtCertified =
+    hasSecuredDebt === true &&
+    formData.get("secured_debt_certified") === "true";
+
+  const debtStatementFiles = formData.getAll("secured_debt_statement").filter(
+    (f): f is File => f instanceof File && f.size > 0,
+  );
+
+  if (hasSecuredDebt === true) {
+    if (
+      securedDebtAmount === null ||
+      isNaN(securedDebtAmount) ||
+      securedDebtAmount < 0
+    ) {
+      return jsonError("Secured debt amount must be a non-negative number", 422);
+    }
+    if (debtStatementFiles.length === 0) {
+      return jsonError(
+        "At least one loan statement is required when secured debt is declared",
+        422,
+      );
+    }
+    if (!securedDebtCertified) {
+      return jsonError(
+        "You must certify that the loan information is accurate",
+        422,
+      );
+    }
+  }
+
   const svc = createServiceClient();
 
   let propertyId: string | null = null;
@@ -318,6 +379,24 @@ export async function POST(req: Request) {
 
   if (existingErr) {
     return jsonError(existingErr.message, 500);
+  }
+
+  // Debt columns to persist
+  const debtVerificationStatus =
+    hasSecuredDebt === null
+      ? null
+      : hasSecuredDebt === false
+        ? "not_applicable"
+        : "pending";
+
+  const debtColumns: Record<string, any> = {};
+  if (hasSecuredDebt !== null) {
+    debtColumns.has_secured_property_debt = hasSecuredDebt;
+    debtColumns.secured_debt_verification_status = debtVerificationStatus;
+    if (hasSecuredDebt === true) {
+      debtColumns.secured_property_debt_amount = securedDebtAmount;
+      debtColumns.secured_debt_certified_at = new Date().toISOString();
+    }
   }
 
   if (existingProperty) {
@@ -347,6 +426,7 @@ export async function POST(req: Request) {
         postal_code,
         is_private: true,
         normalized_address: computed_normalized || null,
+        ...debtColumns,
       })
       .eq("id", existingProperty.id)
       .select("id")
@@ -374,6 +454,7 @@ export async function POST(req: Request) {
         status: "unverified",
         is_private: true,
         normalized_address: computed_normalized || null,
+        ...debtColumns,
       })
       .select("id")
       .single();
@@ -453,6 +534,81 @@ export async function POST(req: Request) {
 
   if (docInsertErr) {
     return jsonError(`Document records failed: ${docInsertErr.message}`, 500);
+  }
+
+  // --- Process and upload secured debt statement files ---
+  if (hasSecuredDebt === true && debtStatementFiles.length > 0) {
+    const debtDocRows: Array<Record<string, any>> = [];
+
+    for (let i = 0; i < debtStatementFiles.length; i++) {
+      const file = debtStatementFiles[i];
+      const rawBuf = Buffer.from(await file.arrayBuffer());
+
+      const result = await enforceLimitsAndProcess(rawBuf, file.type);
+      if (!result.ok) {
+        return jsonError(`Loan statement ${i + 1}: ${result.error}`, result.status);
+      }
+
+      // Debt statements are keyed by index to avoid collisions
+      const storagePath = `${user.id}/${propertyId}/secured_debt_statement_${Date.now()}_${i}.${result.ext}`;
+
+      const { error: uploadErr } = await svc.storage
+        .from(BUCKET)
+        .upload(storagePath, result.outBuf, {
+          contentType: result.storedContentType,
+          upsert: false,
+        });
+
+      if (uploadErr) {
+        return jsonError(`Loan statement upload failed: ${uploadErr.message}`, 500);
+      }
+
+      const debtRow: Record<string, any> = {
+        property_id: propertyId,
+        doc_type: "secured_debt_statement",
+        storage_path: storagePath,
+        content_type: result.storedContentType,
+        byte_size: result.meta.byte_size,
+        sha256: result.meta.sha256,
+        width: result.meta.width ?? null,
+        height: result.meta.height ?? null,
+        original_content_type: result.meta.original_content_type,
+      };
+
+      console.info("PROPERTY_DEBT_DOC_UPLOAD", {
+        property_id: propertyId,
+        doc_type: "secured_debt_statement",
+        index: i,
+        ...result.meta,
+      });
+
+      debtDocRows.push(debtRow);
+    }
+
+    const { error: debtDocInsertErr } = await (
+      svc.from("property_documents") as any
+    ).insert(debtDocRows);
+
+    if (debtDocInsertErr) {
+      return jsonError(
+        `Debt document records failed: ${debtDocInsertErr.message}`,
+        500,
+      );
+    }
+  }
+
+  // --- Record underwriting snapshot (append-only audit trail) ---
+  if (hasSecuredDebt !== null) {
+    await (svc.from("property_underwriting_snapshots") as any).insert({
+      property_id: propertyId,
+      captured_by: user.id,
+      actor_type: "owner",
+      snapshot_source: "owner_declaration",
+      has_secured_property_debt: hasSecuredDebt,
+      secured_property_debt_amount:
+        hasSecuredDebt === true ? securedDebtAmount : null,
+      ltv_policy_ratio: 0.75,
+    });
   }
 
   return NextResponse.json(
