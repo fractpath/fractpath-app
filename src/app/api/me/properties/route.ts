@@ -36,9 +36,9 @@ function formatAddress(row: Record<string, any>): string {
     .join(", ");
 }
 
-// Columns to fetch for properties owned by this user (includes homeowner-visible debt fields)
+// Columns to fetch for properties owned by this user (includes homeowner-visible debt + intake fields)
 const OWNED_SELECT =
-  "id, address_line1, address_line2, city, state, postal_code, status, ownership_status, is_private, owner_user_id, claimed_by_user_id, created_by_user_id, created_at, updated_at, has_secured_property_debt, secured_property_debt_amount, secured_debt_verification_status, secured_debt_fresh_until";
+  "id, address_line1, address_line2, city, state, postal_code, status, ownership_status, is_private, owner_user_id, claimed_by_user_id, created_by_user_id, created_at, updated_at, has_secured_property_debt, secured_property_debt_amount, secured_debt_verification_status, secured_debt_fresh_until, ownership_type, occupancy_use, occupancy_use_other, major_condition_issue, major_condition_issue_details, known_liens_and_claims, total_known_debt_amount, total_known_debt_confidence, debt_statement_availability, title_claims_known, title_claims_details, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, owner_stated_fmv_source_other, willing_to_proceed_formal_review";
 
 // Columns to fetch for claimable properties (cross-user — no underwriting data)
 const CLAIMABLE_SELECT =
@@ -412,6 +412,52 @@ export async function POST(req: Request) {
     }
   }
 
+  // --- Sprint 16 intake fields ---
+  function strOrNull(key: string): string | null {
+    const v = String(formData.get(key) ?? "").trim();
+    return v === "" ? null : v;
+  }
+  function numOrNull(key: string): number | null {
+    const v = String(formData.get(key) ?? "").trim();
+    if (v === "") return null;
+    const n = parseFloat(v.replace(/[^0-9.]/g, ""));
+    return isNaN(n) ? null : n;
+  }
+
+  const intakeColumns: Record<string, any> = {
+    ownership_type: strOrNull("ownership_type"),
+    occupancy_use: strOrNull("occupancy_use"),
+    occupancy_use_other: strOrNull("occupancy_use_other"),
+    major_condition_issue: strOrNull("major_condition_issue"),
+    major_condition_issue_details: strOrNull("major_condition_issue_details"),
+    known_liens_and_claims: (() => {
+      const vals = formData
+        .getAll("known_liens_and_claims")
+        .map((v) => String(v).trim())
+        .filter(Boolean);
+      return vals.length > 0 ? vals : null;
+    })(),
+    total_known_debt_amount: numOrNull("total_known_debt_amount"),
+    total_known_debt_confidence: strOrNull("total_known_debt_confidence"),
+    debt_statement_availability: strOrNull("debt_statement_availability"),
+    title_claims_known: strOrNull("title_claims_known"),
+    title_claims_details: strOrNull("title_claims_details"),
+    owner_stated_fmv: numOrNull("owner_stated_fmv"),
+    owner_stated_fmv_confidence: strOrNull("owner_stated_fmv_confidence"),
+    owner_stated_fmv_source: strOrNull("owner_stated_fmv_source"),
+    owner_stated_fmv_source_other: strOrNull("owner_stated_fmv_source_other"),
+    willing_to_proceed_formal_review: strOrNull(
+      "willing_to_proceed_formal_review",
+    ),
+  };
+
+  // Strip undefined intake columns so we don't accidentally null out existing
+  // data when the form only submits a partial update.
+  const activeIntakeColumns: Record<string, any> = {};
+  for (const [k, v] of Object.entries(intakeColumns)) {
+    if (v !== null) activeIntakeColumns[k] = v;
+  }
+
   if (existingProperty) {
     const ownedByAnotherUser =
       !!existingProperty.owner_user_id &&
@@ -440,6 +486,7 @@ export async function POST(req: Request) {
         is_private: true,
         normalized_address: computed_normalized || null,
         ...debtColumns,
+        ...activeIntakeColumns,
       })
       .eq("id", existingProperty.id)
       .select("id")
@@ -468,6 +515,7 @@ export async function POST(req: Request) {
         is_private: true,
         normalized_address: computed_normalized || null,
         ...debtColumns,
+        ...activeIntakeColumns,
       })
       .select("id")
       .single();

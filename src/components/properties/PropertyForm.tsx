@@ -50,6 +50,23 @@ type EditPrefill = {
   city: string;
   state: string;
   postal_code: string;
+  // Sprint 16 intake fields (optional — prefill from saved property data)
+  ownership_type?: string | null;
+  occupancy_use?: string | null;
+  occupancy_use_other?: string | null;
+  major_condition_issue?: string | null;
+  major_condition_issue_details?: string | null;
+  known_liens_and_claims?: string[] | null;
+  total_known_debt_amount?: number | null;
+  total_known_debt_confidence?: string | null;
+  debt_statement_availability?: string | null;
+  title_claims_known?: string | null;
+  title_claims_details?: string | null;
+  owner_stated_fmv?: number | null;
+  owner_stated_fmv_confidence?: string | null;
+  owner_stated_fmv_source?: string | null;
+  owner_stated_fmv_source_other?: string | null;
+  willing_to_proceed_formal_review?: string | null;
 };
 
 type ResolveExtras = {
@@ -198,6 +215,55 @@ export function PropertyForm(props: {
   const [debtCertified, setDebtCertified] = useState(false);
   const debtFileInputRef = useRef<HTMLInputElement>(null);
 
+  // Sprint 16 intake fields
+  const [ownershipType, setOwnershipType] = useState<string>(
+    props.editPrefill?.ownership_type ?? "",
+  );
+  const [occupancyUse, setOccupancyUse] = useState<string>(
+    props.editPrefill?.occupancy_use ?? "",
+  );
+  const [occupancyUseOther, setOccupancyUseOther] = useState<string>(
+    props.editPrefill?.occupancy_use_other ?? "",
+  );
+  const [majorConditionIssue, setMajorConditionIssue] = useState<string>(
+    props.editPrefill?.major_condition_issue ?? "",
+  );
+  const [majorConditionIssueDetails, setMajorConditionIssueDetails] =
+    useState<string>(props.editPrefill?.major_condition_issue_details ?? "");
+  const [knownLiensAndClaims, setKnownLiensAndClaims] = useState<string[]>(
+    props.editPrefill?.known_liens_and_claims ?? [],
+  );
+  const [totalKnownDebtAmountStr, setTotalKnownDebtAmountStr] = useState<string>(
+    props.editPrefill?.total_known_debt_amount != null
+      ? String(props.editPrefill.total_known_debt_amount)
+      : "",
+  );
+  const [totalKnownDebtConfidence, setTotalKnownDebtConfidence] =
+    useState<string>(props.editPrefill?.total_known_debt_confidence ?? "");
+  const [debtStatementAvailability, setDebtStatementAvailability] =
+    useState<string>(props.editPrefill?.debt_statement_availability ?? "");
+  const [titleClaimsKnown, setTitleClaimsKnown] = useState<string>(
+    props.editPrefill?.title_claims_known ?? "",
+  );
+  const [titleClaimsDetails, setTitleClaimsDetails] = useState<string>(
+    props.editPrefill?.title_claims_details ?? "",
+  );
+  const [ownerStatedFmvStr, setOwnerStatedFmvStr] = useState<string>(
+    props.editPrefill?.owner_stated_fmv != null
+      ? String(props.editPrefill.owner_stated_fmv)
+      : "",
+  );
+  const [ownerStatedFmvConfidence, setOwnerStatedFmvConfidence] =
+    useState<string>(props.editPrefill?.owner_stated_fmv_confidence ?? "");
+  const [ownerStatedFmvSource, setOwnerStatedFmvSource] = useState<string>(
+    props.editPrefill?.owner_stated_fmv_source ?? "",
+  );
+  const [ownerStatedFmvSourceOther, setOwnerStatedFmvSourceOther] =
+    useState<string>(props.editPrefill?.owner_stated_fmv_source_other ?? "");
+  const [willingToProceed, setWillingToProceed] = useState<string>(
+    props.editPrefill?.willing_to_proceed_formal_review ?? "",
+  );
+
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -216,7 +282,74 @@ export function PropertyForm(props: {
     setDebtAmountStr("");
     setDebtFiles([]);
     setDebtCertified(false);
-  }, [props.open, defaultMode, isEdit]);
+    // Sprint 16 intake — prefill from saved data in edit mode, reset in create mode
+    const p = props.editPrefill;
+    setOwnershipType(p?.ownership_type ?? "");
+    setOccupancyUse(p?.occupancy_use ?? "");
+    setOccupancyUseOther(p?.occupancy_use_other ?? "");
+    setMajorConditionIssue(p?.major_condition_issue ?? "");
+    setMajorConditionIssueDetails(p?.major_condition_issue_details ?? "");
+    setKnownLiensAndClaims(p?.known_liens_and_claims ?? []);
+    setTotalKnownDebtAmountStr(
+      p?.total_known_debt_amount != null ? String(p.total_known_debt_amount) : "",
+    );
+    setTotalKnownDebtConfidence(p?.total_known_debt_confidence ?? "");
+    setDebtStatementAvailability(p?.debt_statement_availability ?? "");
+    setTitleClaimsKnown(p?.title_claims_known ?? "");
+    setTitleClaimsDetails(p?.title_claims_details ?? "");
+    setOwnerStatedFmvStr(
+      p?.owner_stated_fmv != null ? String(p.owner_stated_fmv) : "",
+    );
+    setOwnerStatedFmvConfidence(p?.owner_stated_fmv_confidence ?? "");
+    setOwnerStatedFmvSource(p?.owner_stated_fmv_source ?? "");
+    setOwnerStatedFmvSourceOther(p?.owner_stated_fmv_source_other ?? "");
+    setWillingToProceed(p?.willing_to_proceed_formal_review ?? "");
+  }, [props.open, defaultMode, isEdit, props.editPrefill]);
+
+  // Edit-mode Sprint 16 field reload — fetch from API since the parent
+  // component (PropertyList) passes only address fields via editPrefill.
+  useEffect(() => {
+    if (!props.open || !isEdit || !props.editPrefill?.propertyId) return;
+    const pid = props.editPrefill.propertyId;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/me/properties");
+        if (!res.ok || cancelled) return;
+        const json = await res.json().catch(() => null);
+        if (!json || cancelled) return;
+        const p = (json.properties ?? []).find((r: any) => r.id === pid);
+        if (!p || cancelled) return;
+        setOwnershipType(p.ownership_type ?? "");
+        setOccupancyUse(p.occupancy_use ?? "");
+        setOccupancyUseOther(p.occupancy_use_other ?? "");
+        setMajorConditionIssue(p.major_condition_issue ?? "");
+        setMajorConditionIssueDetails(p.major_condition_issue_details ?? "");
+        setKnownLiensAndClaims(p.known_liens_and_claims ?? []);
+        setTotalKnownDebtAmountStr(
+          p.total_known_debt_amount != null
+            ? String(p.total_known_debt_amount)
+            : "",
+        );
+        setTotalKnownDebtConfidence(p.total_known_debt_confidence ?? "");
+        setDebtStatementAvailability(p.debt_statement_availability ?? "");
+        setTitleClaimsKnown(p.title_claims_known ?? "");
+        setTitleClaimsDetails(p.title_claims_details ?? "");
+        setOwnerStatedFmvStr(
+          p.owner_stated_fmv != null ? String(p.owner_stated_fmv) : "",
+        );
+        setOwnerStatedFmvConfidence(p.owner_stated_fmv_confidence ?? "");
+        setOwnerStatedFmvSource(p.owner_stated_fmv_source ?? "");
+        setOwnerStatedFmvSourceOther(p.owner_stated_fmv_source_other ?? "");
+        setWillingToProceed(p.willing_to_proceed_formal_review ?? "");
+      } catch {
+        // Fail gracefully — intake fields remain blank
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [props.open, isEdit, props.editPrefill?.propertyId]);
 
   const previews = useMemo(() => {
     const out: Partial<Record<DocType, { url: string; isImage: boolean }>> = {};
@@ -314,6 +447,25 @@ export function PropertyForm(props: {
       debtFiles.length > 0 &&
       debtCertified);
 
+  // Sprint 16 intake validation — only required in create mode
+  const intakeValid =
+    isEdit ||
+    (ownershipType !== "" &&
+      occupancyUse !== "" &&
+      (occupancyUse !== "other" || occupancyUseOther.trim() !== "") &&
+      majorConditionIssue !== "" &&
+      (majorConditionIssue !== "yes" ||
+        majorConditionIssueDetails.trim() !== "") &&
+      knownLiensAndClaims.length > 0 &&
+      titleClaimsKnown !== "" &&
+      (titleClaimsKnown !== "yes" || titleClaimsDetails.trim() !== "") &&
+      ownerStatedFmvStr.trim() !== "" &&
+      ownerStatedFmvConfidence !== "" &&
+      ownerStatedFmvSource !== "" &&
+      (ownerStatedFmvSource !== "other" ||
+        ownerStatedFmvSourceOther.trim() !== "") &&
+      willingToProceed !== "");
+
   const canSubmitOwner =
     isOwnerMode &&
     addressValid &&
@@ -321,6 +473,7 @@ export function PropertyForm(props: {
     allFilesPresent &&
     debtDeclared &&
     debtValid &&
+    intakeValid &&
     !submitting;
   const canSubmitInvestor =
     !isOwnerMode &&
@@ -352,6 +505,34 @@ export function PropertyForm(props: {
             metadataFd.set("secured_debt_certified", "true");
           }
         }
+
+        // Sprint 16 intake fields (optional during edit — only send if set)
+        if (ownershipType) metadataFd.set("ownership_type", ownershipType);
+        if (occupancyUse) metadataFd.set("occupancy_use", occupancyUse);
+        if (occupancyUseOther) metadataFd.set("occupancy_use_other", occupancyUseOther);
+        if (majorConditionIssue) metadataFd.set("major_condition_issue", majorConditionIssue);
+        if (majorConditionIssueDetails)
+          metadataFd.set("major_condition_issue_details", majorConditionIssueDetails);
+        for (const v of knownLiensAndClaims)
+          metadataFd.append("known_liens_and_claims", v);
+        if (totalKnownDebtAmountStr.trim())
+          metadataFd.set("total_known_debt_amount", totalKnownDebtAmountStr.trim());
+        if (totalKnownDebtConfidence)
+          metadataFd.set("total_known_debt_confidence", totalKnownDebtConfidence);
+        if (debtStatementAvailability)
+          metadataFd.set("debt_statement_availability", debtStatementAvailability);
+        if (titleClaimsKnown) metadataFd.set("title_claims_known", titleClaimsKnown);
+        if (titleClaimsDetails) metadataFd.set("title_claims_details", titleClaimsDetails);
+        if (ownerStatedFmvStr.trim())
+          metadataFd.set("owner_stated_fmv", ownerStatedFmvStr.trim());
+        if (ownerStatedFmvConfidence)
+          metadataFd.set("owner_stated_fmv_confidence", ownerStatedFmvConfidence);
+        if (ownerStatedFmvSource)
+          metadataFd.set("owner_stated_fmv_source", ownerStatedFmvSource);
+        if (ownerStatedFmvSourceOther)
+          metadataFd.set("owner_stated_fmv_source_other", ownerStatedFmvSourceOther);
+        if (willingToProceed)
+          metadataFd.set("willing_to_proceed_formal_review", willingToProceed);
 
         const editUrl = `/api/me/properties/${props.editPrefill!.propertyId}/edit`;
         const metaRes = await fetch(editUrl, { method: "PATCH", body: metadataFd });
@@ -426,6 +607,32 @@ export function PropertyForm(props: {
             fd.set("secured_debt_certified", "true");
           }
         }
+
+        // Sprint 16 intake fields
+        if (ownershipType) fd.set("ownership_type", ownershipType);
+        if (occupancyUse) fd.set("occupancy_use", occupancyUse);
+        if (occupancyUseOther) fd.set("occupancy_use_other", occupancyUseOther);
+        if (majorConditionIssue) fd.set("major_condition_issue", majorConditionIssue);
+        if (majorConditionIssueDetails)
+          fd.set("major_condition_issue_details", majorConditionIssueDetails);
+        for (const v of knownLiensAndClaims) fd.append("known_liens_and_claims", v);
+        if (totalKnownDebtAmountStr.trim())
+          fd.set("total_known_debt_amount", totalKnownDebtAmountStr.trim());
+        if (totalKnownDebtConfidence)
+          fd.set("total_known_debt_confidence", totalKnownDebtConfidence);
+        if (debtStatementAvailability)
+          fd.set("debt_statement_availability", debtStatementAvailability);
+        if (titleClaimsKnown) fd.set("title_claims_known", titleClaimsKnown);
+        if (titleClaimsDetails) fd.set("title_claims_details", titleClaimsDetails);
+        if (ownerStatedFmvStr.trim())
+          fd.set("owner_stated_fmv", ownerStatedFmvStr.trim());
+        if (ownerStatedFmvConfidence)
+          fd.set("owner_stated_fmv_confidence", ownerStatedFmvConfidence);
+        if (ownerStatedFmvSource) fd.set("owner_stated_fmv_source", ownerStatedFmvSource);
+        if (ownerStatedFmvSourceOther)
+          fd.set("owner_stated_fmv_source_other", ownerStatedFmvSourceOther);
+        if (willingToProceed)
+          fd.set("willing_to_proceed_formal_review", willingToProceed);
 
         const res = await fetch("/api/me/properties", { method: "POST", body: fd });
         const json = await res.json().catch(() => null);
@@ -735,6 +942,441 @@ export function PropertyForm(props: {
                 You&apos;ve indicated this property has no outstanding secured
                 loans. Your answer will be reviewed as part of the verification
                 process.
+              </div>
+            )}
+
+            {/* Sprint 16 intake section — owner mode only */}
+            {isOwnerMode && (
+              <div className="border-t pt-4 space-y-5">
+                <div>
+                  <div className="text-sm font-medium">
+                    Additional property details{" "}
+                    {isEdit ? "(optional update)" : "*"}
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-0.5">
+                    This information is kept private and used only for internal
+                    review. It will never be shared with prospective buyers.
+                  </div>
+                </div>
+
+                {/* Ownership type */}
+                <div className="space-y-1.5">
+                  <div className="text-sm font-medium">
+                    How is ownership of this property held?
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { value: "sole_owner", label: "Sole owner" },
+                      { value: "co_owner", label: "Co-owner" },
+                      { value: "trust", label: "Trust" },
+                      { value: "estate", label: "Estate" },
+                      { value: "not_sure", label: "Not sure" },
+                    ].map(({ value, label }) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setOwnershipType(value)}
+                        className={`px-3 py-1.5 rounded-md border text-sm transition-colors ${
+                          ownershipType === value
+                            ? "bg-foreground text-background border-foreground"
+                            : "bg-white hover:bg-muted/40"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Occupancy use */}
+                <div className="space-y-1.5">
+                  <div className="text-sm font-medium">
+                    How is this property currently used?
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { value: "primary", label: "Primary residence" },
+                      { value: "rental", label: "Rental / investment" },
+                      { value: "vacant", label: "Vacant" },
+                      { value: "second_home", label: "Second home" },
+                      { value: "other", label: "Other" },
+                    ].map(({ value, label }) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => {
+                          setOccupancyUse(value);
+                          if (value !== "other") setOccupancyUseOther("");
+                        }}
+                        className={`px-3 py-1.5 rounded-md border text-sm transition-colors ${
+                          occupancyUse === value
+                            ? "bg-foreground text-background border-foreground"
+                            : "bg-white hover:bg-muted/40"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {occupancyUse === "other" && (
+                    <input
+                      type="text"
+                      className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
+                      placeholder="Please describe…"
+                      value={occupancyUseOther}
+                      onChange={(e) => setOccupancyUseOther(e.target.value)}
+                    />
+                  )}
+                </div>
+
+                {/* Major condition issues */}
+                <div className="space-y-1.5">
+                  <div className="text-sm font-medium">
+                    Are you aware of any major structural or condition issues
+                    affecting this property?
+                  </div>
+                  <div className="flex gap-2">
+                    {[
+                      { value: "no", label: "No" },
+                      { value: "yes", label: "Yes" },
+                      { value: "not_sure", label: "Not sure" },
+                    ].map(({ value, label }) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => {
+                          setMajorConditionIssue(value);
+                          if (value !== "yes")
+                            setMajorConditionIssueDetails("");
+                        }}
+                        className={`px-4 py-2 rounded-md border text-sm font-medium transition-colors ${
+                          majorConditionIssue === value
+                            ? "bg-foreground text-background border-foreground"
+                            : "bg-white hover:bg-muted/40"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {majorConditionIssue === "yes" && (
+                    <textarea
+                      className="mt-1 w-full rounded-md border px-3 py-2 text-sm resize-none"
+                      rows={2}
+                      placeholder="Briefly describe the issue(s)…"
+                      value={majorConditionIssueDetails}
+                      onChange={(e) =>
+                        setMajorConditionIssueDetails(e.target.value)
+                      }
+                    />
+                  )}
+                </div>
+
+                {/* Known liens and claims */}
+                <div className="space-y-1.5">
+                  <div className="text-sm font-medium">
+                    Which of the following apply to this property? (Select all
+                    that apply)
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { value: "first_mortgage", label: "First mortgage" },
+                      { value: "heloc", label: "HELOC" },
+                      { value: "second_lien", label: "Second lien" },
+                      { value: "tax_lien", label: "Tax lien" },
+                      { value: "judgment", label: "Judgment" },
+                      { value: "hoa_lien", label: "HOA lien" },
+                      { value: "other_claim", label: "Other claim" },
+                      { value: "none_known", label: "None known" },
+                      { value: "not_sure", label: "Not sure" },
+                    ].map(({ value, label }) => {
+                      const selected = knownLiensAndClaims.includes(value);
+                      return (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => {
+                            setKnownLiensAndClaims((prev) => {
+                              if (
+                                value === "none_known" ||
+                                value === "not_sure"
+                              ) {
+                                return selected ? [] : [value];
+                              }
+                              const without = prev.filter(
+                                (v) =>
+                                  v !== "none_known" &&
+                                  v !== "not_sure" &&
+                                  v !== value,
+                              );
+                              return selected
+                                ? without
+                                : [...without, value];
+                            });
+                          }}
+                          className={`px-3 py-1.5 rounded-md border text-sm transition-colors ${
+                            selected
+                              ? "bg-foreground text-background border-foreground"
+                              : "bg-white hover:bg-muted/40"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Debt detail fields — shown when any real lien type selected */}
+                  {knownLiensAndClaims.some(
+                    (v) => v !== "none_known" && v !== "not_sure",
+                  ) && (
+                    <div className="space-y-3 mt-2 pl-1 border-l-2 border-muted">
+                      <label className="block space-y-1">
+                        <span className="text-sm font-medium">
+                          Estimated total balance across all liens
+                        </span>
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                            $
+                          </span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            className="w-full rounded-md border pl-7 pr-3 py-2 text-sm"
+                            placeholder="0"
+                            value={totalKnownDebtAmountStr}
+                            onChange={(e) =>
+                              setTotalKnownDebtAmountStr(e.target.value)
+                            }
+                          />
+                        </div>
+                      </label>
+
+                      <div className="space-y-1.5">
+                        <div className="text-sm font-medium">
+                          How confident are you in that estimate?
+                        </div>
+                        <div className="flex gap-2 flex-wrap">
+                          {[
+                            { value: "exact", label: "Exact" },
+                            { value: "estimate", label: "Estimate" },
+                            { value: "not_sure", label: "Not sure" },
+                          ].map(({ value, label }) => (
+                            <button
+                              key={value}
+                              type="button"
+                              onClick={() =>
+                                setTotalKnownDebtConfidence(value)
+                              }
+                              className={`px-3 py-1.5 rounded-md border text-sm transition-colors ${
+                                totalKnownDebtConfidence === value
+                                  ? "bg-foreground text-background border-foreground"
+                                  : "bg-white hover:bg-muted/40"
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <div className="text-sm font-medium">
+                          Do you have loan statements available?
+                        </div>
+                        <div className="flex gap-2 flex-wrap">
+                          {[
+                            { value: "yes", label: "Yes" },
+                            { value: "partially", label: "Partially" },
+                            { value: "no", label: "No" },
+                          ].map(({ value, label }) => (
+                            <button
+                              key={value}
+                              type="button"
+                              onClick={() =>
+                                setDebtStatementAvailability(value)
+                              }
+                              className={`px-3 py-1.5 rounded-md border text-sm transition-colors ${
+                                debtStatementAvailability === value
+                                  ? "bg-foreground text-background border-foreground"
+                                  : "bg-white hover:bg-muted/40"
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Title claims */}
+                <div className="space-y-1.5">
+                  <div className="text-sm font-medium">
+                    Are you aware of any title disputes, claims, or ownership
+                    challenges on this property?
+                  </div>
+                  <div className="flex gap-2">
+                    {[
+                      { value: "no", label: "No" },
+                      { value: "yes", label: "Yes" },
+                      { value: "not_sure", label: "Not sure" },
+                    ].map(({ value, label }) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => {
+                          setTitleClaimsKnown(value);
+                          if (value !== "yes") setTitleClaimsDetails("");
+                        }}
+                        className={`px-4 py-2 rounded-md border text-sm font-medium transition-colors ${
+                          titleClaimsKnown === value
+                            ? "bg-foreground text-background border-foreground"
+                            : "bg-white hover:bg-muted/40"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {titleClaimsKnown === "yes" && (
+                    <textarea
+                      className="mt-1 w-full rounded-md border px-3 py-2 text-sm resize-none"
+                      rows={2}
+                      placeholder="Briefly describe…"
+                      value={titleClaimsDetails}
+                      onChange={(e) => setTitleClaimsDetails(e.target.value)}
+                    />
+                  )}
+                </div>
+
+                {/* Owner-stated FMV */}
+                <div className="space-y-3">
+                  <label className="block space-y-1">
+                    <span className="text-sm font-medium">
+                      What do you believe this property is worth today?
+                    </span>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                        $
+                      </span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        className="w-full rounded-md border pl-7 pr-3 py-2 text-sm"
+                        placeholder="0"
+                        value={ownerStatedFmvStr}
+                        onChange={(e) => setOwnerStatedFmvStr(e.target.value)}
+                      />
+                    </div>
+                  </label>
+
+                  <div className="space-y-1.5">
+                    <div className="text-sm font-medium">
+                      How confident are you in that estimate?
+                    </div>
+                    <div className="flex gap-2 flex-wrap">
+                      {[
+                        { value: "very_confident", label: "Very confident" },
+                        { value: "somewhat", label: "Somewhat confident" },
+                        { value: "low", label: "Low confidence" },
+                        { value: "not_sure", label: "Not sure" },
+                      ].map(({ value, label }) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => setOwnerStatedFmvConfidence(value)}
+                          className={`px-3 py-1.5 rounded-md border text-sm transition-colors ${
+                            ownerStatedFmvConfidence === value
+                              ? "bg-foreground text-background border-foreground"
+                              : "bg-white hover:bg-muted/40"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="text-sm font-medium">
+                      What is your primary basis for this estimate?
+                    </div>
+                    <div className="flex gap-2 flex-wrap">
+                      {[
+                        { value: "appraisal", label: "Recent appraisal" },
+                        { value: "realtor_cma", label: "Realtor / CMA" },
+                        { value: "online", label: "Online estimate" },
+                        {
+                          value: "personal",
+                          label: "Personal assessment",
+                        },
+                        {
+                          value: "offer_listing",
+                          label: "Offer / listing price",
+                        },
+                        { value: "other", label: "Other" },
+                      ].map(({ value, label }) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => {
+                            setOwnerStatedFmvSource(value);
+                            if (value !== "other")
+                              setOwnerStatedFmvSourceOther("");
+                          }}
+                          className={`px-3 py-1.5 rounded-md border text-sm transition-colors ${
+                            ownerStatedFmvSource === value
+                              ? "bg-foreground text-background border-foreground"
+                              : "bg-white hover:bg-muted/40"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    {ownerStatedFmvSource === "other" && (
+                      <input
+                        type="text"
+                        className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
+                        placeholder="Please describe…"
+                        value={ownerStatedFmvSourceOther}
+                        onChange={(e) =>
+                          setOwnerStatedFmvSourceOther(e.target.value)
+                        }
+                      />
+                    )}
+                  </div>
+                </div>
+
+                {/* Willing to proceed */}
+                <div className="space-y-1.5">
+                  <div className="text-sm font-medium">
+                    Are you open to moving forward with a formal review of your
+                    options?
+                  </div>
+                  <div className="flex gap-2">
+                    {[
+                      { value: "yes", label: "Yes" },
+                      { value: "maybe", label: "Maybe" },
+                      { value: "no", label: "Not right now" },
+                    ].map(({ value, label }) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setWillingToProceed(value)}
+                        className={`px-4 py-2 rounded-md border text-sm font-medium transition-colors ${
+                          willingToProceed === value
+                            ? "bg-foreground text-background border-foreground"
+                            : "bg-white hover:bg-muted/40"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
 

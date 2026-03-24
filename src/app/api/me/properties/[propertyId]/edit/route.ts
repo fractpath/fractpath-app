@@ -105,6 +105,47 @@ export async function PATCH(
     }
   }
 
+  // Sprint 16 intake fields — all optional during edit; only update when provided
+  function strField(key: string): string | null {
+    const v = String(formData.get(key) ?? "").trim();
+    return v === "" ? null : v;
+  }
+  function numField(key: string): number | null {
+    const v = String(formData.get(key) ?? "").trim();
+    if (v === "") return null;
+    const n = parseFloat(v.replace(/[^0-9.]/g, ""));
+    return isNaN(n) ? null : n;
+  }
+
+  const intakeFields: Record<string, any> = {
+    ownership_type: strField("ownership_type"),
+    occupancy_use: strField("occupancy_use"),
+    occupancy_use_other: strField("occupancy_use_other"),
+    major_condition_issue: strField("major_condition_issue"),
+    major_condition_issue_details: strField("major_condition_issue_details"),
+    known_liens_and_claims: (() => {
+      const vals = formData
+        .getAll("known_liens_and_claims")
+        .map((v) => String(v).trim())
+        .filter(Boolean);
+      return vals.length > 0 ? vals : null;
+    })(),
+    total_known_debt_amount: numField("total_known_debt_amount"),
+    total_known_debt_confidence: strField("total_known_debt_confidence"),
+    debt_statement_availability: strField("debt_statement_availability"),
+    title_claims_known: strField("title_claims_known"),
+    title_claims_details: strField("title_claims_details"),
+    owner_stated_fmv: numField("owner_stated_fmv"),
+    owner_stated_fmv_confidence: strField("owner_stated_fmv_confidence"),
+    owner_stated_fmv_source: strField("owner_stated_fmv_source"),
+    owner_stated_fmv_source_other: strField("owner_stated_fmv_source_other"),
+    willing_to_proceed_formal_review: strField("willing_to_proceed_formal_review"),
+  };
+
+  for (const [k, v] of Object.entries(intakeFields)) {
+    if (v !== null) updatePayload[k] = v;
+  }
+
   const { error: updateErr } = await (svc.from("properties") as any)
     .update(updatePayload)
     .eq("id", propertyId)

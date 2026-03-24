@@ -107,7 +107,7 @@ export default async function AdminPropertyAuditPage({
 
   const propRes = await (supabase.from("properties") as any)
     .select(
-      "id, owner_user_id, address_line1, address_line2, city, state, postal_code, status, created_at, updated_at, reviewed_at, reviewed_by, verified_at, verified_by, review_notes, has_secured_property_debt, secured_property_debt_amount, secured_debt_certified_at, secured_debt_last_verified_at, secured_debt_fresh_until, secured_debt_verification_status, latest_verified_fmv, fmv_verified_at, fmv_verification_source, ltv_policy_ratio, max_accessible_cash_current",
+      "id, owner_user_id, address_line1, address_line2, city, state, postal_code, status, created_at, updated_at, reviewed_at, reviewed_by, verified_at, verified_by, review_notes, has_secured_property_debt, secured_property_debt_amount, secured_debt_certified_at, secured_debt_last_verified_at, secured_debt_fresh_until, secured_debt_verification_status, latest_verified_fmv, fmv_verified_at, fmv_verification_source, ltv_policy_ratio, max_accessible_cash_current, ownership_type, occupancy_use, occupancy_use_other, major_condition_issue, major_condition_issue_details, known_liens_and_claims, total_known_debt_amount, total_known_debt_confidence, debt_statement_availability, title_claims_known, title_claims_details, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, owner_stated_fmv_source_other, willing_to_proceed_formal_review",
     )
     .eq("id", propertyId)
     .maybeSingle();
@@ -421,6 +421,131 @@ export default async function AdminPropertyAuditPage({
         propertyId={propertyId}
         currentStatus={p.status}
       />
+
+      {/* Sprint 16 intake panel */}
+      {(p.ownership_type ||
+        p.occupancy_use ||
+        p.major_condition_issue ||
+        (p.known_liens_and_claims && p.known_liens_and_claims.length > 0) ||
+        p.title_claims_known ||
+        p.owner_stated_fmv != null ||
+        p.willing_to_proceed_formal_review) && (
+        <div className="rounded-lg border overflow-hidden">
+          <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b">
+            Homeowner intake (Sprint 16)
+          </div>
+          <div className="p-4 text-sm space-y-4">
+            <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+              <div>
+                <div className="text-muted-foreground text-xs">Ownership type</div>
+                <div className="font-medium">
+                  {p.ownership_type?.replace("_", " ") ?? "—"}
+                </div>
+              </div>
+              <div>
+                <div className="text-muted-foreground text-xs">Occupancy use</div>
+                <div className="font-medium">
+                  {p.occupancy_use?.replace("_", " ") ?? "—"}
+                  {p.occupancy_use === "other" && p.occupancy_use_other
+                    ? `: ${p.occupancy_use_other}`
+                    : ""}
+                </div>
+              </div>
+              <div>
+                <div className="text-muted-foreground text-xs">Major condition issue</div>
+                <div className="font-medium">
+                  {p.major_condition_issue?.replace("_", " ") ?? "—"}
+                </div>
+              </div>
+              {p.major_condition_issue === "yes" && (
+                <div>
+                  <div className="text-muted-foreground text-xs">Condition details</div>
+                  <div className="font-medium break-words">
+                    {p.major_condition_issue_details ?? "—"}
+                  </div>
+                </div>
+              )}
+              <div>
+                <div className="text-muted-foreground text-xs">Title claims known</div>
+                <div className="font-medium">
+                  {p.title_claims_known?.replace("_", " ") ?? "—"}
+                </div>
+              </div>
+              {p.title_claims_known === "yes" && (
+                <div>
+                  <div className="text-muted-foreground text-xs">Title claim details</div>
+                  <div className="font-medium break-words">
+                    {p.title_claims_details ?? "—"}
+                  </div>
+                </div>
+              )}
+              <div>
+                <div className="text-muted-foreground text-xs">Owner-stated FMV</div>
+                <div className="font-medium">{formatCurrency(p.owner_stated_fmv)}</div>
+              </div>
+              <div>
+                <div className="text-muted-foreground text-xs">FMV confidence</div>
+                <div className="font-medium">
+                  {p.owner_stated_fmv_confidence?.replace("_", " ") ?? "—"}
+                </div>
+              </div>
+              <div>
+                <div className="text-muted-foreground text-xs">FMV basis</div>
+                <div className="font-medium">
+                  {p.owner_stated_fmv_source?.replace("_", " ") ?? "—"}
+                  {p.owner_stated_fmv_source === "other" &&
+                  p.owner_stated_fmv_source_other
+                    ? `: ${p.owner_stated_fmv_source_other}`
+                    : ""}
+                </div>
+              </div>
+              <div>
+                <div className="text-muted-foreground text-xs">Open to formal review</div>
+                <div className="font-medium">
+                  {p.willing_to_proceed_formal_review?.replace("_", " ") ?? "—"}
+                </div>
+              </div>
+            </div>
+            {p.known_liens_and_claims && p.known_liens_and_claims.length > 0 && (
+              <div className="border-t pt-3">
+                <div className="text-xs font-medium text-muted-foreground mb-2">
+                  Known liens and claims
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {p.known_liens_and_claims.map((v: string) => (
+                    <span
+                      key={v}
+                      className="inline-block rounded-full border px-2 py-0.5 text-xs"
+                    >
+                      {v.replace(/_/g, " ")}
+                    </span>
+                  ))}
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-2">
+                  <div>
+                    <div className="text-muted-foreground text-xs">Total declared debt</div>
+                    <div className="font-medium">
+                      {formatCurrency(p.total_known_debt_amount)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground text-xs">Confidence</div>
+                    <div className="font-medium">
+                      {p.total_known_debt_confidence?.replace("_", " ") ?? "—"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground text-xs">Statements available</div>
+                    <div className="font-medium">
+                      {p.debt_statement_availability ?? "—"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Underwriting snapshots */}
       {underwritingRows.length > 0 && (
