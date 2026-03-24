@@ -14,15 +14,20 @@ function fmt(n: number | null | undefined): string {
 
 type Props = {
   threadId: string;
+  threadStatus?: string | null;
   onCounterClick?: () => void;
 };
 
-export function HomeownerPolicyBanner({ threadId, onCounterClick }: Props) {
+export function HomeownerPolicyBanner({ threadId, threadStatus, onCounterClick }: Props) {
   const { loading, error, data } = useThreadLtvPolicy(threadId);
 
   if (loading) return null;
   if (error) return null;
   if (!data) return null;
+
+  // Suppress all underwriting blocker copy once the deal is accepted.
+  // The AcceptedPendingReviewBanner handles status communication at that stage.
+  if (threadStatus === "accepted") return null;
 
   const blocked = data.execution_readiness_blocked_by_underwriting;
 

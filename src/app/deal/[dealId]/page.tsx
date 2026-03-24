@@ -8,6 +8,7 @@ import { DealDetailWidgetPanel } from "@/components/deal/DealDetailWidgetPanel";
 import { DealActivityFeed } from "@/components/deal/DealActivityFeed";
 import { NegotiationSection } from "@/components/deal/NegotiationSection";
 import { HomeownerPolicyBanner } from "@/components/deal/HomeownerPolicyBanner";
+import { AcceptedPendingReviewBanner } from "@/components/deal/AcceptedPendingReviewBanner";
 import { WaitingBanner } from "@/components/deal/WaitingBanner";
 import { RecomputeSnapshotButton } from "@/components/deal/RecomputeSnapshotButton";
 import { SignatureCard } from "@/components/deal/SignatureCard";
@@ -386,6 +387,10 @@ export default async function DealPage(ctx: PageProps) {
             effectiveSnapshot={effectiveSnapshotRecord}
           />
 
+          {effectiveThread?.status === "accepted" && (
+            <AcceptedPendingReviewBanner />
+          )}
+
           {showNegotiationUi && negState.isSender && effectiveThread && (
             <WaitingBanner
               threadId={effectiveThread.id}
@@ -396,7 +401,10 @@ export default async function DealPage(ctx: PageProps) {
           {showNegotiationUi &&
             negState.isOwnerSide &&
             effectiveThread && (
-              <HomeownerPolicyBanner threadId={effectiveThread.id} />
+              <HomeownerPolicyBanner
+                threadId={effectiveThread.id}
+                threadStatus={effectiveThread.status}
+              />
             )}
 
           {showNegotiationUi &&
@@ -802,6 +810,10 @@ export default async function DealPage(ctx: PageProps) {
             effectiveSnapshot={effectiveSnapshotRecord}
           />
 
+          {effectiveThread?.status === "accepted" && (
+            <AcceptedPendingReviewBanner />
+          )}
+
           {showNegotiationUi && negState.isSender && effectiveThread && (
             <WaitingBanner
               threadId={effectiveThread.id}
@@ -812,7 +824,10 @@ export default async function DealPage(ctx: PageProps) {
           {showNegotiationUi &&
             negState.isOwnerSide &&
             effectiveThread && (
-              <HomeownerPolicyBanner threadId={effectiveThread.id} />
+              <HomeownerPolicyBanner
+                threadId={effectiveThread.id}
+                threadStatus={effectiveThread.status}
+              />
             )}
 
           {showNegotiationUi &&
