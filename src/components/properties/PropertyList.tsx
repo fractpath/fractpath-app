@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useToast } from "@/components/ui/Toast";
 import { LoadingButton } from "@/components/ui/LoadingButton";
 import { Modal } from "@/components/ui/Modal";
@@ -223,6 +224,12 @@ export function PropertyList() {
                       </LoadingButton>
                     ) : (
                       <>
+                        <Link
+                          href={`/properties/${p.id}`}
+                          className="text-sm underline"
+                        >
+                          Details
+                        </Link>
                         {canEdit(p.status, p.visibility) && (
                           <button
                             className="text-sm underline"
