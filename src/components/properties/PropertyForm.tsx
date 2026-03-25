@@ -471,89 +471,59 @@ export function PropertyForm(props: {
     setSubmitting(true);
     try {
       if (isEdit) {
-        const metadataFd = new FormData();
-        metadataFd.set("address_line1", address_line1.trim());
-        metadataFd.set("address_line2", address_line2.trim());
-        metadataFd.set("city", city.trim());
-        metadataFd.set("state", state.trim());
-        metadataFd.set("postal_code", postal_code.trim());
+        const fd = new FormData();
+        fd.set("address_line1", address_line1.trim());
+        fd.set("address_line2", address_line2.trim());
+        fd.set("city", city.trim());
+        fd.set("state", state.trim());
+        fd.set("postal_code", postal_code.trim());
 
         // Sprint 16 intake fields (optional during edit — only send if set)
-        if (ownershipType) metadataFd.set("ownership_type", ownershipType);
-        if (occupancyUse) metadataFd.set("occupancy_use", occupancyUse);
-        if (occupancyUseOther) metadataFd.set("occupancy_use_other", occupancyUseOther);
-        if (majorConditionIssue) metadataFd.set("major_condition_issue", majorConditionIssue);
+        if (ownershipType) fd.set("ownership_type", ownershipType);
+        if (occupancyUse) fd.set("occupancy_use", occupancyUse);
+        if (occupancyUseOther) fd.set("occupancy_use_other", occupancyUseOther);
+        if (majorConditionIssue) fd.set("major_condition_issue", majorConditionIssue);
         if (majorConditionIssueDetails)
-          metadataFd.set("major_condition_issue_details", majorConditionIssueDetails);
+          fd.set("major_condition_issue_details", majorConditionIssueDetails);
         for (const v of knownLiensAndClaims)
-          metadataFd.append("known_liens_and_claims", v);
+          fd.append("known_liens_and_claims", v);
         if (totalKnownDebtAmountStr.trim())
-          metadataFd.set("total_known_debt_amount", totalKnownDebtAmountStr.trim());
+          fd.set("total_known_debt_amount", totalKnownDebtAmountStr.trim());
         if (totalKnownDebtConfidence)
-          metadataFd.set("total_known_debt_confidence", totalKnownDebtConfidence);
+          fd.set("total_known_debt_confidence", totalKnownDebtConfidence);
         if (debtStatementAvailability)
-          metadataFd.set("debt_statement_availability", debtStatementAvailability);
-        if (titleClaimsKnown) metadataFd.set("title_claims_known", titleClaimsKnown);
-        if (titleClaimsDetails) metadataFd.set("title_claims_details", titleClaimsDetails);
+          fd.set("debt_statement_availability", debtStatementAvailability);
+        if (titleClaimsKnown) fd.set("title_claims_known", titleClaimsKnown);
+        if (titleClaimsDetails) fd.set("title_claims_details", titleClaimsDetails);
         if (ownerStatedFmvStr.trim())
-          metadataFd.set("owner_stated_fmv", ownerStatedFmvStr.trim());
+          fd.set("owner_stated_fmv", ownerStatedFmvStr.trim());
         if (ownerStatedFmvConfidence)
-          metadataFd.set("owner_stated_fmv_confidence", ownerStatedFmvConfidence);
+          fd.set("owner_stated_fmv_confidence", ownerStatedFmvConfidence);
         if (ownerStatedFmvSource)
-          metadataFd.set("owner_stated_fmv_source", ownerStatedFmvSource);
+          fd.set("owner_stated_fmv_source", ownerStatedFmvSource);
         if (ownerStatedFmvSourceOther)
-          metadataFd.set("owner_stated_fmv_source_other", ownerStatedFmvSourceOther);
+          fd.set("owner_stated_fmv_source_other", ownerStatedFmvSourceOther);
         if (willingToProceed)
-          metadataFd.set("willing_to_proceed_formal_review", willingToProceed);
+          fd.set("willing_to_proceed_formal_review", willingToProceed);
+
+        // Baseline verification docs
+        for (const docType of Object.keys(DOC_LABELS) as DocType[]) {
+          if (files[docType]) fd.set(docType, files[docType]!);
+        }
+
+        // Supporting docs — appended into the same payload so address fields are present
+        for (const supType of visibleSupportingDocs) {
+          const f = supportingFiles[supType];
+          if (f) fd.set(supType, f);
+        }
 
         const editUrl = `/api/me/properties/${props.editPrefill!.propertyId}/edit`;
-        const metaRes = await fetch(editUrl, { method: "PATCH", body: metadataFd });
-        const metaJson = await metaRes.json().catch(() => null);
+        const res = await fetch(editUrl, { method: "PATCH", body: fd });
+        const resJson = await res.json().catch(() => null);
 
-        if (!metaRes.ok) {
-          t.error(metaJson?.error || "Something went wrong — try again.");
+        if (!res.ok) {
+          t.error(resJson?.error || "Something went wrong — try again.");
           return;
-        }
-
-        const docsToUpload = (Object.keys(DOC_LABELS) as DocType[]).filter(
-          (k) => files[k] !== null,
-        );
-        for (const docType of docsToUpload) {
-          const docFd = new FormData();
-          docFd.set("address_line1", address_line1.trim());
-          docFd.set("address_line2", address_line2.trim());
-          docFd.set("city", city.trim());
-          docFd.set("state", state.trim());
-          docFd.set("postal_code", postal_code.trim());
-          docFd.set(docType, files[docType]!);
-
-          const docRes = await fetch(editUrl, { method: "PATCH", body: docFd });
-          const docJson = await docRes.json().catch(() => null);
-          if (!docRes.ok) {
-            t.error(
-              docJson?.error ||
-                `Failed to upload ${docType.replace("_", " ")} — try again.`,
-            );
-            return;
-          }
-        }
-
-        // Upload any selected supporting docs
-        const supDocsToUpload = visibleSupportingDocs.filter(
-          (k) => supportingFiles[k] != null,
-        );
-        for (const supType of supDocsToUpload) {
-          const supFd = new FormData();
-          supFd.set(supType, supportingFiles[supType]!);
-          const supRes = await fetch(editUrl, { method: "PATCH", body: supFd });
-          const supJson = await supRes.json().catch(() => null);
-          if (!supRes.ok) {
-            t.error(
-              supJson?.error ||
-                `Failed to upload ${supType.replace(/_/g, " ")} — try again.`,
-            );
-            return;
-          }
         }
 
       } else {
