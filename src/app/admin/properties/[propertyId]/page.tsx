@@ -138,7 +138,7 @@ export default async function AdminPropertyAuditPage({
     .filter(Boolean)
     .join(", ");
 
-  const [auditRes, docsRes, underwritingRes] = await Promise.all([
+  const [auditRes, docsRes, underwritingRes, linkedThreadRes] = await Promise.all([
     (supabase.from("property_status_audit") as any)
       .select(
         "id, from_status, to_status, changed_by, actor_type, changed_at, notes",
@@ -155,7 +155,31 @@ export default async function AdminPropertyAuditPage({
       .eq("property_id", propertyId)
       .order("captured_at", { ascending: false })
       .limit(20),
+    (supabase.from("deal_threads") as any)
+      .select("deal_id")
+      .eq("property_id", propertyId)
+      .eq("status", "accepted")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
+
+  // Fetch triage metadata for the linked accepted deal (if any)
+  let linkedDeal: {
+    id: string;
+    triage_status: string | null;
+    triage_reason_tags: string[] | null;
+    fmv_plausibility_flag: string | null;
+    accepted_at: string | null;
+  } | null = null;
+
+  if (linkedThreadRes.data?.deal_id) {
+    const { data: dealRow } = await (supabase.from("deals") as any)
+      .select("id, triage_status, triage_reason_tags, fmv_plausibility_flag, accepted_at")
+      .eq("id", linkedThreadRes.data.deal_id)
+      .maybeSingle();
+    linkedDeal = dealRow ?? null;
+  }
 
   const auditRows = (auditRes.data ?? []) as any[];
   const underwritingRows = (underwritingRes.data ?? []) as any[];
@@ -432,7 +456,7 @@ export default async function AdminPropertyAuditPage({
         p.willing_to_proceed_formal_review) && (
         <div className="rounded-lg border overflow-hidden">
           <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b">
-            Homeowner intake (Sprint 16)
+            Homeowner intake
           </div>
           <div className="p-4 text-sm space-y-4">
             <div className="grid grid-cols-2 gap-x-6 gap-y-3">
@@ -546,6 +570,111 @@ export default async function AdminPropertyAuditPage({
           </div>
         </div>
       )}
+
+      {/* Sprint 16 review — linked accepted deal triage */}
+      {(() => {
+        const TRIAGE_BADGE: Record<string, { label: string; cls: string }> = {
+          ready_for_deposit: { label: "Ready for deposit request", cls: "bg-green-100 text-green-800" },
+          triage_in_progress: { label: "Triage in progress", cls: "bg-blue-100 text-blue-800" },
+          more_info_needed: { label: "Additional information required", cls: "bg-yellow-100 text-yellow-800" },
+          ineligible: { label: "Ineligible", cls: "bg-red-100 text-red-800" },
+        };
+        const FMV_BADGE: Record<string, { label: string; cls: string }> = {
+          green: { label: "Green", cls: "bg-green-100 text-green-800" },
+          yellow: { label: "Yellow", cls: "bg-yellow-100 text-yellow-800" },
+          red: { label: "Red", cls: "bg-red-100 text-red-800" },
+        };
+
+        return (
+          <div className="rounded-lg border overflow-hidden">
+            <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b flex items-center gap-2">
+              Sprint 16 review
+              {linkedDeal?.triage_status && (() => {
+                const b = TRIAGE_BADGE[linkedDeal!.triage_status!];
+                return b ? (
+                  <span className={`text-xs rounded-full px-2 py-0.5 font-normal ${b.cls}`}>
+                    {b.label}
+                  </span>
+                ) : null;
+              })()}
+            </div>
+            <div className="p-4 text-sm">
+              {!linkedDeal ? (
+                <p className="text-muted-foreground text-xs">
+                  No accepted deal review metadata yet.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+                    <div>
+                      <div className="text-muted-foreground text-xs">Triage status</div>
+                      <div className="font-medium">
+                        {linkedDeal.triage_status
+                          ? (TRIAGE_BADGE[linkedDeal.triage_status]?.label ?? linkedDeal.triage_status.replace(/_/g, " "))
+                          : <span className="text-muted-foreground">Accepted – pending review</span>}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground text-xs">FMV plausibility</div>
+                      <div className="font-medium">
+                        {linkedDeal.fmv_plausibility_flag ? (() => {
+                          const b = FMV_BADGE[linkedDeal.fmv_plausibility_flag!];
+                          return b ? (
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${b.cls}`}>
+                              {b.label}
+                            </span>
+                          ) : linkedDeal.fmv_plausibility_flag;
+                        })() : "—"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground text-xs">Deal</div>
+                      <div className="font-mono text-xs">
+                        <a
+                          href={`/deal/${linkedDeal.id}`}
+                          target="_blank"
+                          className="underline text-muted-foreground hover:text-foreground"
+                        >
+                          {linkedDeal.id.slice(0, 8)}…
+                        </a>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground text-xs">Accepted</div>
+                      <div className="font-medium">{formatDate(linkedDeal.accepted_at)}</div>
+                    </div>
+                  </div>
+
+                  {linkedDeal.triage_reason_tags && linkedDeal.triage_reason_tags.length > 0 && (
+                    <div>
+                      <div className="text-muted-foreground text-xs mb-1.5">Reason tags</div>
+                      <div className="flex flex-wrap gap-1">
+                        {linkedDeal.triage_reason_tags.map((tag) => (
+                          <span
+                            key={tag}
+                            className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-muted text-muted-foreground font-mono"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="pt-1">
+                    <a
+                      href="/admin/deals"
+                      className="text-xs underline text-muted-foreground hover:text-foreground"
+                    >
+                      View triage queue →
+                    </a>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Underwriting snapshots */}
       {underwritingRows.length > 0 && (

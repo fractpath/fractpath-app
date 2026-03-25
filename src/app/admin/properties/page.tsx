@@ -107,16 +107,50 @@ type SearchParams = Record<string, string | string[] | undefined>;
   const REQUIRED_DOC_TYPES = ["selfie", "drivers_license", "utility_bill"];
 
   let docCountsByProperty: Record<string, Set<string>> = {};
-  if (propertyIds.length > 0) {
-    const { data: docs } = await (supabase.from("property_documents") as any)
-      .select("property_id, doc_type")
-      .in("property_id", propertyIds);
+  let triageByProperty: Record<string, string | null> = {};
 
-    for (const d of docs ?? []) {
+  if (propertyIds.length > 0) {
+    const [docsResult, threadsResult] = await Promise.all([
+      (supabase.from("property_documents") as any)
+        .select("property_id, doc_type")
+        .in("property_id", propertyIds),
+      (supabase.from("deal_threads") as any)
+        .select("property_id, deal_id")
+        .in("property_id", propertyIds)
+        .eq("status", "accepted"),
+    ]);
+
+    for (const d of docsResult.data ?? []) {
       if (!docCountsByProperty[d.property_id]) {
         docCountsByProperty[d.property_id] = new Set();
       }
       docCountsByProperty[d.property_id].add(d.doc_type);
+    }
+
+    const acceptedThreads: { property_id: string; deal_id: string }[] =
+      threadsResult.data ?? [];
+    const dealIds = [
+      ...new Set(
+        acceptedThreads.map((t) => t.deal_id).filter(Boolean),
+      ),
+    ];
+
+    if (dealIds.length > 0) {
+      const { data: triageDeals } = await (supabase.from("deals") as any)
+        .select("id, triage_status")
+        .in("id", dealIds);
+
+      const triageByDealId: Record<string, string | null> = {};
+      for (const d of triageDeals ?? []) {
+        triageByDealId[d.id] = d.triage_status ?? null;
+      }
+
+      // Map back: property_id -> triage_status (most recent accepted thread wins)
+      for (const t of acceptedThreads) {
+        if (!(t.property_id in triageByProperty)) {
+          triageByProperty[t.property_id] = triageByDealId[t.deal_id] ?? null;
+        }
+      }
     }
   }
 
@@ -207,6 +241,7 @@ type SearchParams = Record<string, string | string[] | undefined>;
               <th className="p-3">Owner</th>
               <th className="p-3">Status</th>
               <th className="p-3">Readiness</th>
+              <th className="p-3">Deal triage</th>
               <th className="p-3">Notes</th>
               <th className="p-3 w-[120px]">Action</th>
             </tr>
@@ -214,7 +249,7 @@ type SearchParams = Record<string, string | string[] | undefined>;
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td className="p-3 text-muted-foreground" colSpan={6}>
+                <td className="p-3 text-muted-foreground" colSpan={7}>
                   No properties found for: {filter}
                 </td>
               </tr>
@@ -233,6 +268,14 @@ type SearchParams = Record<string, string | string[] | undefined>;
                 const readiness = p._readiness as Readiness;
                 const isActionable = readiness === "ready_for_review" || readiness === "in_review";
                 const dimmed = readiness === "unclaimed" || readiness === "missing_docs";
+
+                const triageStatus = triageByProperty[p.id] ?? null;
+                const TRIAGE_CHIP: Record<string, { label: string; cls: string }> = {
+                  ready_for_deposit: { label: "Ready for deposit", cls: "bg-green-100 text-green-800 border-green-200" },
+                  triage_in_progress: { label: "Triage in progress", cls: "bg-blue-100 text-blue-800 border-blue-200" },
+                  more_info_needed: { label: "More info needed", cls: "bg-yellow-100 text-yellow-800 border-yellow-200" },
+                  ineligible: { label: "Ineligible", cls: "bg-red-100 text-red-800 border-red-200" },
+                };
 
                 return (
                   <tr key={p.id} className={`border-t ${dimmed ? "opacity-60" : ""}`}>
@@ -263,6 +306,29 @@ type SearchParams = Record<string, string | string[] | undefined>;
 
                     <td className="p-3">
                       {readinessChip(readiness)}
+                    </td>
+
+                    <td className="p-3">
+                      {p.id in triageByProperty ? (
+                        triageStatus ? (
+                          (() => {
+                            const chip = TRIAGE_CHIP[triageStatus];
+                            return chip ? (
+                              <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${chip.cls}`}>
+                                {chip.label}
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
+                                {triageStatus.replace(/_/g, " ")}
+                              </span>
+                            );
+                          })()
+                        ) : (
+                          <span className="text-xs text-muted-foreground">pending</span>
+                        )
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
                     </td>
 
                     <td className="p-3">
