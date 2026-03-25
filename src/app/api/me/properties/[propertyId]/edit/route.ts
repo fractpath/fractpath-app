@@ -9,6 +9,23 @@ export const runtime = "nodejs";
 const BUCKET = "property-verification";
 const ALLOWED_DOC_TYPES = ["selfie", "drivers_license", "utility_bill"] as const;
 
+const SUPPORTING_DOC_TYPES = [
+  "mortgage_statement",
+  "heloc_statement",
+  "second_lien_statement",
+  "tax_lien_notice",
+  "judgment_document",
+  "hoa_lien_notice",
+  "other_claim_document",
+  "appraisal_report",
+  "cma_report",
+  "online_estimate_screenshot",
+  "listing_or_offer_document",
+  "trust_document",
+  "estate_document",
+  "condition_supporting_document",
+] as const;
+
 function jsonError(msg: string, status: number) {
   return NextResponse.json({ ok: false, error: msg }, { status });
 }
@@ -252,6 +269,66 @@ export async function PATCH(
     console.info("PROPERTY_DEBT_DOC_UPLOAD", {
       property_id: propertyId,
       doc_type: "secured_debt_statement",
+    });
+  }
+
+  // Process supporting document uploads (upsert by property_id,doc_type)
+  for (const docType of SUPPORTING_DOC_TYPES) {
+    const file = formData.get(docType);
+    if (!file || !(file instanceof File) || file.size === 0) continue;
+
+    const rawBuf = Buffer.from(await file.arrayBuffer());
+    const result = await enforceLimitsAndProcess(rawBuf, file.type);
+
+    if (!result.ok) {
+      return jsonError(
+        `${docType.replace(/_/g, " ")}: ${result.error}`,
+        result.status,
+      );
+    }
+
+    const storagePath = `${user.id}/${propertyId}/${docType}.${result.ext}`;
+
+    const { error: uploadErr } = await svc.storage
+      .from(BUCKET)
+      .upload(storagePath, result.outBuf, {
+        contentType: result.storedContentType,
+        upsert: true,
+      });
+
+    if (uploadErr) {
+      return jsonError(
+        `Upload failed for ${docType.replace(/_/g, " ")}: ${uploadErr.message}`,
+        500,
+      );
+    }
+
+    const { error: upsertErr } = await (svc.from("property_documents") as any).upsert(
+      {
+        property_id: propertyId,
+        doc_type: docType,
+        storage_path: storagePath,
+        content_type: result.storedContentType,
+        byte_size: result.meta.byte_size,
+        sha256: result.meta.sha256,
+        width: result.meta.width ?? null,
+        height: result.meta.height ?? null,
+        original_content_type: result.meta.original_content_type,
+      },
+      { onConflict: "property_id,doc_type" },
+    );
+
+    if (upsertErr) {
+      return jsonError(
+        `Document record failed for ${docType.replace(/_/g, " ")}: ${upsertErr.message}`,
+        500,
+      );
+    }
+
+    console.info("PROPERTY_SUPPORTING_DOC_UPLOAD", {
+      property_id: propertyId,
+      doc_type: docType,
+      ...result.meta,
     });
   }
 
