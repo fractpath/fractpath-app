@@ -23,6 +23,23 @@ type Property = {
   claim_thread_id?: string | null;
   claim_deal_id?: string | null;
   claim_thread_status?: string | null;
+  // Sprint 16 intake fields
+  ownership_type?: string | null;
+  occupancy_use?: string | null;
+  occupancy_use_other?: string | null;
+  major_condition_issue?: string | null;
+  major_condition_issue_details?: string | null;
+  known_liens_and_claims?: string[] | null;
+  total_known_debt_amount?: number | null;
+  total_known_debt_confidence?: string | null;
+  debt_statement_availability?: string | null;
+  title_claims_known?: string | null;
+  title_claims_details?: string | null;
+  owner_stated_fmv?: number | null;
+  owner_stated_fmv_confidence?: string | null;
+  owner_stated_fmv_source?: string | null;
+  owner_stated_fmv_source_other?: string | null;
+  willing_to_proceed_formal_review?: string | null;
 };
 
 const STATUS_BADGE: Record<
@@ -266,6 +283,22 @@ export function PropertyList() {
             city: editTarget.city ?? "",
             state: editTarget.state,
             postal_code: editTarget.postal_code,
+            ownership_type: editTarget.ownership_type,
+            occupancy_use: editTarget.occupancy_use,
+            occupancy_use_other: editTarget.occupancy_use_other,
+            major_condition_issue: editTarget.major_condition_issue,
+            major_condition_issue_details: editTarget.major_condition_issue_details,
+            known_liens_and_claims: editTarget.known_liens_and_claims,
+            total_known_debt_amount: editTarget.total_known_debt_amount,
+            total_known_debt_confidence: editTarget.total_known_debt_confidence,
+            debt_statement_availability: editTarget.debt_statement_availability,
+            title_claims_known: editTarget.title_claims_known,
+            title_claims_details: editTarget.title_claims_details,
+            owner_stated_fmv: editTarget.owner_stated_fmv,
+            owner_stated_fmv_confidence: editTarget.owner_stated_fmv_confidence,
+            owner_stated_fmv_source: editTarget.owner_stated_fmv_source,
+            owner_stated_fmv_source_other: editTarget.owner_stated_fmv_source_other,
+            willing_to_proceed_formal_review: editTarget.willing_to_proceed_formal_review,
           }}
         />
       )}
@@ -286,6 +319,22 @@ export function PropertyList() {
             city: verifyTarget.city ?? "",
             state: verifyTarget.state,
             postal_code: verifyTarget.postal_code,
+            ownership_type: verifyTarget.ownership_type,
+            occupancy_use: verifyTarget.occupancy_use,
+            occupancy_use_other: verifyTarget.occupancy_use_other,
+            major_condition_issue: verifyTarget.major_condition_issue,
+            major_condition_issue_details: verifyTarget.major_condition_issue_details,
+            known_liens_and_claims: verifyTarget.known_liens_and_claims,
+            total_known_debt_amount: verifyTarget.total_known_debt_amount,
+            total_known_debt_confidence: verifyTarget.total_known_debt_confidence,
+            debt_statement_availability: verifyTarget.debt_statement_availability,
+            title_claims_known: verifyTarget.title_claims_known,
+            title_claims_details: verifyTarget.title_claims_details,
+            owner_stated_fmv: verifyTarget.owner_stated_fmv,
+            owner_stated_fmv_confidence: verifyTarget.owner_stated_fmv_confidence,
+            owner_stated_fmv_source: verifyTarget.owner_stated_fmv_source,
+            owner_stated_fmv_source_other: verifyTarget.owner_stated_fmv_source_other,
+            willing_to_proceed_formal_review: verifyTarget.willing_to_proceed_formal_review,
           }}
         />
       )}

@@ -306,51 +306,6 @@ export function PropertyForm(props: {
     setWillingToProceed(p?.willing_to_proceed_formal_review ?? "");
   }, [props.open, defaultMode, isEdit, props.editPrefill]);
 
-  // Edit-mode Sprint 16 field reload — fetch from API since the parent
-  // component (PropertyList) passes only address fields via editPrefill.
-  useEffect(() => {
-    if (!props.open || !isEdit || !props.editPrefill?.propertyId) return;
-    const pid = props.editPrefill.propertyId;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/me/properties");
-        if (!res.ok || cancelled) return;
-        const json = await res.json().catch(() => null);
-        if (!json || cancelled) return;
-        const p = (json.properties ?? []).find((r: any) => r.id === pid);
-        if (!p || cancelled) return;
-        setOwnershipType(p.ownership_type ?? "");
-        setOccupancyUse(p.occupancy_use ?? "");
-        setOccupancyUseOther(p.occupancy_use_other ?? "");
-        setMajorConditionIssue(p.major_condition_issue ?? "");
-        setMajorConditionIssueDetails(p.major_condition_issue_details ?? "");
-        setKnownLiensAndClaims(p.known_liens_and_claims ?? []);
-        setTotalKnownDebtAmountStr(
-          p.total_known_debt_amount != null
-            ? String(p.total_known_debt_amount)
-            : "",
-        );
-        setTotalKnownDebtConfidence(p.total_known_debt_confidence ?? "");
-        setDebtStatementAvailability(p.debt_statement_availability ?? "");
-        setTitleClaimsKnown(p.title_claims_known ?? "");
-        setTitleClaimsDetails(p.title_claims_details ?? "");
-        setOwnerStatedFmvStr(
-          p.owner_stated_fmv != null ? String(p.owner_stated_fmv) : "",
-        );
-        setOwnerStatedFmvConfidence(p.owner_stated_fmv_confidence ?? "");
-        setOwnerStatedFmvSource(p.owner_stated_fmv_source ?? "");
-        setOwnerStatedFmvSourceOther(p.owner_stated_fmv_source_other ?? "");
-        setWillingToProceed(p.willing_to_proceed_formal_review ?? "");
-      } catch {
-        // Fail gracefully — intake fields remain blank
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [props.open, isEdit, props.editPrefill?.propertyId]);
-
   const previews = useMemo(() => {
     const out: Partial<Record<DocType, { url: string; isImage: boolean }>> = {};
     (Object.keys(DOC_LABELS) as DocType[]).forEach((k) => {
