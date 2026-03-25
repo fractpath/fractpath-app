@@ -413,15 +413,17 @@ export default async function DealPage(ctx: PageProps) {
               />
             )}
 
-          <SignatureCard
-            dealId={dealId}
-            threadStatus={effectiveThread?.status ?? null}
-            packet={sigData.packet}
-            recipients={sigData.recipients}
-            isAdmin={isAdmin}
-            execAgreementUrl={sigData.execAgreementUrl}
-            certificateUrl={sigData.certificateUrl}
-          />
+          {sigData.packet && (
+            <SignatureCard
+              dealId={dealId}
+              threadStatus={effectiveThread?.status ?? null}
+              packet={sigData.packet}
+              recipients={sigData.recipients}
+              isAdmin={isAdmin}
+              execAgreementUrl={sigData.execAgreementUrl}
+              certificateUrl={sigData.certificateUrl}
+            />
+          )}
 
           <DealDetailWidgetPanel
             dealId={dealId}
@@ -827,15 +829,17 @@ export default async function DealPage(ctx: PageProps) {
               />
             )}
 
-          <SignatureCard
-            dealId={dealId}
-            threadStatus={effectiveThread?.status ?? null}
-            packet={fallbackSigData.packet}
-            recipients={fallbackSigData.recipients}
-            isAdmin={fallbackIsAdmin}
-            execAgreementUrl={fallbackSigData.execAgreementUrl}
-            certificateUrl={fallbackSigData.certificateUrl}
-          />
+          {fallbackSigData.packet && (
+            <SignatureCard
+              dealId={dealId}
+              threadStatus={effectiveThread?.status ?? null}
+              packet={fallbackSigData.packet}
+              recipients={fallbackSigData.recipients}
+              isAdmin={fallbackIsAdmin}
+              execAgreementUrl={fallbackSigData.execAgreementUrl}
+              certificateUrl={fallbackSigData.certificateUrl}
+            />
+          )}
 
           <DealDetailWidgetPanel
             dealId={dealId}
