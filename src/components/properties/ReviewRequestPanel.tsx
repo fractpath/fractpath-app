@@ -106,14 +106,7 @@ export function ReviewRequestPanel({
             onClick={onOpenEdit}
             className="rounded px-3 py-1.5 text-xs font-medium border bg-white hover:bg-muted"
           >
-            Edit property details
-          </button>
-          <button
-            type="button"
-            onClick={onOpenEdit}
-            className="rounded px-3 py-1.5 text-xs font-medium border bg-white hover:bg-muted"
-          >
-            Upload / replace documents
+            Update property details
           </button>
         </div>
       )}

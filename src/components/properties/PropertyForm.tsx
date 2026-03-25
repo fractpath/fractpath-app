@@ -342,29 +342,41 @@ export function PropertyForm(props: {
     return out;
   }, [files]);
 
-  // Derive which supporting doc slots are visible based on current intake selections
-  const visibleSupportingDocs = useMemo((): SupportingDocType[] => {
-    const result: SupportingDocType[] = [];
-    // Lien/claim-based
-    if (knownLiensAndClaims.includes("first_mortgage")) result.push("mortgage_statement");
-    if (knownLiensAndClaims.includes("heloc")) result.push("heloc_statement");
-    if (knownLiensAndClaims.includes("second_lien")) result.push("second_lien_statement");
-    if (knownLiensAndClaims.includes("tax_lien")) result.push("tax_lien_notice");
-    if (knownLiensAndClaims.includes("judgment")) result.push("judgment_document");
-    if (knownLiensAndClaims.includes("hoa_lien")) result.push("hoa_lien_notice");
-    if (knownLiensAndClaims.includes("other_claim")) result.push("other_claim_document");
-    // FMV source-based
-    if (ownerStatedFmvSource === "appraisal") result.push("appraisal_report");
-    if (ownerStatedFmvSource === "realtor_cma") result.push("cma_report");
-    if (ownerStatedFmvSource === "online") result.push("online_estimate_screenshot");
-    if (ownerStatedFmvSource === "offer_listing") result.push("listing_or_offer_document");
-    // Ownership type-based
-    if (ownershipType === "trust") result.push("trust_document");
-    if (ownershipType === "estate") result.push("estate_document");
-    // Condition-based
-    if (majorConditionIssue === "yes") result.push("condition_supporting_document");
-    return result;
-  }, [knownLiensAndClaims, ownerStatedFmvSource, ownershipType, majorConditionIssue]);
+  // Derive which supporting doc slots are visible — plain const, no memoization,
+  // so it re-derives unconditionally on every render from current state values.
+  const _visibleLiens: SupportingDocType[] = [];
+  if (knownLiensAndClaims.includes("first_mortgage")) _visibleLiens.push("mortgage_statement");
+  if (knownLiensAndClaims.includes("heloc")) _visibleLiens.push("heloc_statement");
+  if (knownLiensAndClaims.includes("second_lien")) _visibleLiens.push("second_lien_statement");
+  if (knownLiensAndClaims.includes("tax_lien")) _visibleLiens.push("tax_lien_notice");
+  if (knownLiensAndClaims.includes("judgment")) _visibleLiens.push("judgment_document");
+  if (knownLiensAndClaims.includes("hoa_lien")) _visibleLiens.push("hoa_lien_notice");
+  if (knownLiensAndClaims.includes("other_claim")) _visibleLiens.push("other_claim_document");
+  if (ownerStatedFmvSource === "appraisal") _visibleLiens.push("appraisal_report");
+  if (ownerStatedFmvSource === "realtor_cma") _visibleLiens.push("cma_report");
+  if (ownerStatedFmvSource === "online") _visibleLiens.push("online_estimate_screenshot");
+  if (ownerStatedFmvSource === "offer_listing") _visibleLiens.push("listing_or_offer_document");
+  if (ownershipType === "trust") _visibleLiens.push("trust_document");
+  if (ownershipType === "estate") _visibleLiens.push("estate_document");
+  if (majorConditionIssue === "yes") _visibleLiens.push("condition_supporting_document");
+  const visibleSupportingDocs: SupportingDocType[] = _visibleLiens;
+
+  // When a slot becomes invisible, clear its file so stale selections don't accumulate.
+  const _visibleSet = new Set(visibleSupportingDocs);
+  useEffect(() => {
+    setSupportingFiles((prev) => {
+      const pruned = { ...prev };
+      let changed = false;
+      for (const k of Object.keys(pruned) as SupportingDocType[]) {
+        if (!_visibleSet.has(k)) {
+          pruned[k] = null;
+          changed = true;
+        }
+      }
+      return changed ? pruned : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleSupportingDocs.join(",")]);
 
   useEffect(() => {
     return () => {
