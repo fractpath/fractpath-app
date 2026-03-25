@@ -9,6 +9,10 @@ import {
   type DocRow,
 } from "@/components/admin/PropertyDocumentsPreview";
 import { AdminPropertyStatusControls } from "@/components/admin/AdminPropertyStatusControls";
+import {
+  AdminReviewRequestPanel,
+  type AdminReviewRequest,
+} from "@/components/admin/AdminReviewRequestPanel";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { computeLtvPolicy } from "@/lib/ltvPolicy";
 
@@ -179,6 +183,23 @@ export default async function AdminPropertyAuditPage({
       .eq("id", linkedThreadRes.data.deal_id)
       .maybeSingle();
     linkedDeal = dealRow ?? null;
+  }
+
+  // Fetch current open/submitted review request for linked deal
+  let currentReviewRequest: AdminReviewRequest | null = null;
+  if (linkedDeal?.id) {
+    const { data: reqRow } = await (supabase.from("deal_review_requests") as any)
+      .select(
+        "id, deal_id, property_id, status, requested_items, admin_note, homeowner_note, submitted_at, resolved_at, created_at",
+      )
+      .eq("deal_id", linkedDeal.id)
+      .eq("property_id", propertyId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (reqRow) {
+      currentReviewRequest = reqRow as AdminReviewRequest;
+    }
   }
 
   const auditRows = (auditRes.data ?? []) as any[];
@@ -675,6 +696,15 @@ export default async function AdminPropertyAuditPage({
           </div>
         );
       })()}
+
+      {/* Review request panel */}
+      {linkedDeal && (
+        <AdminReviewRequestPanel
+          dealId={linkedDeal.id}
+          propertyId={propertyId}
+          initialRequest={currentReviewRequest}
+        />
+      )}
 
       {/* Underwriting snapshots */}
       {underwritingRows.length > 0 && (

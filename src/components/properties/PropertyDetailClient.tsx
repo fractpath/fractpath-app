@@ -4,6 +4,10 @@ import { useState } from "react";
 import Link from "next/link";
 import { PropertyForm } from "@/components/properties/PropertyForm";
 import { PropertyDocumentsPanel } from "@/components/properties/PropertyDocumentsPanel";
+import {
+  ReviewRequestPanel,
+  type HomeownerReviewRequest,
+} from "@/components/properties/ReviewRequestPanel";
 import type { HomeownerPropertyShape } from "@/lib/property/projections";
 
 type LinkedDeal = {
@@ -17,6 +21,7 @@ type LinkedDeal = {
 type Props = {
   property: HomeownerPropertyShape;
   linkedDeal: LinkedDeal;
+  reviewRequest?: HomeownerReviewRequest | null;
 };
 
 // ── Status badge ─────────────────────────────────────────────────────────────
@@ -124,7 +129,7 @@ function Row({ fieldLabel, value }: { fieldLabel: string; value: string | null |
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function PropertyDetailClient({ property, linkedDeal }: Props) {
+export function PropertyDetailClient({ property, linkedDeal, reviewRequest }: Props) {
   const [editOpen, setEditOpen] = useState(false);
 
   const badge = STATUS_BADGE[property.status] ?? STATUS_BADGE.unverified;
@@ -299,6 +304,15 @@ export function PropertyDetailClient({ property, linkedDeal }: Props) {
             )}
           </p>
         </div>
+      )}
+
+      {/* Review request panel */}
+      {reviewRequest && (reviewRequest.status === "open" || reviewRequest.status === "submitted") && (
+        <ReviewRequestPanel
+          request={reviewRequest}
+          propertyId={property.id}
+          onOpenEdit={() => setEditOpen(true)}
+        />
       )}
 
       {/* Documents */}

@@ -80,7 +80,7 @@ export default async function AdminDealsTriagePage({ searchParams }: PageProps) 
 
   let query = (svc.from("deals") as any)
     .select(
-      "id, status, triage_status, triage_reason_tags, fmv_plausibility_flag, accepted_at, created_at",
+      "id, status, triage_status, triage_reason_tags, fmv_plausibility_flag, accepted_at, created_at, deal_threads(property_id)",
     )
     .order("accepted_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
@@ -219,7 +219,7 @@ export default async function AdminDealsTriagePage({ searchParams }: PageProps) 
                     )}
                   </div>
 
-                  <div className="flex-shrink-0">
+                  <div className="flex-shrink-0 flex flex-col items-end gap-1.5">
                     <Link
                       href={`/deal/${deal.id}`}
                       target="_blank"
@@ -227,6 +227,19 @@ export default async function AdminDealsTriagePage({ searchParams }: PageProps) 
                     >
                       View deal →
                     </Link>
+                    {(() => {
+                      const propertyId: string | null =
+                        (deal.deal_threads as any[])?.[0]?.property_id ?? null;
+                      if (!propertyId) return null;
+                      return (
+                        <Link
+                          href={`/admin/properties/${propertyId}`}
+                          className="text-xs underline text-muted-foreground hover:text-foreground"
+                        >
+                          Review request →
+                        </Link>
+                      );
+                    })()}
                   </div>
                 </div>
               );

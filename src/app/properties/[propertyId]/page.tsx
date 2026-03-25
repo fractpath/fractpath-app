@@ -4,6 +4,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { PropertyDetailClient } from "@/components/properties/PropertyDetailClient";
 import { toHomeownerProperty } from "@/lib/property/projections";
+import type { HomeownerReviewRequest } from "@/components/properties/ReviewRequestPanel";
 
 export const runtime = "nodejs";
 
@@ -101,11 +102,41 @@ export default async function PropertyDetailPage({ params }: PageProps) {
     // non-fatal — proceed without linked deal
   }
 
+  // Fetch open/submitted review request for the linked deal + this property
+  let reviewRequest: HomeownerReviewRequest | null = null;
+  if (linkedDeal?.deal_id) {
+    try {
+      const { data: reqRow } = await (svc.from("deal_review_requests") as any)
+        .select("id, status, requested_items, admin_note, submitted_at")
+        .eq("deal_id", linkedDeal.deal_id)
+        .eq("property_id", propertyId)
+        .in("status", ["open", "submitted"])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (reqRow) {
+        reviewRequest = {
+          id: reqRow.id,
+          status: reqRow.status,
+          requested_items: reqRow.requested_items ?? [],
+          admin_note: reqRow.admin_note ?? null,
+          submitted_at: reqRow.submitted_at ?? null,
+        };
+      }
+    } catch {
+      // non-fatal
+    }
+  }
+
   return (
     <div>
       <AppHeader />
       <main className="mx-auto max-w-2xl p-6 space-y-6">
-        <PropertyDetailClient property={property} linkedDeal={linkedDeal} />
+        <PropertyDetailClient
+          property={property}
+          linkedDeal={linkedDeal}
+          reviewRequest={reviewRequest}
+        />
       </main>
     </div>
   );
