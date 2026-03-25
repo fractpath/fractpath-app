@@ -7,7 +7,6 @@ import { DealPageShell } from "@/components/deal/DealPageShell";
 import { DealDetailWidgetPanel } from "@/components/deal/DealDetailWidgetPanel";
 import { DealActivityFeed } from "@/components/deal/DealActivityFeed";
 import { NegotiationSection } from "@/components/deal/NegotiationSection";
-import { HomeownerPolicyBanner } from "@/components/deal/HomeownerPolicyBanner";
 import { AcceptedPendingReviewBanner } from "@/components/deal/AcceptedPendingReviewBanner";
 import { WaitingBanner } from "@/components/deal/WaitingBanner";
 import { RecomputeSnapshotButton } from "@/components/deal/RecomputeSnapshotButton";
@@ -397,16 +396,6 @@ export default async function DealPage(ctx: PageProps) {
               isBuyer={negState.isBuyer}
             />
           )}
-
-          {showNegotiationUi &&
-            negState.isOwnerSide &&
-            effectiveThread &&
-            headerProperty?.property_status === "verified" && (
-              <HomeownerPolicyBanner
-                threadId={effectiveThread.id}
-                threadStatus={effectiveThread.status}
-              />
-            )}
 
           {showNegotiationUi &&
             negState.isResponder &&
@@ -821,16 +810,6 @@ export default async function DealPage(ctx: PageProps) {
               isBuyer={negState.isBuyer}
             />
           )}
-
-          {showNegotiationUi &&
-            negState.isOwnerSide &&
-            effectiveThread &&
-            property?.status === "verified" && (
-              <HomeownerPolicyBanner
-                threadId={effectiveThread.id}
-                threadStatus={effectiveThread.status}
-              />
-            )}
 
           {showNegotiationUi &&
             negState.isResponder &&
