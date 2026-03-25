@@ -25,16 +25,17 @@ export async function PATCH(
   } = await supabase.auth.getUser();
   if (!user) return jsonError("Unauthorized", 401);
 
-  const { data: existing } = await (supabase.from("properties") as any)
+  const svc = createServiceClient();
+  const { data: existing } = await (svc.from("properties") as any)
     .select("id, status, owner_user_id")
     .eq("id", propertyId)
-    .eq("owner_user_id", user.id)
+    .or(
+      `owner_user_id.eq.${user.id},created_by_user_id.eq.${user.id},claimed_by_user_id.eq.${user.id}`,
+    )
     .maybeSingle();
 
   if (!existing) return jsonError("Not found", 404);
-  if (existing.status !== "unverified") {
-    return jsonError("Only unverified properties can be edited", 409);
-  }
+  // Note: edits after verification may require re-review in a future workflow.
 
   let formData: FormData;
   try {
@@ -52,8 +53,6 @@ export async function PATCH(
   if (!address_line1) return jsonError("Street address is required", 422);
   if (!state) return jsonError("State is required", 422);
   if (!postal_code) return jsonError("Zip code is required", 422);
-
-  const svc = createServiceClient();
 
   const displayParts = [address_line1, address_line2, city, state, postal_code].filter(Boolean).join(", ");
   const computed_normalized = normalizeAddress(displayParts);
@@ -149,7 +148,9 @@ export async function PATCH(
   const { error: updateErr } = await (svc.from("properties") as any)
     .update(updatePayload)
     .eq("id", propertyId)
-    .eq("owner_user_id", user.id);
+    .or(
+      `owner_user_id.eq.${user.id},created_by_user_id.eq.${user.id},claimed_by_user_id.eq.${user.id}`,
+    );
 
   if (updateErr) return jsonError(updateErr.message, 500);
 
