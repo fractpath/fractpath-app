@@ -293,6 +293,19 @@ export async function POST(
       return json(500, { ok: false, error: tUpdErr.message });
     }
 
+    // Advance deal row to ACCEPTED (DB trigger sets accepted_at; best-effort)
+    const { error: dealUpdErr } = await (svc.from("deals") as any)
+      .update({ status: "ACCEPTED" })
+      .eq("id", resolvedDealId)
+      .neq("status", "ACCEPTED");
+
+    if (dealUpdErr) {
+      console.error("OWNER_DECISION_DEAL_STATUS_UPDATE_ERROR", {
+        dealId: resolvedDealId,
+        error: dealUpdErr.message,
+      });
+    }
+
     const finalOwnerUserId =
       (threadPatch.owner_user_id as string | undefined) ??
       (thread.owner_user_id as string | null);

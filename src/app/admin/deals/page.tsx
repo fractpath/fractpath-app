@@ -87,11 +87,11 @@ export default async function AdminDealsTriagePage({ searchParams }: PageProps) 
     .limit(100);
 
   if (filterRaw === "accepted") {
-    query = query.eq("status", "accepted");
+    query = query.eq("status", "ACCEPTED");
   } else if (filterRaw === "triaged") {
     query = query.not("triage_status", "is", null);
   } else if (filterRaw === "no_triage") {
-    query = query.eq("status", "accepted").is("triage_status", null);
+    query = query.eq("status", "ACCEPTED").is("triage_status", null);
   } else if (filterRaw === "ineligible") {
     query = query.eq("triage_status", "ineligible");
   } else if (filterRaw === "ready") {
