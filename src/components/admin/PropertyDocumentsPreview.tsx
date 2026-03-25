@@ -2,8 +2,7 @@
 
 import { useMemo, useState } from "react";
 
-type IdentityDocType = "selfie" | "drivers_license" | "utility_bill";
-export type DocType = IdentityDocType | "secured_debt_statement";
+export type DocType = string;
 
 export type DocRow = {
   doc_type: DocType;
@@ -11,20 +10,43 @@ export type DocRow = {
   preview_token: string;
 };
 
-const IDENTITY_DOCS: Array<{ docType: IdentityDocType; label: string }> = [
+const VERIFICATION_DOC_TYPES: Array<{ docType: string; label: string }> = [
   { docType: "selfie", label: "Selfie" },
   { docType: "drivers_license", label: "Driver's License" },
   { docType: "utility_bill", label: "Utility Bill" },
 ];
 
+const VERIFICATION_SET = new Set(VERIFICATION_DOC_TYPES.map((d) => d.docType));
+
+const SUPPORTING_DOC_LABELS: Record<string, string> = {
+  secured_debt_statement: "Debt / loan statement",
+  mortgage_statement: "Mortgage statement",
+  heloc_statement: "HELOC statement",
+  second_lien_statement: "Second lien statement",
+  tax_lien_notice: "Tax lien notice",
+  judgment_document: "Judgment document",
+  hoa_lien_notice: "HOA lien notice",
+  other_claim_document: "Other claim document",
+  appraisal_report: "Appraisal report",
+  cma_report: "CMA / realtor estimate",
+  online_estimate_screenshot: "Online estimate screenshot",
+  listing_or_offer_document: "Listing or offer document",
+  trust_document: "Trust document",
+  estate_document: "Estate document",
+  condition_supporting_document: "Condition supporting document",
+};
+
+function docLabel(docType: string): string {
+  const v = VERIFICATION_DOC_TYPES.find((d) => d.docType === docType);
+  if (v) return v.label;
+  return SUPPORTING_DOC_LABELS[docType] ?? docType.replace(/_/g, " ");
+}
+
 // Always return a ROOT-ABSOLUTE path (must start with "/")
-function proxyUrl(propertyId: string, docType: DocType, token: string) {
+function proxyUrl(propertyId: string, docType: string, token: string) {
   const path = `/api/admin/properties/${encodeURIComponent(
     propertyId,
   )}/documents/${encodeURIComponent(docType)}`;
-
-  // Ensure browser treats it as root-absolute (not relative)
-  // Using URL normalizes edge cases like accidental missing leading slash.
   const u = new URL(path, "http://local");
   u.searchParams.set("t", token);
   return u.pathname + u.search;
@@ -56,8 +78,8 @@ function DocCard({
       title={exists ? "Open preview" : "Missing"}
     >
       <div className="flex items-center justify-between gap-2">
-        <div className="text-sm font-medium">{label}</div>
-        <div className="text-xs text-muted-foreground">
+        <div className="text-sm font-medium truncate">{label}</div>
+        <div className="text-xs text-muted-foreground shrink-0">
           {exists ? contentType || "unknown" : "missing"}
         </div>
       </div>
@@ -86,6 +108,42 @@ function DocCard({
   );
 }
 
+function DocListRow({
+  label,
+  row,
+  propertyId,
+  onOpen,
+}: {
+  label: string;
+  row: DocRow;
+  propertyId: string;
+  onOpen: (r: DocRow) => void;
+}) {
+  const contentType = row.content_type ?? "";
+  return (
+    <div className="flex items-center justify-between gap-3 px-3 py-2.5 border-b last:border-b-0">
+      <div className="flex items-center gap-2 min-w-0">
+        <span className="text-sm truncate">{label}</span>
+        <span className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium bg-green-100 text-green-800 shrink-0">
+          ✓
+        </span>
+        {contentType && (
+          <span className="text-xs text-muted-foreground shrink-0 hidden sm:block">
+            {contentType}
+          </span>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={() => onOpen(row)}
+        className="text-xs underline text-muted-foreground hover:text-foreground shrink-0"
+      >
+        Preview
+      </button>
+    </div>
+  );
+}
+
 export function PropertyDocumentsPreview(props: {
   propertyId: string;
   docs: DocRow[];
@@ -93,57 +151,82 @@ export function PropertyDocumentsPreview(props: {
   const { propertyId, docs } = props;
   const [open, setOpen] = useState<DocRow | null>(null);
 
-  const identityDocs = useMemo(() => {
-    const m = new Map<IdentityDocType, DocRow>();
+  const { verificationMap, debtDocs, supportingDocs } = useMemo(() => {
+    const verificationMap = new Map<string, DocRow>();
+    const debtDocs: DocRow[] = [];
+    const supportingDocs: DocRow[] = [];
+
     for (const d of docs) {
-      if (d.doc_type !== "secured_debt_statement") {
-        m.set(d.doc_type as IdentityDocType, d);
+      if (VERIFICATION_SET.has(d.doc_type)) {
+        verificationMap.set(d.doc_type, d);
+      } else if (d.doc_type === "secured_debt_statement") {
+        debtDocs.push(d);
+      } else {
+        supportingDocs.push(d);
       }
     }
-    return m;
+    return { verificationMap, debtDocs, supportingDocs };
   }, [docs]);
 
-  const debtStatements = useMemo(
-    () => docs.filter((d) => d.doc_type === "secured_debt_statement"),
-    [docs],
-  );
+  const hasSupportingOrDebt = debtDocs.length > 0 || supportingDocs.length > 0;
 
   return (
-    <section className="rounded-lg border p-4 space-y-4">
-      <div className="text-sm font-medium">Documents</div>
+    <>
+      {/* Verification documents */}
+      <section className="rounded-lg border overflow-hidden">
+        <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b">
+          Verification documents
+        </div>
+        <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-3">
+          {VERIFICATION_DOC_TYPES.map(({ docType, label }) => (
+            <DocCard
+              key={docType}
+              label={label}
+              row={verificationMap.get(docType)}
+              propertyId={propertyId}
+              onOpen={setOpen}
+            />
+          ))}
+        </div>
+      </section>
 
-      {/* Identity & verification docs */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        {IDENTITY_DOCS.map(({ docType, label }) => (
-          <DocCard
-            key={docType}
-            label={label}
-            row={identityDocs.get(docType)}
-            propertyId={propertyId}
-            onOpen={setOpen}
-          />
-        ))}
-      </div>
-
-      {/* Debt statement docs */}
-      {debtStatements.length > 0 && (
-        <div>
-          <div className="text-xs font-medium text-muted-foreground mb-2">
-            Loan statements ({debtStatements.length})
+      {/* Supporting documents */}
+      <section className="rounded-lg border overflow-hidden">
+        <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b flex items-center gap-2">
+          Supporting documents
+          {hasSupportingOrDebt && (
+            <span className="text-xs font-normal text-muted-foreground">
+              {debtDocs.length + supportingDocs.length} uploaded
+            </span>
+          )}
+        </div>
+        {!hasSupportingOrDebt ? (
+          <div className="p-4 text-sm text-muted-foreground">
+            No supporting documents uploaded by homeowner.
           </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            {debtStatements.map((row, idx) => (
-              <DocCard
-                key={`${row.doc_type}-${idx}`}
-                label={`Loan statement ${idx + 1}`}
+        ) : (
+          <div className="divide-y">
+            {debtDocs.map((row, idx) => (
+              <DocListRow
+                key={`debt-${idx}`}
+                label={idx === 0 ? "Debt / loan statement" : `Debt / loan statement (${idx + 1})`}
+                row={row}
+                propertyId={propertyId}
+                onOpen={setOpen}
+              />
+            ))}
+            {supportingDocs.map((row) => (
+              <DocListRow
+                key={row.doc_type}
+                label={docLabel(row.doc_type)}
                 row={row}
                 propertyId={propertyId}
                 onOpen={setOpen}
               />
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </section>
 
       {/* Lightbox */}
       {open ? (
@@ -158,12 +241,7 @@ export function PropertyDocumentsPreview(props: {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-2 flex items-center justify-between gap-3">
-              <div className="text-sm font-medium">
-                {open.doc_type === "secured_debt_statement"
-                  ? "Loan Statement"
-                  : IDENTITY_DOCS.find((d) => d.docType === open.doc_type)?.label ??
-                    open.doc_type}
-              </div>
+              <div className="text-sm font-medium">{docLabel(open.doc_type)}</div>
               <button
                 type="button"
                 className="rounded border px-2 py-1 text-sm hover:bg-muted/30"
@@ -206,6 +284,6 @@ export function PropertyDocumentsPreview(props: {
           </div>
         </div>
       ) : null}
-    </section>
+    </>
   );
 }
