@@ -56,7 +56,7 @@ export function NegotiationSection({
       setResult(`Proposal ${body.status ?? decision + "ed"}`);
       setAcceptOpen(false);
       setRejectOpen(false);
-      window.location.href = "/dashboard";
+      router.refresh();
     } catch (err: any) {
       setResult(err?.message ?? "Network error");
     } finally {
@@ -146,9 +146,9 @@ export function NegotiationSection({
               shown on this page.
             </p>
             <p>
-              <span className="font-medium">Next steps:</span> we will generate a
-              contract package, request any required documents, then send for
-              e-signature (DocuSign), and proceed to lender/title coordination.
+              <span className="font-medium">Next steps:</span> FractPath will
+              review the file, may request additional information, and will
+              contact you with the next step in the process.
             </p>
             <p className="text-xs text-gray-500">
               You can still cancel before final contract execution.
