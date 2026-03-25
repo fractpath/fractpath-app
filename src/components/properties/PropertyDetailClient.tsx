@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { PropertyForm } from "@/components/properties/PropertyForm";
+import { PropertyDocumentsPanel } from "@/components/properties/PropertyDocumentsPanel";
 import type { HomeownerPropertyShape } from "@/lib/property/projections";
 
 type LinkedDeal = {
@@ -301,22 +302,11 @@ export function PropertyDetailClient({ property, linkedDeal }: Props) {
       )}
 
       {/* Documents */}
-      <div className="rounded-lg border p-5">
-        <h2 className="text-sm font-semibold mb-2">Documents</h2>
-        <p className="text-sm text-muted-foreground">
-          Verification documents (selfie, ID, utility bill) are submitted
-          through the property verification flow.{" "}
-          {canEdit(property.status) && (
-            <button
-              type="button"
-              onClick={() => setEditOpen(true)}
-              className="underline hover:text-foreground"
-            >
-              Open property editor
-            </button>
-          )}
-        </p>
-      </div>
+      <PropertyDocumentsPanel
+        propertyId={property.id}
+        onOpenEdit={() => setEditOpen(true)}
+        editAllowed={canEdit(property.status)}
+      />
 
       {/* Linked deal */}
       {linkedDeal?.deal_id && (

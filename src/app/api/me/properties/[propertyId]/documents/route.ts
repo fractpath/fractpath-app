@@ -21,15 +21,17 @@ export async function GET(
   } = await supabase.auth.getUser();
   if (!user) return jsonError("Unauthorized", 401);
 
-  const { data: prop } = await (supabase.from("properties") as any)
+  const svc = createServiceClient();
+
+  const { data: prop } = await (svc.from("properties") as any)
     .select("id")
     .eq("id", propertyId)
-    .eq("owner_user_id", user.id)
+    .or(
+      `owner_user_id.eq.${user.id},created_by_user_id.eq.${user.id},claimed_by_user_id.eq.${user.id}`,
+    )
     .maybeSingle();
 
   if (!prop) return jsonError("Not found", 404);
-
-  const svc = createServiceClient();
 
   const { data: docs, error } = await (svc.from("property_documents") as any)
     .select("id, doc_type, storage_path, content_type, created_at")
