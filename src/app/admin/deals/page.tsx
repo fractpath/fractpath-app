@@ -16,11 +16,11 @@ const TRIAGE_BADGE: Record<
   { label: string; className: string }
 > = {
   ready_for_deposit: {
-    label: "Review deposit required",
+    label: "Ready for deposit request",
     className: "bg-green-100 text-green-800",
   },
   triage_in_progress: {
-    label: "Formal review in progress",
+    label: "Triage in progress",
     className: "bg-blue-100 text-blue-800",
   },
   more_info_needed: {
@@ -28,7 +28,7 @@ const TRIAGE_BADGE: Record<
     className: "bg-yellow-100 text-yellow-800",
   },
   ineligible: {
-    label: "Not applicable",
+    label: "Ineligible",
     className: "bg-red-100 text-red-800",
   },
 };

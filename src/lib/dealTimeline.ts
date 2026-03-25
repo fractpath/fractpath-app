@@ -66,8 +66,8 @@ function eventTypeLabel(et: string): string {
     case "DEAL_SHARED": return "Deal shared";
     case "OFFER_ACCEPTED": return "Offer accepted";
     case "OFFER_REJECTED": return "Offer declined";
-    case "DEAL_TRIAGE_EVALUATED": return "Review initiated";
-    case "DEAL_TRIAGE_READY_FOR_DEPOSIT": return "Review initiated";
+    case "DEAL_TRIAGE_EVALUATED": return "Pending internal review";
+    case "DEAL_TRIAGE_READY_FOR_DEPOSIT": return "Eligible for review deposit";
     case "DEAL_TRIAGE_MORE_INFO_NEEDED": return "Additional information required";
     case "DEAL_TRIAGE_INELIGIBLE": return "Review not applicable";
     default: return et.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
