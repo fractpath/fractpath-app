@@ -4,6 +4,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { getAppBaseUrlServer } from "@/lib/appBaseUrl";
 import { sendTemplateEmail } from "@/lib/email/sendTemplateEmail";
 import { computeLtvPolicy } from "@/lib/ltvPolicy";
+import { evaluateDealTriage } from "@/lib/dealTriage";
 
 function json(status: number, body: any) {
   return NextResponse.json(body, { status });
@@ -389,6 +390,85 @@ export async function POST(
     const finalOwnerUserId =
       (threadPatch.owner_user_id as string | undefined) ??
       (thread.owner_user_id as string | null);
+
+    // --- Sprint 16 triage (best-effort, non-blocking) ---
+    try {
+      const triagePropertyId = thread.property_id as string | null;
+      if (triagePropertyId) {
+        const { data: intakeRow } = await (svc.from("properties") as any)
+          .select(
+            "ownership_type, occupancy_use, occupancy_use_other, major_condition_issue, major_condition_issue_details, known_liens_and_claims, total_known_debt_amount, total_known_debt_confidence, debt_statement_availability, title_claims_known, title_claims_details, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, owner_stated_fmv_source_other, willing_to_proceed_formal_review",
+          )
+          .eq("id", triagePropertyId)
+          .maybeSingle();
+
+        if (intakeRow) {
+          const triageResult = evaluateDealTriage(intakeRow);
+
+          // Persist triage metadata on the deal
+          const { error: triageUpdateErr } = await (svc.from("deals") as any)
+            .update({
+              triage_status: triageResult.triage_status,
+              triage_reason_tags: triageResult.triage_reason_tags,
+              fmv_plausibility_flag: triageResult.fmv_plausibility_flag,
+            })
+            .eq("id", resolvedDealId);
+
+          if (triageUpdateErr) {
+            console.error("DEAL_TRIAGE_PERSIST_ERROR", {
+              dealId: resolvedDealId,
+              error: triageUpdateErr.message,
+            });
+          }
+
+          // Map triage status to outcome-specific event type
+          const triageEventTypeMap: Record<string, string> = {
+            ready_for_deposit: "DEAL_TRIAGE_READY_FOR_DEPOSIT",
+            triage_in_progress: "DEAL_TRIAGE_EVALUATED",
+            more_info_needed: "DEAL_TRIAGE_MORE_INFO_NEEDED",
+            ineligible: "DEAL_TRIAGE_INELIGIBLE",
+          };
+          const triageEventType =
+            triageEventTypeMap[triageResult.triage_status] ??
+            "DEAL_TRIAGE_EVALUATED";
+
+          await (svc.from("deal_events") as any).insert({
+            deal_id: resolvedDealId,
+            event_type: triageEventType,
+            payload: {
+              triage_status: triageResult.triage_status,
+              triage_reason_tags: triageResult.triage_reason_tags,
+              fmv_plausibility_flag: triageResult.fmv_plausibility_flag,
+              property_id: triagePropertyId,
+            },
+            created_by: null,
+          });
+
+          console.log("DEAL_TRIAGE_EVALUATED", {
+            dealId: resolvedDealId,
+            propertyId: triagePropertyId,
+            triageStatus: triageResult.triage_status,
+            fmvFlag: triageResult.fmv_plausibility_flag,
+            tags: triageResult.triage_reason_tags,
+          });
+        } else {
+          console.warn("DEAL_TRIAGE_SKIPPED_NO_INTAKE", {
+            dealId: resolvedDealId,
+            propertyId: triagePropertyId,
+          });
+        }
+      } else {
+        console.warn("DEAL_TRIAGE_SKIPPED_NO_PROPERTY", {
+          dealId: resolvedDealId,
+        });
+      }
+    } catch (triageErr: any) {
+      // Triage is best-effort — never block the accept flow
+      console.error("DEAL_TRIAGE_ERROR", {
+        dealId: resolvedDealId,
+        error: triageErr?.message,
+      });
+    }
 
     console.log("OWNER_DECISION_ACCEPT_EMAIL_ROUTING", {
       dealId: resolvedDealId,
