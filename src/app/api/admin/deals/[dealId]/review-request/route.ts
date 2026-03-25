@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { createServiceClient } from "@/lib/supabase/service";
+import { sendInlineEmail } from "@/lib/email/sendInlineEmail";
+import { getAppBaseUrlServer } from "@/lib/appBaseUrl";
 
 const ALLOWED_STATUS = new Set(["open", "submitted", "resolved"]);
 
@@ -131,6 +133,72 @@ export async function POST(
     requested_items: body.requested_items,
     was_update: !!existing,
   });
+
+  // Notify homeowner — best-effort, non-blocking
+  try {
+    const { data: propRow } = await (svc.from("properties") as any)
+      .select("owner_user_id, address_line1, city, state")
+      .eq("id", body.property_id)
+      .maybeSingle();
+
+    const ownerUserId: string | null = propRow?.owner_user_id ?? null;
+    if (ownerUserId) {
+      const { data: ownerAuth } = await svc.auth.admin.getUserById(ownerUserId);
+      const ownerEmail = ownerAuth?.user?.email?.toLowerCase() ?? null;
+
+      if (ownerEmail) {
+        const from = process.env.RESEND_FROM_EMAIL ?? "notifications@notify.fractpath.com";
+        const addressParts = [propRow?.address_line1, propRow?.city, propRow?.state].filter(Boolean);
+        const addressDisplay = addressParts.join(", ") || "your property";
+        const appBase = getAppBaseUrlServer();
+        const actionUrl = `${appBase}/properties/${body.property_id}`;
+        const itemsHtml = (body.requested_items as Array<{ label: string }>)
+          .map((i) => `<li style="margin-bottom:4px;">${i.label}</li>`)
+          .join("");
+        const adminNoteHtml = body.admin_note
+          ? `<p style="margin-top:12px;padding:10px 12px;background:#fefce8;border-left:3px solid #ca8a04;font-size:14px;">${body.admin_note}</p>`
+          : "";
+
+        await sendInlineEmail({
+          to: ownerEmail,
+          from,
+          subject: "Additional information needed for your property review",
+          html: `
+            <div style="font-family:sans-serif;max-width:520px;margin:0 auto;color:#111;">
+              <p style="font-size:15px;margin-bottom:12px;">Hi,</p>
+              <p style="font-size:15px;margin-bottom:16px;">
+                FractPath needs a few more details before the review for
+                <strong>${addressDisplay}</strong> can continue.
+              </p>
+              <p style="font-size:14px;font-weight:600;margin-bottom:6px;">Requested items:</p>
+              <ul style="font-size:14px;margin:0 0 16px;padding-left:20px;">${itemsHtml}</ul>
+              ${adminNoteHtml}
+              <p style="margin-top:20px;">
+                <a href="${actionUrl}" style="display:inline-block;padding:10px 20px;background:#111;color:#fff;text-decoration:none;border-radius:4px;font-size:14px;">
+                  View property details
+                </a>
+              </p>
+              <p style="font-size:12px;color:#888;margin-top:20px;">
+                You can edit your property details, upload or replace documents, and add a note for our team.
+              </p>
+            </div>
+          `,
+        });
+
+        console.log("review_request_homeowner_notified", {
+          dealId,
+          propertyId: body.property_id,
+          ownerEmail: "[redacted]",
+        });
+      }
+    }
+  } catch (emailErr: any) {
+    console.error("review_request_homeowner_notify_failed", {
+      dealId,
+      propertyId: body.property_id,
+      error: emailErr?.message,
+    });
+  }
 
   return NextResponse.json({ ok: true, request }, { status: 200 });
 }

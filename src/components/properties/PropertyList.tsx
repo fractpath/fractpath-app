@@ -24,6 +24,8 @@ type Property = {
   claim_thread_id?: string | null;
   claim_deal_id?: string | null;
   claim_thread_status?: string | null;
+  // Review request status — set when an open/submitted request exists for a linked deal
+  review_request_status?: "open" | "submitted" | null;
   // Sprint 16 intake fields
   ownership_type?: string | null;
   occupancy_use?: string | null;
@@ -184,6 +186,18 @@ export function PropertyList() {
                   label: "Claimable",
                   className: "bg-amber-100 text-amber-800",
                   hint: "Invited homeowner action required",
+                }
+              : p.review_request_status === "open"
+              ? {
+                  label: "Additional information required",
+                  className: "bg-orange-100 text-orange-900",
+                  hint: "Action needed before review can continue",
+                }
+              : p.review_request_status === "submitted"
+              ? {
+                  label: "Updates submitted for review",
+                  className: "bg-blue-100 text-blue-800",
+                  hint: "Our team is reviewing your updates",
                 }
               : (STATUS_BADGE[p.status] ?? STATUS_BADGE.unverified);
 

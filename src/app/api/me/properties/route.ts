@@ -266,6 +266,52 @@ export async function GET() {
     }
   }
 
+  // Enrich owned properties with review_request_status (open/submitted) — best-effort, non-fatal
+  {
+    const ownedPropertyIds = Array.from(byId.keys());
+    if (ownedPropertyIds.length > 0) {
+      try {
+        // Resolve property_id -> deal_id via deal_threads
+        const { data: propThreads } = await (svc.from("deal_threads") as any)
+          .select("property_id, deal_id")
+          .in("property_id", ownedPropertyIds)
+          .not("deal_id", "is", null);
+
+        const propToDealId = new Map<string, string>();
+        for (const row of propThreads ?? []) {
+          if (row?.property_id && row?.deal_id && !propToDealId.has(row.property_id)) {
+            propToDealId.set(row.property_id, row.deal_id);
+          }
+        }
+
+        if (propToDealId.size > 0) {
+          const dealIds = Array.from(propToDealId.values());
+          const { data: requests } = await (svc.from("deal_review_requests") as any)
+            .select("deal_id, property_id, status")
+            .in("deal_id", dealIds)
+            .in("status", ["open", "submitted"])
+            .order("created_at", { ascending: false });
+
+          const reviewStatusByPropertyId = new Map<string, "open" | "submitted">();
+          for (const req of requests ?? []) {
+            if (req?.property_id && !reviewStatusByPropertyId.has(req.property_id)) {
+              reviewStatusByPropertyId.set(req.property_id, req.status as "open" | "submitted");
+            }
+          }
+
+          for (const [id, prop] of byId.entries()) {
+            const rrStatus = reviewStatusByPropertyId.get(id) ?? null;
+            if (rrStatus) {
+              byId.set(id, { ...prop, review_request_status: rrStatus });
+            }
+          }
+        }
+      } catch {
+        // best-effort — do not fail the response
+      }
+    }
+  }
+
   const rows = Array.from(byId.values()).sort((a: any, b: any) => {
     const aTime = new Date(a.updated_at ?? a.created_at ?? 0).getTime();
     const bTime = new Date(b.updated_at ?? b.created_at ?? 0).getTime();

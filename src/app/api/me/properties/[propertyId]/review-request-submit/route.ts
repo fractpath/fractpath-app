@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import { sendInlineEmail } from "@/lib/email/sendInlineEmail";
+import { getAppBaseUrlServer } from "@/lib/appBaseUrl";
 
 export async function POST(
   req: NextRequest,
@@ -88,6 +90,67 @@ export async function POST(
     });
   } catch {
     // best-effort
+  }
+
+  // Notify ops/admin — best-effort, non-blocking
+  try {
+    const opsEmail = process.env.RESEND_OPS_EMAIL ?? null;
+    const from = process.env.RESEND_FROM_EMAIL ?? "notifications@notify.fractpath.com";
+
+    if (opsEmail) {
+      const appBase = getAppBaseUrlServer();
+      const adminUrl = `${appBase}/admin/properties/${propertyId}`;
+
+      const { data: propRow } = await (svc.from("properties") as any)
+        .select("address_line1, city, state")
+        .eq("id", propertyId)
+        .maybeSingle();
+      const addressParts = [propRow?.address_line1, propRow?.city, propRow?.state].filter(Boolean);
+      const addressDisplay = addressParts.join(", ") || propertyId;
+      const noteHtml = body.homeowner_note?.trim()
+        ? `<p style="margin-top:12px;padding:10px 12px;background:#f8fafc;border-left:3px solid #64748b;font-size:14px;white-space:pre-wrap;">${body.homeowner_note.trim()}</p>`
+        : "<p style='font-size:14px;color:#888;'>No note included.</p>";
+
+      await sendInlineEmail({
+        to: opsEmail,
+        from,
+        subject: "Homeowner submitted additional information for review",
+        html: `
+          <div style="font-family:sans-serif;max-width:520px;margin:0 auto;color:#111;">
+            <p style="font-size:15px;margin-bottom:12px;">
+              A homeowner has submitted updates for property: <strong>${addressDisplay}</strong>
+            </p>
+            <p style="font-size:14px;font-weight:600;margin-bottom:4px;">Homeowner note:</p>
+            ${noteHtml}
+            <p style="margin-top:20px;">
+              <a href="${adminUrl}" style="display:inline-block;padding:10px 20px;background:#111;color:#fff;text-decoration:none;border-radius:4px;font-size:14px;">
+                View in admin
+              </a>
+            </p>
+            <p style="font-size:12px;color:#888;margin-top:16px;">
+              Deal ID: ${request.deal_id} · Property ID: ${propertyId}
+            </p>
+          </div>
+        `,
+      });
+
+      console.log("review_request_ops_notified", {
+        dealId: request.deal_id,
+        propertyId,
+      });
+    } else {
+      console.log("review_request_ops_notify_skipped_no_recipient", {
+        dealId: request.deal_id,
+        propertyId,
+        hint: "Set RESEND_OPS_EMAIL env var to enable ops notifications",
+      });
+    }
+  } catch (emailErr: any) {
+    console.error("review_request_ops_notify_failed", {
+      dealId: request.deal_id,
+      propertyId,
+      error: emailErr?.message,
+    });
   }
 
   return NextResponse.json({ ok: true, request: updated }, { status: 200 });
