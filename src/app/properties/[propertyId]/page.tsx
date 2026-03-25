@@ -43,7 +43,9 @@ export default async function PropertyDetailPage({ params }: PageProps) {
   const { data: row, error } = await (svc.from("properties") as any)
     .select(OWNED_SELECT)
     .eq("id", propertyId)
-    .eq("owner_user_id", user.id)
+    .or(
+      `owner_user_id.eq.${user.id},created_by_user_id.eq.${user.id},claimed_by_user_id.eq.${user.id}`,
+    )
     .maybeSingle();
 
   if (error || !row) {
