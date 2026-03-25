@@ -400,7 +400,8 @@ export default async function DealPage(ctx: PageProps) {
 
           {showNegotiationUi &&
             negState.isOwnerSide &&
-            effectiveThread && (
+            effectiveThread &&
+            headerProperty?.property_status === "verified" && (
               <HomeownerPolicyBanner
                 threadId={effectiveThread.id}
                 threadStatus={effectiveThread.status}
@@ -823,7 +824,8 @@ export default async function DealPage(ctx: PageProps) {
 
           {showNegotiationUi &&
             negState.isOwnerSide &&
-            effectiveThread && (
+            effectiveThread &&
+            property?.status === "verified" && (
               <HomeownerPolicyBanner
                 threadId={effectiveThread.id}
                 threadStatus={effectiveThread.status}
