@@ -1340,9 +1340,7 @@ export function PropertyForm(props: {
               onChange={async (e) => {
                 const raw = e.target.files?.[0] ?? null;
                 if (!raw || !activeSupportingSlot) return;
-                const processed = raw.type === "image/heic" || raw.name.toLowerCase().endsWith(".heic")
-                  ? await convertHeicToJpeg(raw)
-                  : raw;
+                const processed = await normalizeUploadToJpeg(raw);
                 setSupportingFiles((prev) => ({ ...prev, [activeSupportingSlot]: processed }));
                 e.target.value = "";
                 setActiveSupportingSlot(null);
