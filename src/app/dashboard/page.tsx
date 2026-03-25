@@ -59,9 +59,19 @@ const IN_PROGRESS_STATUSES = new Set([
   "UNDER_REVIEW",
   "ACTIVE",
   "IMPORTED",
+  "REVIEW_OPEN",
+  "REVIEW_SUBMITTED",
+  "ACCEPTED_PENDING_REVIEW",
 ]);
 
-const ACTIVE_VALUE_STATUSES = new Set(["UNDER_REVIEW", "ACTIVE", "ACCEPTED"]);
+const ACTIVE_VALUE_STATUSES = new Set([
+  "UNDER_REVIEW",
+  "ACTIVE",
+  "ACCEPTED",
+  "REVIEW_OPEN",
+  "REVIEW_SUBMITTED",
+  "ACCEPTED_PENDING_REVIEW",
+]);
 
 const STATUS_DISPLAY: Record<string, string> = {
   IMPORTED: "Imported",
@@ -361,6 +371,39 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       .filter(Boolean) as string[],
   );
 
+  // Sprint 16: fetch review request status for accepted deals (best-effort, non-fatal)
+  const dealToPropertyIdForReview = new Map<string, string>();
+  for (const t of acceptedOwnerThreads as any[]) {
+    if (t?.deal_id && t?.property_id) {
+      dealToPropertyIdForReview.set(t.deal_id, t.property_id);
+    }
+  }
+
+  const reviewRequestByDealId = new Map<
+    string,
+    { status: "open" | "submitted"; property_id: string }
+  >();
+  if (dealToPropertyIdForReview.size > 0) {
+    try {
+      const rrDealIds = Array.from(dealToPropertyIdForReview.keys());
+      const { data: rrRows } = await (svcEarly.from("deal_review_requests") as any)
+        .select("deal_id, property_id, status")
+        .in("deal_id", rrDealIds)
+        .in("status", ["open", "submitted"])
+        .order("created_at", { ascending: false });
+      for (const row of (rrRows ?? []) as any[]) {
+        if (row?.deal_id && !reviewRequestByDealId.has(row.deal_id)) {
+          reviewRequestByDealId.set(row.deal_id, {
+            status: row.status as "open" | "submitted",
+            property_id: row.property_id,
+          });
+        }
+      }
+    } catch {
+      // best-effort — non-fatal
+    }
+  }
+
   if (grantsRes.error) {
     return (
       <div>
@@ -486,15 +529,33 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const hasSnapshot = (dealId: string) =>
     mySnapshots.some((s: any) => s.deal_id === dealId);
 
-  // Priority 1: needs verification
+  // Sprint 16: derive highest-priority review-request state across accepted deals
+  let openReviewDealId: string | null = null;
+  let openReviewPropertyId: string | null = null;
+  let submittedReviewDealId: string | null = null;
+  let submittedReviewPropertyId: string | null = null;
+  let acceptedNoRequestDealId: string | null = null;
+
+  for (const dealId of acceptedOwnerDealIds) {
+    const rr = reviewRequestByDealId.get(dealId);
+    if (rr?.status === "open" && !openReviewDealId) {
+      openReviewDealId = dealId;
+      openReviewPropertyId = rr.property_id;
+    } else if (rr?.status === "submitted" && !submittedReviewDealId) {
+      submittedReviewDealId = dealId;
+      submittedReviewPropertyId = rr.property_id;
+    } else if (!rr && !acceptedNoRequestDealId) {
+      acceptedNoRequestDealId = dealId;
+    }
+  }
+
+  // Remaining existing-priority signals
   const needsVerification = pickFirst(
     props.filter((p: any) => p.status && p.status !== "verified"),
   );
 
-  // Priority 2: owner has offer to review (via property ownership OR invite email)
   const ownerPendingThread = pickFirst(ownerActionableThreads);
 
-  // Priority 3: buyer deal ready to submit (owned by me + has snapshot + no active thread)
   const buyerReadyDeal = pickFirst(
     myDeals.filter((d: any) => {
       const dealId = d.id as string;
@@ -506,20 +567,41 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     }),
   );
 
-  // Priority 4: buyer waiting for owner
   const buyerWaitingThread = pickFirst(buyerWaitingThreads);
 
   const dynamicSteps: any[] = [];
 
-  if (needsVerification) {
+  if (openReviewDealId && openReviewPropertyId) {
+    // Priority 1: open review request -- homeowner action required
     dynamicSteps.push({
-      key: "verify-property",
-      title: "Verify your property",
-      description: "Complete verification to unlock offers and deal workflows.",
-      href: "/me",
-      cta: "Go to verification",
+      key: "review-request-open",
+      title: "Additional information required",
+      description:
+        "FractPath needs a few more details before your review can continue.",
+      href: `/properties/${openReviewPropertyId}`,
+      cta: "View details",
+    });
+  } else if (submittedReviewDealId && submittedReviewPropertyId) {
+    // Priority 2: submitted -- waiting on FractPath team
+    dynamicSteps.push({
+      key: "review-request-submitted",
+      title: "Updates submitted for review",
+      description:
+        "You've submitted updates. Our team will review them and follow up if anything else is needed.",
+      href: `/properties/${submittedReviewPropertyId}`,
+      cta: "View details",
+    });
+  } else if (acceptedNoRequestDealId) {
+    // Priority 3: accepted, no open request -- deal under active review
+    dynamicSteps.push({
+      key: "accepted-pending-review",
+      title: "Deal accepted -- pending review",
+      description: "Your accepted deal is being reviewed by our team.",
+      href: `/deal/${acceptedNoRequestDealId}`,
+      cta: "View deal",
     });
   } else if (ownerPendingThread?.deal_id) {
+    // Priority 4: owner has an offer awaiting their decision
     dynamicSteps.push({
       key: "owner-review-offer",
       title: "Review an offer",
@@ -527,7 +609,17 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       href: `/deal/${ownerPendingThread.deal_id}#offer`,
       cta: "Review offer",
     });
+  } else if (needsVerification) {
+    // Priority 5: property needs verification (suppressed when higher-priority state exists)
+    dynamicSteps.push({
+      key: "verify-property",
+      title: "Verify your property",
+      description: "Complete verification to unlock offers and deal workflows.",
+      href: "/me",
+      cta: "Go to verification",
+    });
   } else if (buyerReadyDeal?.id) {
+    // Priority 6: buyer has a deal ready to submit
     dynamicSteps.push({
       key: "buyer-submit-offer",
       title: "Submit your offer",
@@ -537,10 +629,11 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       cta: "Submit offer",
     });
   } else if (buyerWaitingThread?.deal_id) {
+    // Priority 7: buyer waiting for owner response
     dynamicSteps.push({
       key: "buyer-waiting",
       title: "Waiting on the owner",
-      description: "Your offer is pending the owner’s review.",
+      description: "Your offer is pending the owner's review.",
       href: `/deal/${buyerWaitingThread.deal_id}#offer`,
       cta: "View offer",
     });
@@ -945,7 +1038,22 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     tone: "amber",
     raw: "AWAITING_APPROVAL",
   };
-  const ACTIVE_DEAL_STATUS = { label: "Active", tone: "green", raw: "ACTIVE" };
+  // Sprint 16: per-deal active status derived from review request state
+  const ACCEPTED_PENDING_REVIEW_STATUS = {
+    label: "Accepted \u2013 pending review",
+    tone: "emerald",
+    raw: "ACCEPTED_PENDING_REVIEW",
+  };
+  const REVIEW_OPEN_STATUS = {
+    label: "Additional information required",
+    tone: "amber",
+    raw: "REVIEW_OPEN",
+  };
+  const REVIEW_SUBMITTED_STATUS = {
+    label: "Updates submitted for review",
+    tone: "blue",
+    raw: "REVIEW_SUBMITTED",
+  };
 
   const pendingOwnerDealIdSetForFilter = new Set(pendingOwnerDealIds);
 
@@ -979,9 +1087,20 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const activeDealCardIds = Array.from(acceptedThreadDealIds).filter((id) =>
     byId.has(id),
   );
-  const activeCards = activeDealCardIds.map((dealId) =>
-    buildCardVm(dealId, "OWNER", ACTIVE_DEAL_STATUS),
-  );
+  const activeCards = activeDealCardIds.map((dealId) => {
+    const rr = reviewRequestByDealId.get(dealId) ?? null;
+    const statusOverride =
+      rr?.status === "open"
+        ? REVIEW_OPEN_STATUS
+        : rr?.status === "submitted"
+          ? REVIEW_SUBMITTED_STATUS
+          : ACCEPTED_PENDING_REVIEW_STATUS;
+    const vm = buildCardVm(dealId, "OWNER", statusOverride);
+    if (rr?.property_id) {
+      return { ...vm, href: `/properties/${rr.property_id}` };
+    }
+    return vm;
+  });
 
   const allCards = [...ownerCards, ...viewerCards, ...activeCards];
 
