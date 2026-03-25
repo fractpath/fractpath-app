@@ -3,7 +3,6 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getAppBaseUrlServer } from "@/lib/appBaseUrl";
 import { sendTemplateEmail } from "@/lib/email/sendTemplateEmail";
-import { computeLtvPolicy } from "@/lib/ltvPolicy";
 import { evaluateDealTriage } from "@/lib/dealTriage";
 
 function json(status: number, body: any) {
@@ -166,99 +165,6 @@ export async function POST(
       ok: false,
       error: "Cannot resolve deal for this proposal",
     });
-  }
-
-  // --- LTV policy enforcement (accept only, owner side only) ---
-  if (decision === "accept" && isOwnerSide && !isBuyer) {
-    try {
-      // Load property underwriting data
-      let propUnderwriting: any = null;
-      if (thread.property_id) {
-        const { data: pu } = await (svc.from("properties") as any)
-          .select(
-            "has_secured_property_debt, secured_property_debt_amount, secured_debt_certified_at, secured_debt_last_verified_at, secured_debt_fresh_until, latest_verified_fmv, ltv_policy_ratio",
-          )
-          .eq("id", thread.property_id)
-          .maybeSingle();
-        propUnderwriting = pu ?? null;
-      }
-
-      // Load active proposal's terms to extract deal FMV / cash terms
-      const { data: propTermsRow } = await (svc.from("deal_proposals") as any)
-        .select("terms_snapshot")
-        .eq("id", proposalId)
-        .maybeSingle();
-
-      let dealTerms: Record<string, unknown> | null = null;
-      if (propTermsRow?.terms_snapshot) {
-        const ts = propTermsRow.terms_snapshot;
-        dealTerms = ts?.inputs?.deal_terms ?? ts?.deal_terms ?? null;
-      }
-
-      // Fall back to latest deal snapshot if proposal has no terms
-      if (!dealTerms) {
-        const { data: latestSnap } = await (svc.from("deal_snapshots") as any)
-          .select("snapshot_json")
-          .eq("deal_id", resolvedDealId)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (latestSnap?.snapshot_json?.inputs?.deal_terms) {
-          dealTerms = latestSnap.snapshot_json.inputs.deal_terms;
-        }
-      }
-
-      const debtAmount =
-        propUnderwriting?.has_secured_property_debt === true
-          ? (propUnderwriting?.secured_property_debt_amount ?? 0)
-          : 0;
-
-      const ltvResult = computeLtvPolicy({
-        proposed_deal_fmv: (dealTerms?.property_value as number | null) ?? null,
-        upfront_payment: (dealTerms?.upfront_payment as number | null) ?? null,
-        monthly_payment: (dealTerms?.monthly_payment as number | null) ?? null,
-        number_of_payments:
-          (dealTerms?.number_of_payments as number | null) ?? null,
-        latest_verified_fmv: propUnderwriting?.latest_verified_fmv ?? null,
-        secured_debt_amount: debtAmount,
-        ltv_policy_ratio: propUnderwriting?.ltv_policy_ratio ?? 0.75,
-        secured_debt_certified_at:
-          propUnderwriting?.secured_debt_certified_at ?? null,
-        secured_debt_last_verified_at:
-          propUnderwriting?.secured_debt_last_verified_at ?? null,
-        secured_debt_fresh_until:
-          propUnderwriting?.secured_debt_fresh_until ?? null,
-      });
-
-      if (ltvResult.execution_readiness_blocked_by_underwriting) {
-        console.log("OWNER_DECISION_LTV_BLOCK", {
-          dealId: resolvedDealId,
-          proposalId,
-          reasons: ltvResult.block_reasons_internal,
-          totalCommitted: ltvResult.total_committed_deal_cash,
-          executableMax: ltvResult.executable_max_accessible_cash,
-          debtIsStale: ltvResult.secured_debt_data_is_stale,
-          verifiedFmvMissing: ltvResult.verified_fmv_required_for_execution,
-        });
-
-        return json(409, {
-          ok: false,
-          error:
-            "This offer cannot be accepted at this time. Please review your property details or counter with revised terms.",
-        });
-      }
-    } catch (ltvErr: any) {
-      console.error("OWNER_DECISION_LTV_CHECK_ERROR", {
-        dealId: resolvedDealId,
-        error: ltvErr?.message,
-      });
-      // Fail-closed: block acceptance when policy check throws
-      return json(500, {
-        ok: false,
-        error: "Policy check failed. Please try again.",
-      });
-    }
   }
 
   let canonicalHeader: Record<string, unknown> | undefined;
