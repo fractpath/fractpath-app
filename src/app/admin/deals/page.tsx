@@ -80,7 +80,7 @@ export default async function AdminDealsTriagePage({ searchParams }: PageProps) 
 
   let query = (svc.from("deals") as any)
     .select(
-      "id, status, triage_status, triage_reason_tags, fmv_plausibility_flag, accepted_at, created_at, deal_threads(property_id)",
+      "id, status, triage_status, triage_reason_tags, fmv_plausibility_flag, accepted_at, created_at, deal_threads(property_id, properties(address_line1, city, state))",
     )
     .order("accepted_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
@@ -164,23 +164,33 @@ export default async function AdminDealsTriagePage({ searchParams }: PageProps) 
                 : null;
               const tags: string[] = deal.triage_reason_tags ?? [];
 
+              const propData: any = (deal.deal_threads as any[])?.[0]?.properties ?? null;
+              const shortAddress = propData
+                ? [propData.address_line1, propData.city, propData.state].filter(Boolean).join(", ")
+                : null;
+
               return (
                 <div
                   key={deal.id}
                   className="p-4 flex flex-col sm:flex-row sm:items-start gap-3"
                 >
                   <div className="flex-1 min-w-0 space-y-1.5">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <Link
-                        href={`/deal/${deal.id}`}
-                        className="text-sm font-mono text-muted-foreground hover:underline truncate max-w-[200px]"
-                        target="_blank"
-                      >
-                        {deal.id.slice(0, 8)}…
-                      </Link>
-                      <span className="text-xs text-muted-foreground">
-                        Accepted {formatDate(deal.accepted_at)}
-                      </span>
+                    <div className="space-y-0.5">
+                      <div className="text-sm font-medium">
+                        {shortAddress ?? "Address unavailable"}
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Link
+                          href={`/deal/${deal.id}`}
+                          className="text-xs font-mono text-muted-foreground hover:underline truncate max-w-[180px]"
+                          target="_blank"
+                        >
+                          {deal.id.slice(0, 8)}…
+                        </Link>
+                        <span className="text-xs text-muted-foreground">
+                          Accepted {formatDate(deal.accepted_at)}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="flex flex-wrap gap-1.5">

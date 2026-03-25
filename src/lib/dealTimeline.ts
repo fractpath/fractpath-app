@@ -70,6 +70,8 @@ function eventTypeLabel(et: string): string {
     case "DEAL_TRIAGE_READY_FOR_DEPOSIT": return "Eligible for review deposit";
     case "DEAL_TRIAGE_MORE_INFO_NEEDED": return "Additional information required";
     case "DEAL_TRIAGE_INELIGIBLE": return "Review not applicable";
+    case "DEAL_REVIEW_REQUEST_RESOLVED": return "Information request resolved";
+    case "DEAL_TRIAGE_RETURNED_TO_REVIEW": return "Returned to triage in progress";
     default: return et.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   }
 }

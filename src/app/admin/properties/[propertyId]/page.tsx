@@ -190,7 +190,7 @@ export default async function AdminPropertyAuditPage({
   if (linkedDeal?.id) {
     const { data: reqRow } = await (supabase.from("deal_review_requests") as any)
       .select(
-        "id, deal_id, property_id, status, requested_items, admin_note, homeowner_note, submitted_at, resolved_at, created_at",
+        "id, deal_id, property_id, status, requested_items, admin_note, homeowner_note, resolved_note, submitted_at, resolved_at, created_at",
       )
       .eq("deal_id", linkedDeal.id)
       .eq("property_id", propertyId)
@@ -250,16 +250,39 @@ export default async function AdminPropertyAuditPage({
 
   return (
     <main className="mx-auto max-w-4xl p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <a className="text-sm underline" href="/admin/properties?status=queue">
-          &larr; Back to queue
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <a className="underline text-muted-foreground hover:text-foreground" href="/dashboard">
+          &larr; Dashboard
         </a>
-        <a
-          className="text-sm underline"
-          href={`/admin/properties?status=${encodeURIComponent(p.status)}`}
-        >
-          View list ({String(p.status).replace("_", " ")})
+        <span className="text-muted-foreground">/</span>
+        <a className="underline text-muted-foreground hover:text-foreground" href="/admin/properties">
+          Properties
         </a>
+        <span className="text-muted-foreground">/</span>
+        <a className="underline text-muted-foreground hover:text-foreground" href="/admin/deals">
+          Deals
+        </a>
+        {linkedDeal && (
+          <>
+            <span className="text-muted-foreground">/</span>
+            <a
+              className="underline text-muted-foreground hover:text-foreground"
+              href={`/deal/${linkedDeal.id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              View linked deal →
+            </a>
+          </>
+        )}
+        <span className="ml-auto">
+          <a
+            className="underline text-muted-foreground hover:text-foreground"
+            href={`/admin/properties?status=${encodeURIComponent(p.status)}`}
+          >
+            View list ({String(p.status).replace("_", " ")})
+          </a>
+        </span>
       </div>
 
       <div>
@@ -592,7 +615,7 @@ export default async function AdminPropertyAuditPage({
         </div>
       )}
 
-      {/* Sprint 16 review — linked accepted deal triage */}
+      {/* Linked deal triage panel */}
       {(() => {
         const TRIAGE_BADGE: Record<string, { label: string; cls: string }> = {
           ready_for_deposit: { label: "Ready for deposit request", cls: "bg-green-100 text-green-800" },
@@ -608,8 +631,8 @@ export default async function AdminPropertyAuditPage({
 
         return (
           <div className="rounded-lg border overflow-hidden">
-            <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b flex items-center gap-2">
-              Sprint 16 review
+            <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b flex items-center gap-2 flex-wrap">
+              <span>Linked deal</span>
               {linkedDeal?.triage_status && (() => {
                 const b = TRIAGE_BADGE[linkedDeal!.triage_status!];
                 return b ? (
@@ -618,14 +641,34 @@ export default async function AdminPropertyAuditPage({
                   </span>
                 ) : null;
               })()}
+              {linkedDeal && (
+                <a
+                  href={`/deal/${linkedDeal.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="ml-auto text-xs underline text-muted-foreground hover:text-foreground font-normal"
+                >
+                  View deal →
+                </a>
+              )}
             </div>
             <div className="p-4 text-sm">
               {!linkedDeal ? (
                 <p className="text-muted-foreground text-xs">
-                  No accepted deal review metadata yet.
+                  No accepted deal linked to this property yet.
                 </p>
               ) : (
                 <div className="space-y-3">
+                  {/* Deal identity: address as primary label */}
+                  <div className="space-y-0.5">
+                    <div className="font-medium">
+                      {addressDisplay || "Address not available"}
+                    </div>
+                    <div className="text-xs text-muted-foreground font-mono">
+                      Deal {linkedDeal.id.slice(0, 8)}…
+                    </div>
+                  </div>
+
                   <div className="grid grid-cols-2 gap-x-6 gap-y-2">
                     <div>
                       <div className="text-muted-foreground text-xs">Triage status</div>
@@ -646,18 +689,6 @@ export default async function AdminPropertyAuditPage({
                             </span>
                           ) : linkedDeal.fmv_plausibility_flag;
                         })() : "—"}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-muted-foreground text-xs">Deal</div>
-                      <div className="font-mono text-xs">
-                        <a
-                          href={`/deal/${linkedDeal.id}`}
-                          target="_blank"
-                          className="underline text-muted-foreground hover:text-foreground"
-                        >
-                          {linkedDeal.id.slice(0, 8)}…
-                        </a>
                       </div>
                     </div>
                     <div>
@@ -682,12 +713,20 @@ export default async function AdminPropertyAuditPage({
                     </div>
                   )}
 
-                  <div className="pt-1">
+                  <div className="flex items-center gap-4 pt-1">
                     <a
                       href="/admin/deals"
                       className="text-xs underline text-muted-foreground hover:text-foreground"
                     >
                       View triage queue →
+                    </a>
+                    <a
+                      href={`/deal/${linkedDeal.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs underline text-muted-foreground hover:text-foreground"
+                    >
+                      View deal →
                     </a>
                   </div>
                 </div>

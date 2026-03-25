@@ -6,6 +6,18 @@ import { getAppBaseUrlServer } from "@/lib/appBaseUrl";
 
 const ALLOWED_STATUS = new Set(["open", "submitted", "resolved"]);
 
+const ALLOWED_NEXT_TRIAGE = new Set([
+  "triage_in_progress",
+  "ready_for_deposit",
+  "ineligible",
+]);
+
+const NEXT_TRIAGE_EVENT: Record<string, string> = {
+  triage_in_progress: "DEAL_TRIAGE_RETURNED_TO_REVIEW",
+  ready_for_deposit: "DEAL_TRIAGE_READY_FOR_DEPOSIT",
+  ineligible: "DEAL_TRIAGE_INELIGIBLE",
+};
+
 async function insertEvent(
   svc: ReturnType<typeof createServiceClient>,
   dealId: string,
@@ -214,7 +226,12 @@ export async function PATCH(
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
   }
 
-  let body: { request_id?: string; action?: string };
+  let body: {
+    request_id?: string;
+    action?: string;
+    next_triage_status?: string;
+    resolved_note?: string | null;
+  };
   try {
     body = await req.json();
   } catch {
@@ -229,11 +246,30 @@ export async function PATCH(
     return NextResponse.json({ ok: false, error: "Unknown action" }, { status: 400 });
   }
 
-  const svc = createServiceClient();
+  if (!body.next_triage_status || !ALLOWED_NEXT_TRIAGE.has(body.next_triage_status)) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "next_triage_status must be one of: triage_in_progress, ready_for_deposit, ineligible",
+      },
+      { status: 400 },
+    );
+  }
 
+  const nextTriageStatus = body.next_triage_status;
+  const resolvedNote = body.resolved_note?.trim() || null;
+
+  const svc = createServiceClient();
   const now = new Date().toISOString();
+
+  // Resolve the review request
   const { data: updated, error: upErr } = await (svc.from("deal_review_requests") as any)
-    .update({ status: "resolved", resolved_at: now, updated_at: now })
+    .update({
+      status: "resolved",
+      resolved_at: now,
+      resolved_note: resolvedNote,
+      updated_at: now,
+    })
     .eq("id", body.request_id)
     .eq("deal_id", dealId)
     .select()
@@ -243,9 +279,32 @@ export async function PATCH(
     return NextResponse.json({ ok: false, error: upErr.message }, { status: 500 });
   }
 
+  // Advance the linked deal's triage_status to the chosen next step
+  const { error: triageErr } = await (svc.from("deals") as any)
+    .update({ triage_status: nextTriageStatus })
+    .eq("id", dealId);
+
+  if (triageErr) {
+    console.error("deal_triage_update_failed", { dealId, nextTriageStatus, error: triageErr.message });
+    // Continue — the review request is already resolved; triage update is critical but we log and surface
+    return NextResponse.json({ ok: false, error: `Triage update failed: ${triageErr.message}` }, { status: 500 });
+  }
+
+  // Log property-side event: request resolved + chosen next step
   await insertEvent(svc, dealId, admin.user.id, "DEAL_REVIEW_REQUEST_RESOLVED", {
     request_id: body.request_id,
+    next_triage_status: nextTriageStatus,
+    resolved_note: resolvedNote,
   });
+
+  // Log deal-side event specific to the chosen next step
+  const dealSideEvent = NEXT_TRIAGE_EVENT[nextTriageStatus];
+  if (dealSideEvent) {
+    await insertEvent(svc, dealId, admin.user.id, dealSideEvent, {
+      request_id: body.request_id,
+      previous_triage_status: "more_info_needed",
+    });
+  }
 
   return NextResponse.json({ ok: true, request: updated }, { status: 200 });
 }
