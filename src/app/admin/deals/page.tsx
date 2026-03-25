@@ -166,8 +166,13 @@ export default async function AdminDealsTriagePage({ searchParams }: PageProps) 
 
               const propData: any = (deal.deal_threads as any[])?.[0]?.properties ?? null;
               const shortAddress = propData
-                ? [propData.address_line1, propData.city, propData.state].filter(Boolean).join(", ")
+                ? [propData.address_line1, propData.city, propData.state]
+                    .filter(Boolean)
+                    .join(", ")
                 : null;
+
+              const propertyId: string | null =
+                (deal.deal_threads as any[])?.[0]?.property_id ?? null;
 
               return (
                 <div
@@ -176,17 +181,17 @@ export default async function AdminDealsTriagePage({ searchParams }: PageProps) 
                 >
                   <div className="flex-1 min-w-0 space-y-1.5">
                     <div className="space-y-0.5">
-                      <div className="text-sm font-medium">
+                      {/* Primary label: address → links to deal review */}
+                      <Link
+                        href={`/admin/deals/${deal.id}`}
+                        className="text-sm font-medium hover:underline"
+                      >
                         {shortAddress ?? "Address unavailable"}
-                      </div>
+                      </Link>
                       <div className="flex items-center gap-2 flex-wrap">
-                        <Link
-                          href={`/deal/${deal.id}`}
-                          className="text-xs font-mono text-muted-foreground hover:underline truncate max-w-[180px]"
-                          target="_blank"
-                        >
+                        <span className="text-xs font-mono text-muted-foreground truncate max-w-[180px]">
                           {deal.id.slice(0, 8)}…
-                        </Link>
+                        </span>
                         <span className="text-xs text-muted-foreground">
                           Accepted {formatDate(deal.accepted_at)}
                         </span>
@@ -229,7 +234,22 @@ export default async function AdminDealsTriagePage({ searchParams }: PageProps) 
                     )}
                   </div>
 
+                  {/* Actions column: primary = deal review, secondary = property review */}
                   <div className="flex-shrink-0 flex flex-col items-end gap-1.5">
+                    <Link
+                      href={`/admin/deals/${deal.id}`}
+                      className="text-xs font-medium underline text-foreground hover:text-muted-foreground"
+                    >
+                      Deal review →
+                    </Link>
+                    {propertyId && (
+                      <Link
+                        href={`/admin/properties/${propertyId}`}
+                        className="text-xs underline text-muted-foreground hover:text-foreground"
+                      >
+                        Property review →
+                      </Link>
+                    )}
                     <Link
                       href={`/deal/${deal.id}`}
                       target="_blank"
@@ -237,19 +257,6 @@ export default async function AdminDealsTriagePage({ searchParams }: PageProps) 
                     >
                       View deal →
                     </Link>
-                    {(() => {
-                      const propertyId: string | null =
-                        (deal.deal_threads as any[])?.[0]?.property_id ?? null;
-                      if (!propertyId) return null;
-                      return (
-                        <Link
-                          href={`/admin/properties/${propertyId}`}
-                          className="text-xs underline text-muted-foreground hover:text-foreground"
-                        >
-                          Review request →
-                        </Link>
-                      );
-                    })()}
                   </div>
                 </div>
               );
