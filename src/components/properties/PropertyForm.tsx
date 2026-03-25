@@ -8,28 +8,45 @@ import {
   type ResolvedProperty,
 } from "@/components/threads/AddressTypeahead";
 
+const HEIC_BOX_TYPES = new Set([
+  "ftypheic", "ftypheix", "ftyphevc", "ftyphevx", "ftypmif1", "ftypmsf1",
+]);
+
+async function isHeicByMagicBytes(file: File): Promise<boolean> {
+  try {
+    const slice = file.slice(4, 12);
+    const buf = await slice.arrayBuffer();
+    const box = new TextDecoder("ascii").decode(buf);
+    return HEIC_BOX_TYPES.has(box);
+  } catch {
+    return false;
+  }
+}
+
 async function normalizeUploadToJpeg(file: File): Promise<File> {
   const name = file.name || "upload";
   const lower = name.toLowerCase();
   const type = (file.type || "").toLowerCase();
 
-  const isHeic =
+  const heicByMeta =
     type.includes("heic") ||
     type.includes("heif") ||
     lower.endsWith(".heic") ||
     lower.endsWith(".heif");
 
+  // Also check magic bytes so misnamed HEIC files (e.g. .jpg with HEIC content) are caught
+  const heicByBytes = heicByMeta ? false : await isHeicByMagicBytes(file);
+  const isHeic = heicByMeta || heicByBytes;
+
   if (!isHeic) return file;
 
   const { default: heic2any } = await import("heic2any");
 
-  const blob = (await heic2any({
-    blob: file,
-    toType: "image/jpeg",
-    quality: 0.9,
-  })) as Blob;
+  const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 });
+  // heic2any can return a Blob or Blob[] (multi-frame); always take the first frame
+  const blob = Array.isArray(converted) ? converted[0] : converted;
 
-  const safeBase = name.replace(/\.(heic|heif)$/i, "") || "upload";
+  const safeBase = name.replace(/\.(heic|heif)$/i, "").replace(/\.[^.]+$/, "") || "upload";
   return new File([blob], `${safeBase}.jpg`, { type: "image/jpeg" });
 }
 
@@ -1309,11 +1326,17 @@ export function PropertyForm(props: {
               className="hidden"
               onChange={async (e) => {
                 const raw = e.target.files?.[0] ?? null;
-                if (!raw || !activeSupportingSlot) return;
-                const processed = await normalizeUploadToJpeg(raw);
-                setSupportingFiles((prev) => ({ ...prev, [activeSupportingSlot]: processed }));
                 e.target.value = "";
+                if (!raw || !activeSupportingSlot) return;
+                const slot = activeSupportingSlot;
                 setActiveSupportingSlot(null);
+                try {
+                  const processed = await normalizeUploadToJpeg(raw);
+                  setSupportingFiles((prev) => ({ ...prev, [slot]: processed }));
+                } catch (err) {
+                  console.error(err);
+                  t.error("Could not process that image. Try a different file.");
+                }
               }}
             />
           </div>
