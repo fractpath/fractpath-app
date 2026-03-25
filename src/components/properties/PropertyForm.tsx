@@ -41,6 +41,39 @@ const DOC_LABELS: Record<DocType, { label: string; hint: string }> = {
   utility_bill: { label: "Utility / bill", hint: "Must show property address" },
 };
 
+type SupportingDocType =
+  | "mortgage_statement"
+  | "heloc_statement"
+  | "second_lien_statement"
+  | "tax_lien_notice"
+  | "judgment_document"
+  | "hoa_lien_notice"
+  | "other_claim_document"
+  | "appraisal_report"
+  | "cma_report"
+  | "online_estimate_screenshot"
+  | "listing_or_offer_document"
+  | "trust_document"
+  | "estate_document"
+  | "condition_supporting_document";
+
+const SUPPORTING_DOC_META: Record<SupportingDocType, { label: string; hint: string }> = {
+  mortgage_statement: { label: "Mortgage statement", hint: "Most recent statement from your lender" },
+  heloc_statement: { label: "HELOC statement", hint: "Most recent HELOC statement" },
+  second_lien_statement: { label: "Second lien statement", hint: "Statement for second lien or loan" },
+  tax_lien_notice: { label: "Tax lien notice", hint: "Notice from the taxing authority" },
+  judgment_document: { label: "Judgment document", hint: "Court judgment document" },
+  hoa_lien_notice: { label: "HOA lien notice", hint: "Notice from your HOA" },
+  other_claim_document: { label: "Other claim document", hint: "Supporting document for other claim" },
+  appraisal_report: { label: "Appraisal report", hint: "Recent professional appraisal" },
+  cma_report: { label: "CMA / realtor estimate", hint: "Comparative market analysis from a realtor" },
+  online_estimate_screenshot: { label: "Online estimate screenshot", hint: "Screenshot from Zillow, Redfin, etc." },
+  listing_or_offer_document: { label: "Listing or offer document", hint: "Active listing or offer documentation" },
+  trust_document: { label: "Trust document", hint: "Trust agreement or certificate of trust" },
+  estate_document: { label: "Estate document", hint: "Probate or estate documentation" },
+  condition_supporting_document: { label: "Condition supporting document", hint: "Photos or reports of condition issues" },
+};
+
 type Mode = "investor" | "owner";
 
 type EditPrefill = {
@@ -203,6 +236,11 @@ export function PropertyForm(props: {
     utility_bill: useRef<HTMLInputElement>(null),
   };
 
+  // Supporting docs: one shared file-picker ref + per-slot file state
+  const [supportingFiles, setSupportingFiles] = useState<Partial<Record<SupportingDocType, File | null>>>({});
+  const [activeSupportingSlot, setActiveSupportingSlot] = useState<SupportingDocType | null>(null);
+  const supportingFileInputRef = useRef<HTMLInputElement>(null);
+
 
   // Sprint 16 intake fields
   const [ownershipType, setOwnershipType] = useState<string>(
@@ -267,6 +305,8 @@ export function PropertyForm(props: {
       setZip("");
       setFiles({ selfie: null, drivers_license: null, utility_bill: null });
     }
+    setSupportingFiles({});
+    setActiveSupportingSlot(null);
     // Sprint 16 intake — prefill from saved data in edit mode, reset in create mode
     const p = props.editPrefill;
     setOwnershipType(p?.ownership_type ?? "");
@@ -301,6 +341,30 @@ export function PropertyForm(props: {
     });
     return out;
   }, [files]);
+
+  // Derive which supporting doc slots are visible based on current intake selections
+  const visibleSupportingDocs = useMemo((): SupportingDocType[] => {
+    const result: SupportingDocType[] = [];
+    // Lien/claim-based
+    if (knownLiensAndClaims.includes("first_mortgage")) result.push("mortgage_statement");
+    if (knownLiensAndClaims.includes("heloc")) result.push("heloc_statement");
+    if (knownLiensAndClaims.includes("second_lien")) result.push("second_lien_statement");
+    if (knownLiensAndClaims.includes("tax_lien")) result.push("tax_lien_notice");
+    if (knownLiensAndClaims.includes("judgment")) result.push("judgment_document");
+    if (knownLiensAndClaims.includes("hoa_lien")) result.push("hoa_lien_notice");
+    if (knownLiensAndClaims.includes("other_claim")) result.push("other_claim_document");
+    // FMV source-based
+    if (ownerStatedFmvSource === "appraisal") result.push("appraisal_report");
+    if (ownerStatedFmvSource === "realtor_cma") result.push("cma_report");
+    if (ownerStatedFmvSource === "online") result.push("online_estimate_screenshot");
+    if (ownerStatedFmvSource === "offer_listing") result.push("listing_or_offer_document");
+    // Ownership type-based
+    if (ownershipType === "trust") result.push("trust_document");
+    if (ownershipType === "estate") result.push("estate_document");
+    // Condition-based
+    if (majorConditionIssue === "yes") result.push("condition_supporting_document");
+    return result;
+  }, [knownLiensAndClaims, ownerStatedFmvSource, ownershipType, majorConditionIssue]);
 
   useEffect(() => {
     return () => {
@@ -462,6 +526,24 @@ export function PropertyForm(props: {
           }
         }
 
+        // Upload any selected supporting docs
+        const supDocsToUpload = visibleSupportingDocs.filter(
+          (k) => supportingFiles[k] != null,
+        );
+        for (const supType of supDocsToUpload) {
+          const supFd = new FormData();
+          supFd.set(supType, supportingFiles[supType]!);
+          const supRes = await fetch(editUrl, { method: "PATCH", body: supFd });
+          const supJson = await supRes.json().catch(() => null);
+          if (!supRes.ok) {
+            t.error(
+              supJson?.error ||
+                `Failed to upload ${supType.replace(/_/g, " ")} — try again.`,
+            );
+            return;
+          }
+        }
+
       } else {
         const fd = new FormData();
         fd.set("address_line1", address_line1.trim());
@@ -472,6 +554,12 @@ export function PropertyForm(props: {
 
         for (const docType of Object.keys(DOC_LABELS) as DocType[]) {
           if (files[docType]) fd.set(docType, files[docType]!);
+        }
+
+        // Append selected supporting docs to create FormData
+        for (const supType of visibleSupportingDocs) {
+          const f = supportingFiles[supType];
+          if (f) fd.set(supType, f);
         }
 
         // Sprint 16 intake fields
@@ -1188,6 +1276,66 @@ export function PropertyForm(props: {
                     ))}
                   </div>
                 </div>
+          </div>
+        )}
+
+        {/* Optional supporting documents — conditionally visible based on intake answers */}
+        {isOwnerMode && visibleSupportingDocs.length > 0 && (
+          <div className="space-y-3 pt-4 border-t border-border">
+            <div>
+              <p className="text-sm font-medium text-foreground">Optional supporting documents</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                These can help speed up review if you have them available.
+              </p>
+            </div>
+            {visibleSupportingDocs.map((docType) => {
+              const meta = SUPPORTING_DOC_META[docType];
+              const file = supportingFiles[docType] ?? null;
+              const isImage = file ? (file.type || "").toLowerCase().startsWith("image/") : false;
+              return (
+                <div key={docType} className="rounded-md border border-border bg-muted/20 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-foreground">{meta.label}</p>
+                      <p className="text-xs text-muted-foreground">{meta.hint}</p>
+                      {file && (
+                        <p className="text-xs text-foreground/70 mt-1 truncate">
+                          {isImage ? "📷 " : "📄 "}{file.name}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveSupportingSlot(docType);
+                        supportingFileInputRef.current?.click();
+                      }}
+                      className="shrink-0 text-xs px-3 py-1.5 rounded border border-border bg-white hover:bg-muted/40 transition-colors"
+                    >
+                      {file ? "Replace" : "Choose file"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Single hidden file input for all supporting doc slots */}
+            <input
+              ref={supportingFileInputRef}
+              type="file"
+              accept="image/*,application/pdf"
+              className="hidden"
+              onChange={async (e) => {
+                const raw = e.target.files?.[0] ?? null;
+                if (!raw || !activeSupportingSlot) return;
+                const processed = raw.type === "image/heic" || raw.name.toLowerCase().endsWith(".heic")
+                  ? await convertHeicToJpeg(raw)
+                  : raw;
+                setSupportingFiles((prev) => ({ ...prev, [activeSupportingSlot]: processed }));
+                e.target.value = "";
+                setActiveSupportingSlot(null);
+              }}
+            />
           </div>
         )}
       </div>

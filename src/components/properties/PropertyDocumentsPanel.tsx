@@ -25,6 +25,20 @@ const VERIFICATION_DOC_TYPES = [
 
 const SUPPORTING_DOC_LABELS: Record<string, string> = {
   secured_debt_statement: "Debt statement",
+  mortgage_statement: "Mortgage statement",
+  heloc_statement: "HELOC statement",
+  second_lien_statement: "Second lien statement",
+  tax_lien_notice: "Tax lien notice",
+  judgment_document: "Judgment document",
+  hoa_lien_notice: "HOA lien notice",
+  other_claim_document: "Other claim document",
+  appraisal_report: "Appraisal report",
+  cma_report: "CMA / realtor estimate",
+  online_estimate_screenshot: "Online estimate screenshot",
+  listing_or_offer_document: "Listing or offer document",
+  trust_document: "Trust document",
+  estate_document: "Estate document",
+  condition_supporting_document: "Condition supporting document",
 };
 
 function docLabel(docType: string): string {

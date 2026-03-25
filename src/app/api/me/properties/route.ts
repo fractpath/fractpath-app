@@ -704,6 +704,70 @@ export async function POST(req: Request) {
     }
   }
 
+  // --- Process optional supporting document uploads (upsert by property_id,doc_type) ---
+  const SUPPORTING_DOC_TYPES_POST = [
+    "mortgage_statement", "heloc_statement", "second_lien_statement",
+    "tax_lien_notice", "judgment_document", "hoa_lien_notice",
+    "other_claim_document", "appraisal_report", "cma_report",
+    "online_estimate_screenshot", "listing_or_offer_document",
+    "trust_document", "estate_document", "condition_supporting_document",
+  ] as const;
+
+  for (const docType of SUPPORTING_DOC_TYPES_POST) {
+    const file = formData.get(docType);
+    if (!file || !(file instanceof File) || file.size === 0) continue;
+
+    const rawBuf = Buffer.from(await file.arrayBuffer());
+    const result = await enforceLimitsAndProcess(rawBuf, file.type);
+    if (!result.ok) {
+      return jsonError(`${docType.replace(/_/g, " ")}: ${result.error}`, result.status);
+    }
+
+    const storagePath = `${user.id}/${propertyId}/${docType}.${result.ext}`;
+
+    const { error: supUploadErr } = await svc.storage
+      .from(BUCKET)
+      .upload(storagePath, result.outBuf, {
+        contentType: result.storedContentType,
+        upsert: true,
+      });
+
+    if (supUploadErr) {
+      return jsonError(
+        `Upload failed for ${docType.replace(/_/g, " ")}: ${supUploadErr.message}`,
+        500,
+      );
+    }
+
+    const { error: supUpsertErr } = await (svc.from("property_documents") as any).upsert(
+      {
+        property_id: propertyId,
+        doc_type: docType,
+        storage_path: storagePath,
+        content_type: result.storedContentType,
+        byte_size: result.meta.byte_size,
+        sha256: result.meta.sha256,
+        width: result.meta.width ?? null,
+        height: result.meta.height ?? null,
+        original_content_type: result.meta.original_content_type,
+      },
+      { onConflict: "property_id,doc_type" },
+    );
+
+    if (supUpsertErr) {
+      return jsonError(
+        `Document record failed for ${docType.replace(/_/g, " ")}: ${supUpsertErr.message}`,
+        500,
+      );
+    }
+
+    console.info("PROPERTY_SUPPORTING_DOC_UPLOAD", {
+      property_id: propertyId,
+      doc_type: docType,
+      ...result.meta,
+    });
+  }
+
   // --- Record underwriting snapshot (append-only audit trail) ---
   if (hasSecuredDebt !== null) {
     await (svc.from("property_underwriting_snapshots") as any).insert({
