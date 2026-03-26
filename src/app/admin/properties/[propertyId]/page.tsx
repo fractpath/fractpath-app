@@ -207,7 +207,9 @@ export default async function AdminPropertyAuditPage({
     linkedDeal = dealRow ?? null;
   }
 
-  // Fetch current open/submitted review request for linked deal
+  // Fetch current open/submitted review request for linked deal.
+  // Only pass open/submitted requests to the panel — a resolved request must
+  // not prevent the admin from creating a new one after a status reset.
   let currentReviewRequest: AdminReviewRequest | null = null;
   if (linkedDeal?.id) {
     const { data: reqRow } = await (supabase.from("deal_review_requests") as any)
@@ -216,6 +218,7 @@ export default async function AdminPropertyAuditPage({
       )
       .eq("deal_id", linkedDeal.id)
       .eq("property_id", propertyId)
+      .in("status", ["open", "submitted"])
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
