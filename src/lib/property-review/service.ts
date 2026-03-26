@@ -15,6 +15,7 @@ import {
   normalizeRentcastAvm,
   normalizeRentcastPropertyProfile,
   type PropertyReviewProvider,
+  type RentcastPropertyRecord,
 } from "./providers/rentcast";
 
 type PropertyAddressInput = {
@@ -107,16 +108,16 @@ function normalizeAddressToken(value: string): string {
 }
 
 function pickBestPropertyRecordMatch(
-  records: any[],
+  records: RentcastPropertyRecord[],
   property: PropertyAddressRecord,
-): any | null {
+): RentcastPropertyRecord | null {
   const refLine1 = normalizeAddressToken(property.address_line1 ?? "");
   const refCity = normalizeAddressToken(property.city ?? "");
   const refState = normalizeAddressToken(property.state ?? "");
   const refZip = (property.postal_code ?? "").trim();
 
   let bestScore = -1;
-  let bestRecord: any | null = null;
+  let bestRecord: RentcastPropertyRecord | null = null;
 
   for (const record of records) {
     let score = 0;
