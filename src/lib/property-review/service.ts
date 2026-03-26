@@ -18,6 +18,10 @@ import {
   type RentcastPropertyRecord,
 } from "./providers/rentcast";
 
+// ProfileCandidate is a typed vendor record surface — structurally equivalent
+// to RentcastPropertyRecord so it can be passed directly into normalization.
+export type ProfileCandidate = RentcastPropertyRecord;
+
 type PropertyAddressInput = {
   propertyId: string;
   requestedBy?: string | null;
@@ -31,10 +35,11 @@ type PropertyAddressRecord = {
   postal_code: string | null;
 };
 
-type FetchProfileResult = {
-  runId: string;
-  summary: PropertyReviewSummaryRow;
-};
+// Discriminated union: exact canonical match auto-persists;
+// non-exact matches require admin confirmation.
+type FetchProfileResult =
+  | { matched: true; runId: string; summary: PropertyReviewSummaryRow }
+  | { matched: false; runId: string; candidates: ProfileCandidate[] };
 
 type FetchAvmResult = {
   runId: string;
@@ -46,6 +51,11 @@ const PROFILE_TTL_DAYS = Number(
 );
 const AVM_TTL_DAYS = Number(process.env.PROPERTY_REVIEW_AVM_TTL_DAYS ?? "30");
 const PROVIDER: PropertyReviewProvider = "rentcast";
+
+// Minimum score for automatic persistence — requires normalized line1 match (10)
+// plus city (3) + state (2) = 15. Records below this threshold are surfaced for
+// admin selection and are never auto-persisted.
+const EXACT_MATCH_THRESHOLD = 15;
 
 function addDaysIso(input: Date, days: number): string {
   const next = new Date(input);
@@ -107,8 +117,6 @@ function normalizeAddressToken(value: string): string {
   return normalized.join(" ");
 }
 
-const MATCH_THRESHOLD = 15;
-
 type ScoredCandidate = {
   record: RentcastPropertyRecord;
   score: number;
@@ -135,45 +143,16 @@ function scorePropertyRecordCandidates(
     .sort((a, b) => b.score - a.score);
 }
 
-function pickBestPropertyRecordMatch(
+// Returns the best record only when it meets the exact canonical match threshold.
+// Records below the threshold are never auto-selected — they require admin confirmation.
+function pickExactCanonicalMatch(
   records: RentcastPropertyRecord[],
   property: PropertyAddressRecord,
 ): RentcastPropertyRecord | null {
   const scored = scorePropertyRecordCandidates(records, property);
   const best = scored[0];
-  if (!best || best.score < MATCH_THRESHOLD) return null;
+  if (!best || best.score < EXACT_MATCH_THRESHOLD) return null;
   return best.record;
-}
-
-function buildNoMatchError(
-  records: RentcastPropertyRecord[],
-  property: PropertyAddressRecord,
-): Error {
-  const scored = scorePropertyRecordCandidates(records, property);
-  const top3 = scored.slice(0, 3);
-
-  const target = [
-    property.address_line1 ?? "",
-    property.city ?? "",
-    property.state ?? "",
-    property.postal_code ?? "",
-  ]
-    .map((v) => v.trim())
-    .join(", ");
-
-  const candidates = top3.map(
-    ({ record: r, score }) =>
-      `{score=${score} addr="${r.addressLine1 ?? ""}" city="${r.city ?? ""}" state="${r.state ?? ""}" zip="${r.zipCode ?? ""}"}`,
-  );
-
-  const bestScore = top3[0]?.score ?? 0;
-
-  return new Error(
-    `RentCast returned no exact property match. ` +
-      `Best score=${bestScore} threshold=${MATCH_THRESHOLD} ` +
-      `target="${target}" ` +
-      `candidates=[${candidates.join(", ")}]`,
-  );
 }
 
 export async function fetchPropertyProfileForReview(
@@ -206,9 +185,18 @@ export async function fetchPropertyProfileForReview(
       zipCode: property.postal_code,
     });
 
-    const matchedRecord = pickBestPropertyRecordMatch(response, property);
+    const matchedRecord = pickExactCanonicalMatch(response, property);
+
     if (!matchedRecord) {
-      throw buildNoMatchError(response, property);
+      // No exact canonical match — do not auto-persist. Mark the run failed and
+      // surface the top candidates for admin explicit selection.
+      await failPropertyReviewRun({
+        runId: run.id,
+        errorMessage: "No exact canonical match. Admin selection required.",
+      });
+      const scored = scorePropertyRecordCandidates(response, property);
+      const candidates: ProfileCandidate[] = scored.slice(0, 3).map((c) => c.record);
+      return { matched: false, runId: run.id, candidates };
     }
 
     const normalized = normalizeRentcastPropertyProfile(matchedRecord);
@@ -232,15 +220,74 @@ export async function fetchPropertyProfileForReview(
       expiresAt,
     });
 
-    return {
-      runId: run.id,
-      summary,
-    };
+    return { matched: true, runId: run.id, summary };
   } catch (error) {
     const message =
       error instanceof Error
         ? error.message
         : "Unknown RentCast profile fetch error";
+
+    await failPropertyReviewRun({
+      runId: run.id,
+      errorMessage: message,
+    });
+
+    throw error;
+  }
+}
+
+export async function confirmProfileCandidate(input: {
+  propertyId: string;
+  requestedBy?: string | null;
+  candidate: ProfileCandidate;
+}): Promise<{ runId: string; summary: PropertyReviewSummaryRow }> {
+  const property = await getPropertyAddressOrThrow(input.propertyId);
+  const requestedAt = new Date();
+  const completedAt = requestedAt.toISOString();
+  const expiresAt = addDaysIso(requestedAt, PROFILE_TTL_DAYS);
+
+  const run = await createPropertyReviewRun({
+    propertyId: property.id,
+    provider: PROVIDER,
+    artifactType: "property_profile",
+    requestedBy: input.requestedBy ?? null,
+    sourceKey: buildSourceKey(property),
+    requestParams: {
+      addressLine1: property.address_line1,
+      city: property.city,
+      state: property.state,
+      zipCode: property.postal_code,
+    },
+  });
+
+  try {
+    const normalized = normalizeRentcastPropertyProfile(input.candidate);
+
+    await completePropertyProfileRun({
+      runId: run.id,
+      propertyId: property.id,
+      provider: PROVIDER,
+      completedAt,
+      expiresAt,
+      vendorRecordId: input.candidate.id ?? null,
+      rawPayload: input.candidate,
+      normalizedPayload: normalized,
+    });
+
+    const summary = await updatePropertyReviewSummaryForProfile({
+      propertyId: property.id,
+      runId: run.id,
+      provider: PROVIDER,
+      fetchedAt: completedAt,
+      expiresAt,
+    });
+
+    return { runId: run.id, summary };
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Unknown error during candidate confirmation";
 
     await failPropertyReviewRun({
       runId: run.id,

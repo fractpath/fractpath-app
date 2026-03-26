@@ -15,6 +15,30 @@ type VendorSummary = {
   fmv_expires_at: string | null;
 };
 
+// Mirror of ProfileCandidate from the service — all fields needed for display
+// and for sending to the confirm endpoint.
+type ProfileCandidate = {
+  id?: string | null;
+  addressLine1?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zipCode?: string | null;
+  formattedAddress?: string | null;
+  propertyType?: string | null;
+  bedrooms?: number | null;
+  bathrooms?: number | null;
+  squareFootage?: number | null;
+  lotSize?: number | null;
+  yearBuilt?: number | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  ownerOccupied?: boolean | null;
+  lastSaleDate?: string | null;
+  lastSalePrice?: number | null;
+  county?: string | null;
+  apn?: string | null;
+};
+
 type FailedRun = {
   error_message: string | null;
 };
@@ -59,8 +83,15 @@ export function AdminVendorReviewPanel({
   const [profileErr, setProfileErr] = useState<string | null>(null);
   const [avmErr, setAvmErr] = useState<string | null>(null);
 
+  // Candidate state — populated when fetch-profile finds no exact canonical match.
+  const [candidates, setCandidates] = useState<ProfileCandidate[] | null>(null);
+  const [confirmingIdx, setConfirmingIdx] = useState<number | null>(null);
+  const [confirmErr, setConfirmErr] = useState<string | null>(null);
+
   async function handleFetchProfile() {
     setProfileErr(null);
+    setCandidates(null);
+    setConfirmErr(null);
     setProfilePending(true);
     try {
       const res = await fetch(
@@ -70,6 +101,9 @@ export function AdminVendorReviewPanel({
       const body = await res.json();
       if (!body.ok) {
         setProfileErr(body.error ?? "Failed to fetch property data");
+      } else if (body.matched === false) {
+        // No exact canonical match — surface candidates for admin selection.
+        setCandidates(body.candidates ?? []);
       } else {
         window.location.reload();
       }
@@ -77,6 +111,32 @@ export function AdminVendorReviewPanel({
       setProfileErr("Network error");
     } finally {
       setProfilePending(false);
+    }
+  }
+
+  async function handleConfirmCandidate(candidate: ProfileCandidate, idx: number) {
+    setConfirmErr(null);
+    setConfirmingIdx(idx);
+    try {
+      const res = await fetch(
+        `/api/admin/properties/${propertyId}/review/confirm-profile-candidate`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ candidate }),
+        },
+      );
+      const body = await res.json();
+      if (!body.ok) {
+        setConfirmErr(body.error ?? "Failed to confirm candidate");
+      } else {
+        window.location.reload();
+      }
+    } catch {
+      setConfirmErr("Network error");
+    } finally {
+      setConfirmingIdx(null);
     }
   }
 
@@ -102,7 +162,7 @@ export function AdminVendorReviewPanel({
   }
 
   const s = initialSummary;
-  const anyPending = profilePending || avmPending;
+  const anyPending = profilePending || avmPending || confirmingIdx !== null;
   const shownProfileErr = profileErr ?? lastProfileError?.error_message ?? null;
   const shownAvmErr = avmErr ?? lastAvmError?.error_message ?? null;
 
@@ -138,11 +198,72 @@ export function AdminVendorReviewPanel({
               No property profile fetched yet.
             </div>
           )}
-          {shownProfileErr && (
+
+          {shownProfileErr && !candidates && (
             <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">
               {shownProfileErr}
             </div>
           )}
+
+          {/* Candidate selection — shown when fetch returns no exact canonical match */}
+          {candidates !== null && (
+            <div className="rounded-md border border-yellow-200 bg-yellow-50 px-3 py-3 space-y-3">
+              <div className="text-xs font-medium text-yellow-900">
+                No reliable match found — admin selection required
+              </div>
+              {candidates.length === 0 ? (
+                <div className="text-xs text-yellow-800">
+                  RentCast returned no candidate records for this address.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="text-xs text-yellow-800">
+                    Select the correct property from the candidates below:
+                  </div>
+                  {candidates.map((c, idx) => (
+                    <div
+                      key={idx}
+                      className="rounded border border-yellow-200 bg-white px-3 py-2 flex items-start justify-between gap-3"
+                    >
+                      <div className="text-xs space-y-0.5 min-w-0">
+                        <div className="font-medium truncate">
+                          {c.addressLine1 ?? "—"}
+                        </div>
+                        <div className="text-muted-foreground">
+                          {[c.city, c.state, c.zipCode].filter(Boolean).join(", ") || "—"}
+                        </div>
+                        {(c.propertyType || c.bedrooms != null || c.squareFootage != null || c.yearBuilt != null) && (
+                          <div className="text-muted-foreground">
+                            {[
+                              c.propertyType,
+                              c.bedrooms != null ? `${c.bedrooms}bd` : null,
+                              c.bathrooms != null ? `${c.bathrooms}ba` : null,
+                              c.squareFootage != null ? `${c.squareFootage.toLocaleString()} sqft` : null,
+                              c.yearBuilt != null ? `built ${c.yearBuilt}` : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleConfirmCandidate(c, idx)}
+                        disabled={anyPending}
+                        className="shrink-0 text-xs px-2.5 py-1 rounded border border-yellow-400 hover:bg-yellow-100 disabled:opacity-50 whitespace-nowrap"
+                      >
+                        {confirmingIdx === idx ? "Confirming…" : "Use this match"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {confirmErr && (
+                <div className="text-xs text-red-700">{confirmErr}</div>
+              )}
+            </div>
+          )}
+
           <div>
             <button
               type="button"
