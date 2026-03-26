@@ -14,6 +14,7 @@ import {
 } from "@/components/admin/AdminReviewRequestPanel";
 import { AdminPropertyReviewControls } from "@/components/admin/AdminPropertyReviewControls";
 import type { PropertyReviewStatus } from "@/components/admin/AdminPropertyReviewControls";
+import { AdminVendorReviewPanel } from "@/components/admin/AdminVendorReviewPanel";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { computeLtvPolicy } from "@/lib/ltvPolicy";
 
@@ -151,7 +152,7 @@ export default async function AdminPropertyAuditPage({
     .filter(Boolean)
     .join(", ");
 
-  const [auditRes, docsRes, underwritingRes, linkedThreadRes] = await Promise.all([
+  const [auditRes, docsRes, underwritingRes, linkedThreadRes, summaryRes, recentRunsRes] = await Promise.all([
     (supabase.from("property_status_audit") as any)
       .select(
         "id, from_status, to_status, changed_by, actor_type, changed_at, notes",
@@ -175,6 +176,17 @@ export default async function AdminPropertyAuditPage({
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    (supabase.from("property_review_summary") as any)
+      .select(
+        "profile_provider, profile_fetched_at, profile_expires_at, fmv_provider, fmv_amount, fmv_low, fmv_high, fmv_confidence, fmv_fetched_at, fmv_expires_at",
+      )
+      .eq("property_id", propertyId)
+      .maybeSingle(),
+    (supabase.from("property_review_runs") as any)
+      .select("artifact_type, status, error_message, requested_at")
+      .eq("property_id", propertyId)
+      .order("requested_at", { ascending: false })
+      .limit(10),
   ]);
 
   // Fetch triage metadata for the linked accepted deal (if any)
@@ -213,6 +225,24 @@ export default async function AdminPropertyAuditPage({
 
   const auditRows = (auditRes.data ?? []) as any[];
   const underwritingRows = (underwritingRes.data ?? []) as any[];
+
+  const vendorSummary = summaryRes.data ?? null;
+  const recentRuns = (recentRunsRes.data ?? []) as {
+    artifact_type: string;
+    status: string;
+    error_message: string | null;
+    requested_at: string;
+  }[];
+  const latestProfileRun = recentRuns.find((r) => r.artifact_type === "property_profile") ?? null;
+  const latestAvmRun = recentRuns.find((r) => r.artifact_type === "avm") ?? null;
+  const lastProfileError =
+    latestProfileRun?.status === "failed"
+      ? { error_message: latestProfileRun.error_message }
+      : null;
+  const lastAvmError =
+    latestAvmRun?.status === "failed"
+      ? { error_message: latestAvmRun.error_message }
+      : null;
 
   // Mint short-lived per-doc tokens (10 minutes) for ALL doc types
   const docs: DocRow[] = ((docsRes.data ?? []) as any[]).map((d) => ({
@@ -582,12 +612,6 @@ export default async function AdminPropertyAuditPage({
               </div>
             </div>
 
-            {/* AMV placeholder */}
-            <div className="rounded-md bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-              <span className="font-medium">AMV (Automated Market Valuation):</span>{" "}
-              Not yet integrated. Once available, AMV provider, value range, and confidence will appear here.
-            </div>
-
             {/* Review note */}
             {p.property_review_note && (
               <div>
@@ -605,6 +629,14 @@ export default async function AdminPropertyAuditPage({
           </div>
         </div>
       </div>
+
+      {/* ── Vendor review data ── */}
+      <AdminVendorReviewPanel
+        propertyId={propertyId}
+        initialSummary={vendorSummary}
+        lastProfileError={lastProfileError}
+        lastAvmError={lastAvmError}
+      />
 
       {/* ── Linked deal (secondary) ── */}
       <div className="rounded-lg border overflow-hidden">
