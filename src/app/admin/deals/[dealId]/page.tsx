@@ -43,6 +43,7 @@ function extractDealTerms(snapshot: unknown): {
   upfront_payment: number | null;
   monthly_payment: number | null;
   number_of_payments: number | null;
+  property_value: number | null;
 } | null {
   if (!snapshot || typeof snapshot !== "object") return null;
   const s = snapshot as Record<string, unknown>;
@@ -52,7 +53,80 @@ function extractDealTerms(snapshot: unknown): {
     upfront_payment: (dealTerms.upfront_payment as number) ?? null,
     monthly_payment: (dealTerms.monthly_payment as number) ?? null,
     number_of_payments: (dealTerms.number_of_payments as number) ?? null,
+    property_value: (dealTerms.property_value as number) ?? null,
   };
+}
+
+// ─── AVM / LTV eligibility ───────────────────────────────────────────────────
+
+const DEVIATION_REVIEW_THRESHOLD_PCT = 20;     // flag for manual review
+const DEVIATION_ESCALATION_THRESHOLD_PCT = 40; // flag for escalated review
+const DEFAULT_LTV_RATIO = 0.75;
+
+type AvmEligibilityResult =
+  | "eligible"
+  | "ineligible_ltv"
+  | "blocked_pending_fmv"
+  | "manual_review_required"
+  | "escalated_review_required";
+
+interface AvmEligibilityCard {
+  result: AvmEligibilityResult;
+  verifiedFmv: number | null;
+  fmvProvider: string | null;
+  fmvFetchedAt: string | null;
+  fmvExpiresAt: string | null;
+  isFmvExpired: boolean;
+  proposedFmv: number | null;
+  deviationPct: number | null;
+  securedDebt: number;
+  ltvRatio: number;
+  maxEligibleCash: number | null;
+  requestedCash: number | null;
+}
+
+const AVM_RESULT_META: Record<AvmEligibilityResult, { label: string; cls: string }> = {
+  eligible: { label: "Eligible", cls: "bg-green-100 text-green-800" },
+  ineligible_ltv: { label: "Ineligible — LTV exceeded", cls: "bg-red-100 text-red-800" },
+  blocked_pending_fmv: { label: "Blocked — verified FMV pending", cls: "bg-yellow-100 text-yellow-800" },
+  manual_review_required: { label: "Manual review required", cls: "bg-orange-100 text-orange-800" },
+  escalated_review_required: { label: "Escalated review required", cls: "bg-red-100 text-red-800" },
+};
+
+function computeAvmEligibility(args: {
+  verifiedFmv: number | null;
+  fmvProvider: string | null;
+  fmvFetchedAt: string | null;
+  fmvExpiresAt: string | null;
+  proposedFmv: number | null;
+  securedDebt: number;
+  ltvRatio: number;
+  requestedCash: number | null;
+}): AvmEligibilityCard {
+  const { verifiedFmv, fmvProvider, fmvFetchedAt, fmvExpiresAt, proposedFmv, securedDebt, ltvRatio, requestedCash } = args;
+  const isFmvExpired = fmvExpiresAt ? new Date(fmvExpiresAt) < new Date() : false;
+
+  if (!verifiedFmv || isFmvExpired) {
+    return { result: "blocked_pending_fmv", verifiedFmv, fmvProvider, fmvFetchedAt, fmvExpiresAt, isFmvExpired, proposedFmv, deviationPct: null, securedDebt, ltvRatio, maxEligibleCash: null, requestedCash };
+  }
+
+  const maxEligibleCash = Math.max(0, verifiedFmv * ltvRatio - securedDebt);
+  const deviationPct = proposedFmv != null
+    ? Math.abs(proposedFmv - verifiedFmv) / verifiedFmv * 100
+    : null;
+
+  let result: AvmEligibilityResult;
+  if (requestedCash !== null && requestedCash > maxEligibleCash) {
+    result = "ineligible_ltv";
+  } else if (deviationPct !== null && deviationPct >= DEVIATION_ESCALATION_THRESHOLD_PCT) {
+    result = "escalated_review_required";
+  } else if (deviationPct !== null && deviationPct >= DEVIATION_REVIEW_THRESHOLD_PCT) {
+    result = "manual_review_required";
+  } else {
+    result = "eligible";
+  }
+
+  return { result, verifiedFmv, fmvProvider, fmvFetchedAt, fmvExpiresAt, isFmvExpired, proposedFmv, deviationPct, securedDebt, ltvRatio, maxEligibleCash, requestedCash };
 }
 
 // ─── Deal review state derivation ───────────────────────────────────────────
@@ -292,7 +366,7 @@ export default async function AdminDealReviewPage({
     : null;
 
   // ── Parallel fetches ─────────────────────────────────────────────────────
-  const [eventsResult, reviewRequestRes, proposalRes] = await Promise.all([
+  const [eventsResult, reviewRequestRes, proposalRes, reviewSummaryRes] = await Promise.all([
     getDealEvents(svc, dealId, 100),
 
     // Latest review request for this deal+property
@@ -316,11 +390,20 @@ export default async function AdminDealReviewPage({
           .limit(1)
           .maybeSingle()
       : Promise.resolve({ data: null }),
+
+    // Property review summary for verified AVM inputs
+    propertyId
+      ? (svc.from("property_review_summary") as any)
+          .select("fmv_amount, fmv_provider, fmv_fetched_at, fmv_expires_at")
+          .eq("property_id", propertyId)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
 
   const events = eventsResult.ok ? eventsResult.events : [];
   const reviewRequest: any = reviewRequestRes.data ?? null;
   const latestProposal: any = proposalRes.data ?? null;
+  const reviewSummary: any = reviewSummaryRes.data ?? null;
 
   // ── Derived values ───────────────────────────────────────────────────────
   const hasOpenReviewRequest =
@@ -349,6 +432,19 @@ export default async function AdminDealReviewPage({
   const maxCash = property?.max_accessible_cash_current ?? null;
   const fmvBasis = property?.latest_verified_fmv ?? property?.owner_stated_fmv ?? null;
   const debtBasis = property?.has_secured_property_debt ? (property?.secured_property_debt_amount ?? 0) : 0;
+
+  // ── AVM eligibility ───────────────────────────────────────────────────────
+  const avmEligibility: AvmEligibilityCard = computeAvmEligibility({
+    verifiedFmv: (reviewSummary?.fmv_amount as number | null) ?? null,
+    fmvProvider: (reviewSummary?.fmv_provider as string | null) ?? null,
+    fmvFetchedAt: (reviewSummary?.fmv_fetched_at as string | null) ?? null,
+    fmvExpiresAt: (reviewSummary?.fmv_expires_at as string | null) ?? null,
+    proposedFmv: proposedTerms?.property_value ?? null,
+    securedDebt: debtBasis,
+    ltvRatio: (property?.ltv_policy_ratio as number | null) ?? DEFAULT_LTV_RATIO,
+    requestedCash: upfront,
+  });
+  const avmMeta = AVM_RESULT_META[avmEligibility.result];
 
   // Simple envelope check: compare proposed upfront against max available cash
   let economicsResult: { label: string; cls: string; detail: string } | null = null;
@@ -621,10 +717,96 @@ export default async function AdminDealReviewPage({
               </div>
             )}
 
-            {/* AMV placeholder */}
-            <div className="rounded-md bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-              <span className="font-medium">AMV:</span>{" "}
-              Not yet integrated. Automated Market Valuation results will appear here once available.
+            {/* AVM / LTV eligibility card */}
+            <div className={`rounded-md border text-xs ${
+              avmEligibility.result === "eligible"
+                ? "border-green-200 bg-green-50"
+                : avmEligibility.result === "blocked_pending_fmv"
+                  ? "border-yellow-200 bg-yellow-50"
+                  : avmEligibility.result === "manual_review_required"
+                    ? "border-orange-200 bg-orange-50"
+                    : "border-red-200 bg-red-50"
+            }`}>
+              <div className="flex items-center gap-2 px-3 py-2 border-b border-inherit">
+                <span className="font-semibold">AVM / LTV eligibility</span>
+                <span className={`rounded-full px-2 py-0.5 font-medium ${avmMeta.cls}`}>
+                  {avmMeta.label}
+                </span>
+              </div>
+              <div className="px-3 py-2.5 grid grid-cols-2 gap-x-6 gap-y-2">
+                <div>
+                  <div className="text-muted-foreground">Verified FMV</div>
+                  <div className="font-medium">
+                    {avmEligibility.verifiedFmv
+                      ? formatCurrency(avmEligibility.verifiedFmv)
+                      : <span className="text-muted-foreground">Not available</span>}
+                    {avmEligibility.fmvProvider && (
+                      <span className="ml-1 text-muted-foreground">({avmEligibility.fmvProvider})</span>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Proposed deal FMV</div>
+                  <div className="font-medium">
+                    {avmEligibility.proposedFmv != null
+                      ? formatCurrency(avmEligibility.proposedFmv)
+                      : <span className="text-muted-foreground">Not available</span>}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Deviation</div>
+                  <div className="font-medium">
+                    {avmEligibility.deviationPct != null
+                      ? `${avmEligibility.deviationPct.toFixed(1)}%`
+                      : "—"}
+                    {avmEligibility.deviationPct !== null && avmEligibility.deviationPct >= DEVIATION_ESCALATION_THRESHOLD_PCT && (
+                      <span className="ml-1 text-red-700">↑ escalation threshold</span>
+                    )}
+                    {avmEligibility.deviationPct !== null &&
+                      avmEligibility.deviationPct >= DEVIATION_REVIEW_THRESHOLD_PCT &&
+                      avmEligibility.deviationPct < DEVIATION_ESCALATION_THRESHOLD_PCT && (
+                      <span className="ml-1 text-orange-700">↑ review threshold</span>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">LTV ratio</div>
+                  <div className="font-medium">
+                    {(avmEligibility.ltvRatio * 100).toFixed(0)}%
+                  </div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Secured debt</div>
+                  <div className="font-medium">{formatCurrency(avmEligibility.securedDebt)}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Max eligible cash</div>
+                  <div className="font-medium">
+                    {avmEligibility.maxEligibleCash != null
+                      ? formatCurrency(avmEligibility.maxEligibleCash)
+                      : "—"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Requested cash</div>
+                  <div className="font-medium">
+                    {avmEligibility.requestedCash != null
+                      ? formatCurrency(avmEligibility.requestedCash)
+                      : "—"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">AVM fetched</div>
+                  <div className="font-medium">
+                    {avmEligibility.fmvFetchedAt
+                      ? formatDateShort(avmEligibility.fmvFetchedAt)
+                      : "—"}
+                    {avmEligibility.isFmvExpired && (
+                      <span className="ml-1 text-red-600">(expired)</span>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
 
             {property.property_review_note && (
