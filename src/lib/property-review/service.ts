@@ -89,6 +89,50 @@ function buildSourceKey(address: PropertyAddressRecord): string {
   ].join("|");
 }
 
+const SUFFIX_MAP: Record<string, string> = {
+  street: "st",
+  road: "rd",
+  drive: "dr",
+  avenue: "ave",
+  court: "ct",
+  lane: "ln",
+};
+
+function normalizeAddressToken(value: string): string {
+  let s = value.toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
+  s = s.replace(/\s+/g, " ");
+  const words = s.split(" ");
+  const normalized = words.map((w) => SUFFIX_MAP[w] ?? w);
+  return normalized.join(" ");
+}
+
+function pickBestPropertyRecordMatch(
+  records: any[],
+  property: PropertyAddressRecord,
+): any | null {
+  const refLine1 = normalizeAddressToken(property.address_line1 ?? "");
+  const refCity = normalizeAddressToken(property.city ?? "");
+  const refState = normalizeAddressToken(property.state ?? "");
+  const refZip = (property.postal_code ?? "").trim();
+
+  let bestScore = -1;
+  let bestRecord: any | null = null;
+
+  for (const record of records) {
+    let score = 0;
+    if (normalizeAddressToken(record.addressLine1 ?? "") === refLine1) score += 10;
+    if (normalizeAddressToken(record.city ?? "") === refCity) score += 3;
+    if (normalizeAddressToken(record.state ?? "") === refState) score += 2;
+    if ((record.zipCode ?? "").trim() === refZip) score += 3;
+    if (score > bestScore) {
+      bestScore = score;
+      bestRecord = record;
+    }
+  }
+
+  return bestScore >= 15 ? bestRecord : null;
+}
+
 export async function fetchPropertyProfileForReview(
   input: PropertyAddressInput,
 ): Promise<FetchProfileResult> {
@@ -119,12 +163,12 @@ export async function fetchPropertyProfileForReview(
       zipCode: property.postal_code,
     });
 
-    const firstRecord = response[0];
-    if (!firstRecord) {
-      throw new Error("RentCast returned no property records");
+    const matchedRecord = pickBestPropertyRecordMatch(response, property);
+    if (!matchedRecord) {
+      throw new Error("RentCast returned no exact property match");
     }
 
-    const normalized = normalizeRentcastPropertyProfile(firstRecord);
+    const normalized = normalizeRentcastPropertyProfile(matchedRecord);
 
     await completePropertyProfileRun({
       runId: run.id,
@@ -132,7 +176,7 @@ export async function fetchPropertyProfileForReview(
       provider: PROVIDER,
       completedAt,
       expiresAt,
-      vendorRecordId: firstRecord.id ?? null,
+      vendorRecordId: matchedRecord.id ?? null,
       rawPayload: response,
       normalizedPayload: normalized,
     });
