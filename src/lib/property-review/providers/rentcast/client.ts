@@ -81,16 +81,20 @@ export async function fetchRentcastPropertyRecord(input: {
   });
 }
 
+// AVM endpoint requires a full canonical address string, not component fields.
 export async function fetchRentcastAvm(input: {
   addressLine1: string;
   city: string;
   state: string;
   zipCode?: string | null;
 }): Promise<RentcastAvmResponse> {
-  return rentcastFetch<RentcastAvmResponse>("/avm/value", {
-    addressLine1: input.addressLine1,
-    city: input.city,
-    state: input.state,
-    zipCode: input.zipCode ?? "",
-  });
+  const address = [
+    input.addressLine1.trim(),
+    input.city.trim(),
+    [input.state.trim(), (input.zipCode ?? "").trim()].filter(Boolean).join(" "),
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  return rentcastFetch<RentcastAvmResponse>("/avm/value", { address });
 }

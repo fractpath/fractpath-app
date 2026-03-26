@@ -17,6 +17,7 @@ import type { PropertyReviewStatus } from "@/components/admin/AdminPropertyRevie
 import { AdminVendorReviewPanel } from "@/components/admin/AdminVendorReviewPanel";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { computeLtvPolicy } from "@/lib/ltvPolicy";
+import type { NormalizedPropertyProfile } from "@/lib/property-review/providers/rentcast";
 
 function requirePreviewSecret(): string {
   const v = process.env.ADMIN_DOC_PREVIEW_SECRET;
@@ -183,7 +184,7 @@ export default async function AdminPropertyAuditPage({
       .eq("property_id", propertyId)
       .maybeSingle(),
     (supabase.from("property_review_runs") as any)
-      .select("artifact_type, status, error_message, requested_at")
+      .select("artifact_type, status, error_message, requested_at, normalized_payload, is_current")
       .eq("property_id", propertyId)
       .order("requested_at", { ascending: false })
       .limit(10),
@@ -232,6 +233,8 @@ export default async function AdminPropertyAuditPage({
     status: string;
     error_message: string | null;
     requested_at: string;
+    normalized_payload: unknown;
+    is_current: boolean;
   }[];
   const latestProfileRun = recentRuns.find((r) => r.artifact_type === "property_profile") ?? null;
   const latestAvmRun = recentRuns.find((r) => r.artifact_type === "avm") ?? null;
@@ -243,6 +246,12 @@ export default async function AdminPropertyAuditPage({
     latestAvmRun?.status === "failed"
       ? { error_message: latestAvmRun.error_message }
       : null;
+  const currentProfileRun =
+    recentRuns.find(
+      (r) => r.artifact_type === "property_profile" && r.is_current && r.status === "completed",
+    ) ?? null;
+  const persistedProfileDetails =
+    (currentProfileRun?.normalized_payload as NormalizedPropertyProfile | null) ?? null;
 
   // Mint short-lived per-doc tokens (10 minutes) for ALL doc types
   const docs: DocRow[] = ((docsRes.data ?? []) as any[]).map((d) => ({
@@ -636,6 +645,7 @@ export default async function AdminPropertyAuditPage({
         initialSummary={vendorSummary}
         lastProfileError={lastProfileError}
         lastAvmError={lastAvmError}
+        initialProfileDetails={persistedProfileDetails}
       />
 
       {/* ── Linked deal (secondary) ── */}

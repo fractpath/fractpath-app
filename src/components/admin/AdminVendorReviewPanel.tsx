@@ -15,6 +15,30 @@ type VendorSummary = {
   fmv_expires_at: string | null;
 };
 
+// Mirror of NormalizedPropertyProfile from providers/rentcast/types.ts.
+type PersistedProfileDetails = {
+  address: {
+    line1: string | null;
+    city: string | null;
+    state: string | null;
+    zip: string | null;
+    formatted: string | null;
+  } | null;
+  propertyType: string | null;
+  beds: number | null;
+  baths: number | null;
+  squareFeet: number | null;
+  lotSize: number | null;
+  yearBuilt: number | null;
+  ownerOccupied: boolean | null;
+  lastSaleDate: string | null;
+  lastSalePrice: number | null;
+  apn: string | null;
+  county: string | null;
+  latitude: number | null;
+  longitude: number | null;
+};
+
 // Mirror of ProfileCandidate from the service — all fields needed for display
 // and for sending to the confirm endpoint.
 type ProfileCandidate = {
@@ -48,6 +72,7 @@ type Props = {
   initialSummary: VendorSummary | null;
   lastProfileError: FailedRun | null;
   lastAvmError: FailedRun | null;
+  initialProfileDetails: PersistedProfileDetails | null;
 };
 
 function fmt(val: string | null | undefined): string {
@@ -77,6 +102,7 @@ export function AdminVendorReviewPanel({
   initialSummary,
   lastProfileError,
   lastAvmError,
+  initialProfileDetails,
 }: Props) {
   const [profilePending, setProfilePending] = useState(false);
   const [avmPending, setAvmPending] = useState(false);
@@ -179,19 +205,86 @@ export function AdminVendorReviewPanel({
             Property profile
           </div>
           {s?.profile_provider ? (
-            <div className="grid grid-cols-2 gap-x-6 gap-y-2">
-              <div>
-                <div className="text-xs text-muted-foreground">Provider</div>
-                <div className="font-medium capitalize">{s.profile_provider}</div>
+            <div className="space-y-3">
+              {/* Metadata row */}
+              <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+                <div>
+                  <div className="text-xs text-muted-foreground">Provider</div>
+                  <div className="font-medium capitalize">{s.profile_provider}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Fetched</div>
+                  <div className="font-medium">{fmt(s.profile_fetched_at)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Expires</div>
+                  <div className="font-medium">{fmt(s.profile_expires_at)}</div>
+                </div>
               </div>
-              <div>
-                <div className="text-xs text-muted-foreground">Fetched</div>
-                <div className="font-medium">{fmt(s.profile_fetched_at)}</div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground">Expires</div>
-                <div className="font-medium">{fmt(s.profile_expires_at)}</div>
-              </div>
+
+              {/* Persisted subject-property details */}
+              {initialProfileDetails ? (
+                <div className="rounded-md border bg-muted/20 px-3 py-3 space-y-2">
+                  <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                    Subject property
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+                    <div className="col-span-2">
+                      <div className="text-xs text-muted-foreground">Address</div>
+                      <div className="font-medium">
+                        {(initialProfileDetails.address?.formatted ??
+                          [
+                            initialProfileDetails.address?.line1,
+                            initialProfileDetails.address?.city,
+                            initialProfileDetails.address?.state,
+                            initialProfileDetails.address?.zip,
+                          ]
+                            .filter(Boolean)
+                            .join(", ")) ||
+                          "—"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">Property type</div>
+                      <div className="font-medium capitalize">
+                        {initialProfileDetails.propertyType?.replace(/_/g, " ") ?? "—"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">Year built</div>
+                      <div className="font-medium">{initialProfileDetails.yearBuilt ?? "—"}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">Beds</div>
+                      <div className="font-medium">{initialProfileDetails.beds ?? "—"}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">Baths</div>
+                      <div className="font-medium">{initialProfileDetails.baths ?? "—"}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">Square feet</div>
+                      <div className="font-medium">
+                        {initialProfileDetails.squareFeet != null
+                          ? initialProfileDetails.squareFeet.toLocaleString()
+                          : "—"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">Lot size (sqft)</div>
+                      <div className="font-medium">
+                        {initialProfileDetails.lotSize != null
+                          ? initialProfileDetails.lotSize.toLocaleString()
+                          : "—"}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-xs text-muted-foreground italic">
+                  Subject property details not available.
+                </div>
+              )}
             </div>
           ) : (
             <div className="text-xs text-muted-foreground">
