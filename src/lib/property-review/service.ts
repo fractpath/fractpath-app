@@ -107,31 +107,73 @@ function normalizeAddressToken(value: string): string {
   return normalized.join(" ");
 }
 
-function pickBestPropertyRecordMatch(
+const MATCH_THRESHOLD = 15;
+
+type ScoredCandidate = {
+  record: RentcastPropertyRecord;
+  score: number;
+};
+
+function scorePropertyRecordCandidates(
   records: RentcastPropertyRecord[],
   property: PropertyAddressRecord,
-): RentcastPropertyRecord | null {
+): ScoredCandidate[] {
   const refLine1 = normalizeAddressToken(property.address_line1 ?? "");
   const refCity = normalizeAddressToken(property.city ?? "");
   const refState = normalizeAddressToken(property.state ?? "");
   const refZip = (property.postal_code ?? "").trim();
 
-  let bestScore = -1;
-  let bestRecord: RentcastPropertyRecord | null = null;
+  return records
+    .map((record) => {
+      let score = 0;
+      if (normalizeAddressToken(record.addressLine1 ?? "") === refLine1) score += 10;
+      if (normalizeAddressToken(record.city ?? "") === refCity) score += 3;
+      if (normalizeAddressToken(record.state ?? "") === refState) score += 2;
+      if ((record.zipCode ?? "").trim() === refZip) score += 3;
+      return { record, score };
+    })
+    .sort((a, b) => b.score - a.score);
+}
 
-  for (const record of records) {
-    let score = 0;
-    if (normalizeAddressToken(record.addressLine1 ?? "") === refLine1) score += 10;
-    if (normalizeAddressToken(record.city ?? "") === refCity) score += 3;
-    if (normalizeAddressToken(record.state ?? "") === refState) score += 2;
-    if ((record.zipCode ?? "").trim() === refZip) score += 3;
-    if (score > bestScore) {
-      bestScore = score;
-      bestRecord = record;
-    }
-  }
+function pickBestPropertyRecordMatch(
+  records: RentcastPropertyRecord[],
+  property: PropertyAddressRecord,
+): RentcastPropertyRecord | null {
+  const scored = scorePropertyRecordCandidates(records, property);
+  const best = scored[0];
+  if (!best || best.score < MATCH_THRESHOLD) return null;
+  return best.record;
+}
 
-  return bestScore >= 15 ? bestRecord : null;
+function buildNoMatchError(
+  records: RentcastPropertyRecord[],
+  property: PropertyAddressRecord,
+): Error {
+  const scored = scorePropertyRecordCandidates(records, property);
+  const top3 = scored.slice(0, 3);
+
+  const target = [
+    property.address_line1 ?? "",
+    property.city ?? "",
+    property.state ?? "",
+    property.postal_code ?? "",
+  ]
+    .map((v) => v.trim())
+    .join(", ");
+
+  const candidates = top3.map(
+    ({ record: r, score }) =>
+      `{score=${score} addr="${r.addressLine1 ?? ""}" city="${r.city ?? ""}" state="${r.state ?? ""}" zip="${r.zipCode ?? ""}"}`,
+  );
+
+  const bestScore = top3[0]?.score ?? 0;
+
+  return new Error(
+    `RentCast returned no exact property match. ` +
+      `Best score=${bestScore} threshold=${MATCH_THRESHOLD} ` +
+      `target="${target}" ` +
+      `candidates=[${candidates.join(", ")}]`,
+  );
 }
 
 export async function fetchPropertyProfileForReview(
@@ -166,7 +208,7 @@ export async function fetchPropertyProfileForReview(
 
     const matchedRecord = pickBestPropertyRecordMatch(response, property);
     if (!matchedRecord) {
-      throw new Error("RentCast returned no exact property match");
+      throw buildNoMatchError(response, property);
     }
 
     const normalized = normalizeRentcastPropertyProfile(matchedRecord);
