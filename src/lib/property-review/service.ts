@@ -12,6 +12,7 @@ import {
 import {
   fetchRentcastAvm,
   fetchRentcastPropertyRecord,
+  fetchRentcastPropertyRecordExact,
   normalizeRentcastAvm,
   normalizeRentcastPropertyProfile,
   type PropertyReviewProvider,
@@ -51,11 +52,6 @@ const PROFILE_TTL_DAYS = Number(
 );
 const AVM_TTL_DAYS = Number(process.env.PROPERTY_REVIEW_AVM_TTL_DAYS ?? "30");
 const PROVIDER: PropertyReviewProvider = "rentcast";
-
-// Minimum score for automatic persistence — requires normalized line1 match (10)
-// plus city (3) + state (2) = 15. Records below this threshold are surfaced for
-// admin selection and are never auto-persisted.
-const EXACT_MATCH_THRESHOLD = 15;
 
 function addDaysIso(input: Date, days: number): string {
   const next = new Date(input);
@@ -117,11 +113,24 @@ function normalizeAddressToken(value: string): string {
   return normalized.join(" ");
 }
 
+// Sanity check for the exact-address-first result: confirms the returned record's
+// normalized line1 matches the local property line1.
+function isExactAddressMatch(
+  record: RentcastPropertyRecord,
+  property: PropertyAddressRecord,
+): boolean {
+  return (
+    normalizeAddressToken(record.addressLine1 ?? "") ===
+    normalizeAddressToken(property.address_line1 ?? "")
+  );
+}
+
 type ScoredCandidate = {
   record: RentcastPropertyRecord;
   score: number;
 };
 
+// Used only for ordering fallback search candidates surfaced for admin review.
 function scorePropertyRecordCandidates(
   records: RentcastPropertyRecord[],
   property: PropertyAddressRecord,
@@ -141,18 +150,6 @@ function scorePropertyRecordCandidates(
       return { record, score };
     })
     .sort((a, b) => b.score - a.score);
-}
-
-// Returns the best record only when it meets the exact canonical match threshold.
-// Records below the threshold are never auto-selected — they require admin confirmation.
-function pickExactCanonicalMatch(
-  records: RentcastPropertyRecord[],
-  property: PropertyAddressRecord,
-): RentcastPropertyRecord | null {
-  const scored = scorePropertyRecordCandidates(records, property);
-  const best = scored[0];
-  if (!best || best.score < EXACT_MATCH_THRESHOLD) return null;
-  return best.record;
 }
 
 export async function fetchPropertyProfileForReview(
@@ -177,63 +174,84 @@ export async function fetchPropertyProfileForReview(
     },
   });
 
+  // ── Primary path: exact-address-first subject resolution ──────────────────
+  // Send the full canonical address as a single string. RentCast resolves this
+  // to a specific subject property rather than performing a broad area search.
+  // A single result that passes the line1 sanity check is auto-persisted.
+  let exactRecord: RentcastPropertyRecord | null = null;
+  let exactResponse: RentcastPropertyRecord[] = [];
+
   try {
-    const response = await fetchRentcastPropertyRecord({
+    exactResponse = await fetchRentcastPropertyRecordExact({
       addressLine1: property.address_line1!,
       city: property.city!,
       state: property.state!,
       zipCode: property.postal_code,
     });
 
-    const matchedRecord = pickExactCanonicalMatch(response, property);
-
-    if (!matchedRecord) {
-      // No exact canonical match — do not auto-persist. Mark the run failed and
-      // surface the top candidates for admin explicit selection.
-      await failPropertyReviewRun({
-        runId: run.id,
-        errorMessage: "No exact canonical match. Admin selection required.",
-      });
-      const scored = scorePropertyRecordCandidates(response, property);
-      const candidates: ProfileCandidate[] = scored.slice(0, 3).map((c) => c.record);
-      return { matched: false, runId: run.id, candidates };
+    if (exactResponse.length === 1 && isExactAddressMatch(exactResponse[0], property)) {
+      exactRecord = exactResponse[0];
     }
 
-    const normalized = normalizeRentcastPropertyProfile(matchedRecord);
+    if (exactRecord) {
+      const normalized = normalizeRentcastPropertyProfile(exactRecord);
 
-    await completePropertyProfileRun({
-      runId: run.id,
-      propertyId: property.id,
-      provider: PROVIDER,
-      completedAt,
-      expiresAt,
-      vendorRecordId: matchedRecord.id ?? null,
-      rawPayload: response,
-      normalizedPayload: normalized,
-    });
+      await completePropertyProfileRun({
+        runId: run.id,
+        propertyId: property.id,
+        provider: PROVIDER,
+        completedAt,
+        expiresAt,
+        vendorRecordId: exactRecord.id ?? null,
+        rawPayload: exactResponse,
+        normalizedPayload: normalized,
+      });
 
-    const summary = await updatePropertyReviewSummaryForProfile({
-      propertyId: property.id,
-      runId: run.id,
-      provider: PROVIDER,
-      fetchedAt: completedAt,
-      expiresAt,
-    });
+      const summary = await updatePropertyReviewSummaryForProfile({
+        propertyId: property.id,
+        runId: run.id,
+        provider: PROVIDER,
+        fetchedAt: completedAt,
+        expiresAt,
+      });
 
-    return { matched: true, runId: run.id, summary };
+      return { matched: true, runId: run.id, summary };
+    }
   } catch (error) {
     const message =
       error instanceof Error
         ? error.message
         : "Unknown RentCast profile fetch error";
 
-    await failPropertyReviewRun({
-      runId: run.id,
-      errorMessage: message,
-    });
-
+    await failPropertyReviewRun({ runId: run.id, errorMessage: message });
     throw error;
   }
+
+  // ── Fallback path: component-based search for admin candidate review ───────
+  // Exact resolution returned no unambiguous match. Demote to search and surface
+  // the top candidates for admin explicit selection. This run is marked failed;
+  // a new run is created when the admin confirms a candidate.
+  let candidates: ProfileCandidate[] = [];
+  try {
+    const searchResponse = await fetchRentcastPropertyRecord({
+      addressLine1: property.address_line1!,
+      city: property.city!,
+      state: property.state!,
+      zipCode: property.postal_code,
+    });
+    const scored = scorePropertyRecordCandidates(searchResponse, property);
+    candidates = scored.slice(0, 3).map((c) => c.record);
+  } catch {
+    // Fallback search failure is non-fatal; candidates remain empty and the
+    // admin will see the no-match state with no candidates to select from.
+  }
+
+  await failPropertyReviewRun({
+    runId: run.id,
+    errorMessage: "No exact canonical match. Admin selection required.",
+  });
+
+  return { matched: false, runId: run.id, candidates };
 }
 
 export async function confirmProfileCandidate(input: {

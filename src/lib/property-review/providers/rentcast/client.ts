@@ -44,6 +44,29 @@ async function rentcastFetch<T>(path: string, params: Record<string, string>): P
   return res.json() as Promise<T>;
 }
 
+// Exact-address-first subject resolver.
+// Sends the full canonical address as a single `address` string, which RentCast
+// treats as an exact property lookup rather than a component-based area search.
+// Returns 0 or 1 records for a specific subject property.
+export async function fetchRentcastPropertyRecordExact(input: {
+  addressLine1: string;
+  city: string;
+  state: string;
+  zipCode?: string | null;
+}): Promise<RentcastPropertyResponse> {
+  const address = [
+    input.addressLine1.trim(),
+    input.city.trim(),
+    [input.state.trim(), (input.zipCode ?? "").trim()].filter(Boolean).join(" "),
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  return rentcastFetch<RentcastPropertyResponse>("/properties", { address });
+}
+
+// Component-based search. Can return multiple nearby records and is used only
+// as a fallback to surface admin-review candidates when exact resolution fails.
 export async function fetchRentcastPropertyRecord(input: {
   addressLine1: string;
   city: string;
