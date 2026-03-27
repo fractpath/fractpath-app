@@ -106,7 +106,11 @@ export function AdminDealActions({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ state: selectedState, note: note.trim() || null }),
+        body: JSON.stringify({
+          state: selectedState,
+          note: note.trim() || null,
+          avm_eligibility_result: avmEligibilityResult ?? null,
+        }),
       });
       const body = await res.json();
       if (!body.ok) {
