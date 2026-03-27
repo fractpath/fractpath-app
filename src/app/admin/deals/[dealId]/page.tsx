@@ -326,6 +326,125 @@ async function loadAdminSigData(
   }
 }
 
+// ─── Signer-readiness preflight ──────────────────────────────────────────────
+
+type SignerReadiness = {
+  label: string;
+  userId: string | null;
+  email: string | null;
+  displayName: string | null;
+  isReady: boolean;
+  blockerReason: string | null;
+};
+
+type SignersPreflightResult = {
+  hasAcceptedThread: boolean;
+  buyer: SignerReadiness | null;
+  owner: SignerReadiness | null;
+  allReady: boolean;
+};
+
+const PREFLIGHT_SKIP: SignersPreflightResult = {
+  hasAcceptedThread: false,
+  buyer: null,
+  owner: null,
+  allReady: false,
+};
+
+async function resolveSignerReadiness(
+  svc: ReturnType<typeof createServiceClient>,
+  label: string,
+  userId: string,
+): Promise<SignerReadiness> {
+  let email: string | null = null;
+  let displayName: string | null = null;
+
+  try {
+    const { data: authUser } = await (svc as any).auth.admin.getUserById(userId);
+    if (authUser?.user?.email) {
+      email = authUser.user.email.trim().toLowerCase();
+    }
+  } catch {
+    return {
+      label, userId, email: null, displayName: null, isReady: false,
+      blockerReason: `${label}: auth account could not be accessed.`,
+    };
+  }
+
+  if (!email) {
+    return {
+      label, userId, email: null, displayName: null, isReady: false,
+      blockerReason: `${label} has no verified email address on their account. They must verify their email before signatures can be initiated.`,
+    };
+  }
+
+  try {
+    const { data: profile } = await (svc.from("profiles") as any)
+      .select("first_name, last_name, nickname")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (profile) {
+      const fullName = [profile.first_name, profile.last_name]
+        .filter((s: unknown) => typeof s === "string" && (s as string).trim())
+        .join(" ")
+        .trim();
+      displayName = fullName || (profile.nickname as string | null) || email;
+    } else {
+      displayName = email;
+    }
+  } catch {
+    displayName = email;
+  }
+
+  if (!displayName) {
+    return {
+      label, userId, email, displayName: null, isReady: false,
+      blockerReason: `${label} has no display name set. Add a first name, last name, or nickname to their profile.`,
+    };
+  }
+
+  return { label, userId, email, displayName, isReady: true, blockerReason: null };
+}
+
+async function preflightSignerReadiness(
+  svc: ReturnType<typeof createServiceClient>,
+  buyerUserId: string | null,
+  ownerUserId: string | null,
+  hasAcceptedThread: boolean,
+): Promise<SignersPreflightResult> {
+  if (!hasAcceptedThread) {
+    return {
+      hasAcceptedThread: false,
+      buyer: null,
+      owner: null,
+      allReady: false,
+    };
+  }
+
+  const [buyer, owner] = await Promise.all([
+    buyerUserId
+      ? resolveSignerReadiness(svc, "Buyer", buyerUserId)
+      : Promise.resolve<SignerReadiness>({
+          label: "Buyer", userId: null, email: null, displayName: null, isReady: false,
+          blockerReason: "Buyer user ID is not set on this deal thread.",
+        }),
+    ownerUserId
+      ? resolveSignerReadiness(svc, "Owner", ownerUserId)
+      : Promise.resolve<SignerReadiness>({
+          label: "Owner", userId: null, email: null, displayName: null, isReady: false,
+          blockerReason: "Owner user ID is not set on this deal thread. The homeowner must create an account and be linked to this deal before signatures can be initiated.",
+        }),
+  ]);
+
+  return {
+    hasAcceptedThread: true,
+    buyer,
+    owner,
+    allReady: !!buyer?.isReady && !!owner?.isReady,
+  };
+}
+
 // ─── Page ───────────────────────────────────────────────────────────────────
 
 export default async function AdminDealReviewPage({
@@ -372,7 +491,7 @@ export default async function AdminDealReviewPage({
   // ── Fetch thread + property ─────────────────────────────────────────────
   const { data: thread } = await (svc.from("deal_threads") as any)
     .select(
-      "id, property_id, status, created_at, properties(id, address_line1, address_line2, city, state, postal_code, property_review_status, property_review_status_updated_at, property_review_note, property_review_expires_at, property_review_completed_at, has_secured_property_debt, secured_property_debt_amount, latest_verified_fmv, fmv_verified_at, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, max_accessible_cash_current, ltv_policy_ratio)",
+      "id, buyer_user_id, owner_user_id, property_id, status, created_at, properties(id, address_line1, address_line2, city, state, postal_code, property_review_status, property_review_status_updated_at, property_review_note, property_review_expires_at, property_review_completed_at, has_secured_property_debt, secured_property_debt_amount, latest_verified_fmv, fmv_verified_at, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, max_accessible_cash_current, ltv_policy_ratio)",
     )
     .eq("deal_id", dealId)
     .maybeSingle();
@@ -384,8 +503,20 @@ export default async function AdminDealReviewPage({
     ? [property.address_line1, property.city, property.state].filter(Boolean).join(", ")
     : null;
 
+  // ── Early derived values (needed before parallel block) ──────────────────
+  // "ready_for_deposit" is the persisted DB value for the signature-ready state.
+  // (The CHECK constraint predates the rename to "ready_for_signatures".)
+  const isSignatureReady = deal.triage_status === "ready_for_deposit";
+
+  // Thread status passed to SignatureCard so it can derive its internal CardState.
+  const effectiveThreadStatus: string | null = (thread as any)?.status ?? null;
+
+  // Only run the signer preflight when the deal is signature-ready and the thread
+  // is in the accepted state — avoids two unnecessary auth.admin API calls otherwise.
+  const threadIsAccepted = effectiveThreadStatus === "accepted";
+
   // ── Parallel fetches ─────────────────────────────────────────────────────
-  const [eventsResult, reviewRequestRes, proposalRes, reviewSummaryRes, sigData] = await Promise.all([
+  const [eventsResult, reviewRequestRes, proposalRes, reviewSummaryRes, sigData, signersPreflight] = await Promise.all([
     getDealEvents(svc, dealId, 100),
 
     // Latest review request for this deal+property
@@ -420,6 +551,16 @@ export default async function AdminDealReviewPage({
 
     // Signature packet + recipients (always fetch — cheap; drives the signature section)
     loadAdminSigData(svc, dealId),
+
+    // Signer-readiness preflight — only when signature-ready and thread is accepted
+    isSignatureReady && threadIsAccepted
+      ? preflightSignerReadiness(
+          svc,
+          (thread as any)?.buyer_user_id ?? null,
+          (thread as any)?.owner_user_id ?? null,
+          true,
+        )
+      : Promise.resolve<SignersPreflightResult>(PREFLIGHT_SKIP),
   ]);
 
   const events = eventsResult.ok ? eventsResult.events : [];
@@ -431,13 +572,6 @@ export default async function AdminDealReviewPage({
   const hasOpenReviewRequest =
     reviewRequest !== null &&
     (reviewRequest.status === "open" || reviewRequest.status === "submitted");
-
-  // "ready_for_deposit" is the persisted DB value for the signature-ready state.
-  // (The CHECK constraint predates the rename to "ready_for_signatures".)
-  const isSignatureReady = deal.triage_status === "ready_for_deposit";
-
-  // Thread status passed to SignatureCard so it can derive its internal CardState.
-  const effectiveThreadStatus: string | null = (thread as any)?.status ?? null;
 
   const propReviewStatus: string | null = property?.property_review_status ?? null;
   const propReviewMeta = propReviewStatus ? (PROPERTY_REVIEW_STATUS_META[propReviewStatus] ?? null) : null;
@@ -1018,8 +1152,8 @@ export default async function AdminDealReviewPage({
 
       {/* ── Signature ── */}
       {/* Shown when the deal is in the signature-ready state (triage = ready_for_deposit).
-          If no packet exists: SignatureCard shows "Prepare agreement" (admin button).
-          If packet exists: SignatureCard shows the full signature ladder / tracker. */}
+          Pre-flight section runs before any packet is created to surface signer identity blockers.
+          Once a packet exists the preflight is hidden — the send already succeeded. */}
       {isSignatureReady && (
         <div className="rounded-lg border overflow-hidden">
           <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b flex items-center gap-2">
@@ -1028,22 +1162,96 @@ export default async function AdminDealReviewPage({
               <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-blue-100 text-blue-800 capitalize">
                 {sigData.packet.status.replace(/_/g, " ")}
               </span>
+            ) : signersPreflight.allReady ? (
+              <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-green-100 text-green-800">
+                Signers ready
+              </span>
             ) : (
-              <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-yellow-100 text-yellow-800">
-                Awaiting prepare
+              <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-red-100 text-red-700">
+                Prerequisites missing
               </span>
             )}
           </div>
+
+          {/* Signer-readiness preflight — only shown before packet is created */}
+          {!sigData.packet && (
+            <div className="border-b px-4 py-3 space-y-2">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Signer readiness
+              </p>
+
+              {/* No accepted thread edge-case */}
+              {!signersPreflight.hasAcceptedThread && (
+                <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-800">
+                  No accepted thread found for this deal. The buyer must submit an offer and the
+                  owner must accept it before signatures can be prepared.
+                </div>
+              )}
+
+              {/* Per-signer rows */}
+              {signersPreflight.hasAcceptedThread && (
+                <div className="space-y-1.5">
+                  {[signersPreflight.buyer, signersPreflight.owner].map((sr) => {
+                    if (!sr) return null;
+                    return (
+                      <div
+                        key={sr.label}
+                        className={`flex items-start gap-2 rounded-md px-3 py-2 text-sm ${
+                          sr.isReady
+                            ? "bg-green-50 border border-green-200 text-green-900"
+                            : "bg-red-50 border border-red-200 text-red-900"
+                        }`}
+                      >
+                        <span className="mt-0.5 shrink-0 text-base leading-none">
+                          {sr.isReady ? "✓" : "✗"}
+                        </span>
+                        <div className="min-w-0">
+                          <span className="font-medium">{sr.label}</span>
+                          {sr.isReady ? (
+                            <span className="ml-1.5 text-green-700">
+                              {sr.displayName}
+                              <span className="ml-1 font-normal text-green-600 opacity-70">
+                                &lt;{sr.email}&gt;
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="ml-1.5 text-red-700">{sr.blockerReason}</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Aggregate blocker callout */}
+              {signersPreflight.hasAcceptedThread && !signersPreflight.allReady && (
+                <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-800">
+                  Resolve the issues above before preparing the agreement. The prepare action
+                  is disabled until all signer prerequisites are satisfied.
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="p-4">
-            <SignatureCard
-              dealId={dealId}
-              threadStatus={effectiveThreadStatus}
-              packet={sigData.packet}
-              recipients={sigData.recipients}
-              isAdmin={true}
-              execAgreementUrl={sigData.execAgreementUrl}
-              certificateUrl={sigData.certificateUrl}
-            />
+            {/* SignatureCard — shown when packet exists, OR when all signers are ready (no packet yet).
+                Hidden when prerequisites are missing so the "Prepare agreement" button is not reachable. */}
+            {(sigData.packet || signersPreflight.allReady) ? (
+              <SignatureCard
+                dealId={dealId}
+                threadStatus={effectiveThreadStatus}
+                packet={sigData.packet}
+                recipients={sigData.recipients}
+                isAdmin={true}
+                execAgreementUrl={sigData.execAgreementUrl}
+                certificateUrl={sigData.certificateUrl}
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Prepare is unavailable until signer prerequisites are resolved.
+              </p>
+            )}
           </div>
         </div>
       )}
