@@ -4,6 +4,9 @@ import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getDealEvents } from "@/lib/dealTimeline";
 import { AdminDealActions } from "@/components/admin/AdminDealActions";
+import { SignatureCard } from "@/components/deal/SignatureCard";
+import type { SignaturePacketView, SignatureRecipientView } from "@/components/deal/SignatureCard";
+import { getArtifactSignedUrls } from "@/lib/signature/artifacts";
 import {
   DEFAULT_LTV_RATIO,
   DEVIATION_ESCALATION_THRESHOLD_PCT,
@@ -247,6 +250,82 @@ const PROPERTY_REVIEW_STATUS_META: Record<string, { label: string; badgeCls: str
   property_review_expired: { label: "Review expired", badgeCls: "bg-gray-100 text-gray-600" },
 };
 
+// ─── Signature data loader ───────────────────────────────────────────────────
+
+type AdminSigData = {
+  packet: SignaturePacketView | null;
+  recipients: SignatureRecipientView[];
+  execAgreementUrl: string | null;
+  certificateUrl: string | null;
+};
+
+async function loadAdminSigData(
+  svc: ReturnType<typeof createServiceClient>,
+  dealId: string,
+): Promise<AdminSigData> {
+  try {
+    const { data: packet } = await (svc.from("deal_signature_packets") as any)
+      .select(
+        "id, status, provider, sent_at, completed_at, voided_at, declined_at, " +
+        "executed_document_path, certificate_document_path",
+      )
+      .eq("deal_id", dealId)
+      .order("packet_version", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!packet) return { packet: null, recipients: [], execAgreementUrl: null, certificateUrl: null };
+
+    const { data: recipRows } = await (svc.from("deal_signature_recipients") as any)
+      .select("role, display_name, email, provider_status, signed_at")
+      .eq("packet_id", packet.id)
+      .order("routing_order", { ascending: true });
+
+    const recipients: SignatureRecipientView[] = (recipRows ?? []).map((r: any) => ({
+      role: r.role,
+      display_name: r.display_name ?? null,
+      email: r.email ?? null,
+      provider_status: r.provider_status ?? null,
+      signed_at: r.signed_at ?? null,
+    }));
+
+    let execAgreementUrl: string | null = null;
+    let certificateUrl: string | null = null;
+
+    if (packet.status === "completed") {
+      try {
+        const urls = await getArtifactSignedUrls(
+          packet.executed_document_path ?? null,
+          packet.certificate_document_path ?? null,
+        );
+        execAgreementUrl = urls.executed_agreement_url;
+        certificateUrl = urls.certificate_url;
+      } catch {
+        // non-fatal
+      }
+    }
+
+    return {
+      packet: {
+        id: packet.id,
+        status: packet.status,
+        provider: packet.provider ?? "docusign",
+        sent_at: packet.sent_at ?? null,
+        completed_at: packet.completed_at ?? null,
+        voided_at: packet.voided_at ?? null,
+        declined_at: packet.declined_at ?? null,
+        executed_document_path: packet.executed_document_path ?? null,
+        certificate_document_path: packet.certificate_document_path ?? null,
+      },
+      recipients,
+      execAgreementUrl,
+      certificateUrl,
+    };
+  } catch {
+    return { packet: null, recipients: [], execAgreementUrl: null, certificateUrl: null };
+  }
+}
+
 // ─── Page ───────────────────────────────────────────────────────────────────
 
 export default async function AdminDealReviewPage({
@@ -306,7 +385,7 @@ export default async function AdminDealReviewPage({
     : null;
 
   // ── Parallel fetches ─────────────────────────────────────────────────────
-  const [eventsResult, reviewRequestRes, proposalRes, reviewSummaryRes] = await Promise.all([
+  const [eventsResult, reviewRequestRes, proposalRes, reviewSummaryRes, sigData] = await Promise.all([
     getDealEvents(svc, dealId, 100),
 
     // Latest review request for this deal+property
@@ -338,6 +417,9 @@ export default async function AdminDealReviewPage({
           .eq("property_id", propertyId)
           .maybeSingle()
       : Promise.resolve({ data: null }),
+
+    // Signature packet + recipients (always fetch — cheap; drives the signature section)
+    loadAdminSigData(svc, dealId),
   ]);
 
   const events = eventsResult.ok ? eventsResult.events : [];
@@ -349,6 +431,13 @@ export default async function AdminDealReviewPage({
   const hasOpenReviewRequest =
     reviewRequest !== null &&
     (reviewRequest.status === "open" || reviewRequest.status === "submitted");
+
+  // "ready_for_deposit" is the persisted DB value for the signature-ready state.
+  // (The CHECK constraint predates the rename to "ready_for_signatures".)
+  const isSignatureReady = deal.triage_status === "ready_for_deposit";
+
+  // Thread status passed to SignatureCard so it can derive its internal CardState.
+  const effectiveThreadStatus: string | null = (thread as any)?.status ?? null;
 
   const propReviewStatus: string | null = property?.property_review_status ?? null;
   const propReviewMeta = propReviewStatus ? (PROPERTY_REVIEW_STATUS_META[propReviewStatus] ?? null) : null;
@@ -926,6 +1015,38 @@ export default async function AdminDealReviewPage({
           )}
         </div>
       </div>
+
+      {/* ── Signature ── */}
+      {/* Shown when the deal is in the signature-ready state (triage = ready_for_deposit).
+          If no packet exists: SignatureCard shows "Prepare agreement" (admin button).
+          If packet exists: SignatureCard shows the full signature ladder / tracker. */}
+      {isSignatureReady && (
+        <div className="rounded-lg border overflow-hidden">
+          <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b flex items-center gap-2">
+            <span>Signature &amp; Documents</span>
+            {sigData.packet ? (
+              <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-blue-100 text-blue-800 capitalize">
+                {sigData.packet.status.replace(/_/g, " ")}
+              </span>
+            ) : (
+              <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-yellow-100 text-yellow-800">
+                Awaiting prepare
+              </span>
+            )}
+          </div>
+          <div className="p-4">
+            <SignatureCard
+              dealId={dealId}
+              threadStatus={effectiveThreadStatus}
+              packet={sigData.packet}
+              recipients={sigData.recipients}
+              isAdmin={true}
+              execAgreementUrl={sigData.execAgreementUrl}
+              certificateUrl={sigData.certificateUrl}
+            />
+          </div>
+        </div>
+      )}
 
       {/* ── Deal actions ── */}
       <div className="rounded-lg border overflow-hidden">

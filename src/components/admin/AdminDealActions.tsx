@@ -70,6 +70,13 @@ export function AdminDealActions({
   // Normalize so "ready_for_deposit" (DB value) compares correctly to "ready_for_signatures" (UI key).
   const normalizedTriageStatus = normalizeTriageStatus(currentTriageStatus);
 
+  // When the deal is already signature-ready, remove "Mark ready for signatures" from the
+  // dropdown — it's not a useful action once the state is set and the signature section is live.
+  const availableStates: DealReviewState[] =
+    normalizedTriageStatus === "ready_for_signatures"
+      ? ACTIVE_STATES.filter((s) => s !== "ready_for_signatures")
+      : ACTIVE_STATES;
+
   // Derive AVM gate for the currently-selected state.
   // Only "ready_for_signatures" is a progression action — the other two are always allowed.
   const isProgressionAction = selectedState === "ready_for_signatures";
@@ -146,7 +153,7 @@ export function AdminDealActions({
             onChange={(e) => setSelectedState(e.target.value as DealReviewState)}
             disabled={pending}
           >
-            {ACTIVE_STATES.map((s) => (
+            {availableStates.map((s) => (
               <option key={s} value={s}>
                 {ACTION_META[s].label}
               </option>
