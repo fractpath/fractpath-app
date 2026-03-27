@@ -15,6 +15,7 @@ import {
 import { AdminPropertyReviewControls } from "@/components/admin/AdminPropertyReviewControls";
 import type { PropertyReviewStatus } from "@/components/admin/AdminPropertyReviewControls";
 import { AdminVendorReviewPanel } from "@/components/admin/AdminVendorReviewPanel";
+import { AdminEscalationSimPanel } from "@/components/admin/AdminEscalationSimPanel";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { computeLtvPolicy } from "@/lib/ltvPolicy";
 import type { NormalizedPropertyProfile } from "@/lib/property-review/providers/rentcast";
@@ -129,7 +130,7 @@ export default async function AdminPropertyAuditPage({
 
   const propRes = await (supabase.from("properties") as any)
     .select(
-      "id, owner_user_id, address_line1, address_line2, city, state, postal_code, status, created_at, updated_at, reviewed_at, reviewed_by, verified_at, verified_by, review_notes, has_secured_property_debt, secured_property_debt_amount, secured_debt_certified_at, secured_debt_last_verified_at, secured_debt_fresh_until, secured_debt_verification_status, latest_verified_fmv, fmv_verified_at, fmv_verification_source, ltv_policy_ratio, max_accessible_cash_current, ownership_type, occupancy_use, occupancy_use_other, major_condition_issue, major_condition_issue_details, known_liens_and_claims, total_known_debt_amount, total_known_debt_confidence, debt_statement_availability, title_claims_known, title_claims_details, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, owner_stated_fmv_source_other, willing_to_proceed_formal_review, property_review_status, property_review_status_updated_at, property_review_note, property_review_expires_at, property_review_completed_at",
+      "id, owner_user_id, address_line1, address_line2, city, state, postal_code, status, created_at, updated_at, reviewed_at, reviewed_by, verified_at, verified_by, review_notes, has_secured_property_debt, secured_property_debt_amount, secured_debt_certified_at, secured_debt_last_verified_at, secured_debt_fresh_until, secured_debt_verification_status, latest_verified_fmv, fmv_verified_at, fmv_verification_source, ltv_policy_ratio, max_accessible_cash_current, ownership_type, occupancy_use, occupancy_use_other, major_condition_issue, major_condition_issue_details, known_liens_and_claims, total_known_debt_amount, total_known_debt_confidence, debt_statement_availability, title_claims_known, title_claims_details, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, owner_stated_fmv_source_other, willing_to_proceed_formal_review, property_review_status, property_review_status_updated_at, property_review_note, property_review_expires_at, property_review_completed_at, escalation_deposit_status, escalation_avm_status",
     )
     .eq("id", propertyId)
     .maybeSingle();
@@ -777,59 +778,47 @@ export default async function AdminPropertyAuditPage({
 
       {/* ── Stronger valuation pathway (property-review–owned) ── */}
       {/*
-        This section is the single entry point for escalated valuation and deposit workflows.
-        Deal review does not own or surface deposit/escalation actions.
+        Single entry point for escalated valuation and deposit workflows.
+        Deal review never owns or surfaces deposit/escalation actions.
+        On AVM completion the updated FMV flows into property_review_summary and
+        deal eligibility re-derives automatically — no deal-page action needed.
 
-        TODO(stripe):  Collect escalation deposit via Stripe before initiating a stronger review.
-        TODO(attom):   Trigger an ATTOM valuation run once deposit is confirmed.
-        TODO(fmv-badge): After ATTOM result is received, update property-level verified FMV
-                         (property_review_summary.fmv_amount / fmv_expires_at). Deal eligibility
-                         re-derives automatically from the refreshed basis — no deal-page action needed.
+        TODO(stripe): Replace deposit simulation with live Stripe payment-intent flow.
+        TODO(attom):  Replace AVM simulation with live ATTOM order + result ingestion.
       */}
       <div className="rounded-lg border overflow-hidden">
         <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b flex items-center gap-2">
           <span>Stronger valuation pathway</span>
-          <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-gray-100 text-gray-500">
-            Integration pending
-          </span>
+          {p.escalation_avm_status === "completed" ? (
+            <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-emerald-100 text-emerald-800">
+              FMV applied
+            </span>
+          ) : p.escalation_deposit_status === "paid" ? (
+            <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-blue-100 text-blue-800">
+              Deposit paid — awaiting valuation
+            </span>
+          ) : p.escalation_deposit_status ? (
+            <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-yellow-100 text-yellow-800">
+              Deposit {p.escalation_deposit_status}
+            </span>
+          ) : (
+            <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-gray-100 text-gray-500">
+              Not started
+            </span>
+          )}
         </div>
-        <div className="p-4 space-y-3 text-sm">
-          <p className="text-xs text-muted-foreground">
-            When a deal is blocked pending a stronger property valuation, this is the only place to
-            initiate that workflow. No deal-page action is required or available — valuation
-            escalation is property-review–owned.
-          </p>
-          <div className="space-y-2">
-            {/* TODO(stripe): Replace this placeholder with live Stripe deposit collection */}
-            <div className="rounded-md border border-dashed px-3 py-2.5 text-xs space-y-0.5">
-              <div className="font-medium text-muted-foreground">
-                Request escalation deposit
-              </div>
-              <div className="text-muted-foreground">
-                Pending: Stripe payment collection to fund an escalated valuation review.
-              </div>
-            </div>
-            {/* TODO(attom): Replace this placeholder with live ATTOM API call after deposit confirms */}
-            <div className="rounded-md border border-dashed px-3 py-2.5 text-xs space-y-0.5">
-              <div className="font-medium text-muted-foreground">
-                Initiate stronger valuation review
-              </div>
-              <div className="text-muted-foreground">
-                Pending: ATTOM valuation run triggered after deposit confirmation.
-              </div>
-            </div>
-            {/* TODO(fmv-badge): Write new fmv_amount + fmv_expires_at to property_review_summary
-                after ATTOM result arrives; deal eligibility re-derives from updated basis */}
-            <div className="rounded-md border border-dashed px-3 py-2.5 text-xs space-y-0.5">
-              <div className="font-medium text-muted-foreground">
-                Update verified FMV basis
-              </div>
-              <div className="text-muted-foreground">
-                Post-escalation: refresh property verified FMV from the ATTOM result. Deal-term
-                eligibility re-derives automatically — no deal-review action required.
-              </div>
-            </div>
-          </div>
+        <div className="p-4">
+          <AdminEscalationSimPanel
+            propertyId={propertyId}
+            depositStatus={(p.escalation_deposit_status as string | null) ?? null}
+            avmStatus={(p.escalation_avm_status as string | null) ?? null}
+            suggestedFmv={
+              // Pre-fill with owner-stated FMV as a starting point for the escalated estimate.
+              (p.owner_stated_fmv as number | null) ??
+              (vendorSummary?.fmv_amount as number | null) ??
+              null
+            }
+          />
         </div>
       </div>
 
