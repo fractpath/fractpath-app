@@ -10,15 +10,18 @@ import {
   type AvmEligibilityResult,
 } from "@/lib/avmEligibility";
 
+// Canonical deal review states owned by the deal surface.
+// "ready_for_deposit" is intentionally absent — deposit collection is
+// a property-review–owned action, not a deal-page action.
 const STATE_TO_TRIAGE: Record<string, string> = {
   triage_in_progress: "triage_in_progress",
-  ready_for_deposit: "ready_for_deposit",
+  ready_for_signatures: "ready_for_signatures",
   ineligible: "ineligible",
 };
 
 const STATE_TO_EVENT: Record<string, string> = {
   triage_in_progress: "DEAL_TRIAGE_RETURNED_TO_REVIEW",
-  ready_for_deposit: "DEAL_TRIAGE_READY_FOR_DEPOSIT",
+  ready_for_signatures: "DEAL_TRIAGE_READY_FOR_SIGNATURES",
   ineligible: "DEAL_TRIAGE_INELIGIBLE",
 };
 
@@ -33,7 +36,7 @@ function blockMessage(result: AvmEligibilityResult, deviationPct: number | null)
     case "ineligible_ltv":
       return "Transition blocked: requested upfront cash exceeds maximum eligible cash under the LTV policy.";
     case "escalated_review_required":
-      return `Transition blocked: AVM deviation (${deviationPct?.toFixed(1) ?? "?"}%) exceeds escalation threshold. Escalated review required before advancing.`;
+      return `Transition blocked: AVM deviation (${deviationPct?.toFixed(1) ?? "?"}%) exceeds escalation threshold. Resolve via the stronger valuation pathway on the property review page.`;
     default:
       return "Transition blocked by AVM/LTV policy.";
   }
@@ -66,10 +69,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   const svc = createServiceClient();
 
-  // ── Server-side AVM/LTV gate for ready_for_deposit ───────────────────────
+  // ── Server-side AVM/LTV gate for ready_for_signatures ────────────────────
   // Checks are independent of the client-supplied result so the route cannot be
   // bypassed by a crafted request. Uses the shared computeAvmEligibility helper.
-  if (state === "ready_for_deposit") {
+  if (state === "ready_for_signatures") {
     // Layer 1: cheap early reject on client-reported hard-blocked result.
     if (
       avm_eligibility_result &&
@@ -159,7 +162,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   // Build event payload — include AVM/LTV audit context when present.
   const isManualReviewAck =
-    state === "ready_for_deposit" && avm_eligibility_result === "manual_review_required";
+    state === "ready_for_signatures" && avm_eligibility_result === "manual_review_required";
 
   const eventType = STATE_TO_EVENT[state];
   await (svc.from("deal_events") as any).insert({

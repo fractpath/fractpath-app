@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-type DealReviewState = "triage_in_progress" | "ready_for_deposit" | "ineligible";
+type DealReviewState = "triage_in_progress" | "ready_for_signatures" | "ineligible";
 
 const ACTION_META: Record<DealReviewState, { label: string; description: string; tone: string }> = {
   triage_in_progress: {
@@ -10,9 +10,10 @@ const ACTION_META: Record<DealReviewState, { label: string; description: string;
     description: "Sets the deal back to active triage review.",
     tone: "neutral",
   },
-  ready_for_deposit: {
-    label: "Mark ready for deposit request",
-    description: "Deal economics and property review are sufficient to request deposit.",
+  ready_for_signatures: {
+    label: "Mark ready for signatures",
+    description:
+      "Property valuation is sufficient and deal terms are eligible. Advances deal to the DocuSign signature stage.",
     tone: "success",
   },
   ineligible: {
@@ -22,18 +23,22 @@ const ACTION_META: Record<DealReviewState, { label: string; description: string;
   },
 };
 
+// Deferred actions that are property-review–owned or require future integrations.
+// Deposit collection is intentionally absent from the deal-review surface.
 const DEFERRED_ACTIONS = [
-  { label: "Mark awaiting deposit", reason: "Requires deposit tracking integration" },
+  {
+    label: "Mark awaiting deposit",
+    reason: "Deposit collection is a property-review–owned step — not a deal action",
+  },
   { label: "Mark awaiting AMV", reason: "Requires AMV integration" },
   { label: "Mark counter required", reason: "Requires counter-offer workflow context" },
-  { label: "Mark sent for signature", reason: "Requires DocuSign integration" },
   { label: "Mark executed", reason: "Requires signature completion" },
   { label: "Archive deal", reason: "Requires archival flow" },
 ];
 
 const ACTIVE_STATES = Object.keys(ACTION_META) as DealReviewState[];
 
-// AVM/LTV results that hard-block progression to ready_for_deposit
+// AVM/LTV results that hard-block progression to ready_for_signatures
 const HARD_BLOCKED_RESULTS = new Set([
   "blocked_pending_fmv",
   "ineligible_ltv",
@@ -42,13 +47,13 @@ const HARD_BLOCKED_RESULTS = new Set([
 
 const PROGRESSION_BLOCK_REASON: Record<string, string> = {
   blocked_pending_fmv:
-    "Cannot advance to 'Ready for deposit': no verified AVM is on file for this property. Complete the AVM run on the property review page first.",
+    "Cannot advance to 'Ready for signatures': no verified AVM is on file for this property. Complete the AVM run on the property review page first.",
   ineligible_ltv:
-    "Cannot advance to 'Ready for deposit': requested cash exceeds the maximum eligible cash under the LTV policy.",
+    "Cannot advance to 'Ready for signatures': requested cash exceeds the maximum eligible cash under the LTV policy. Deal terms must be revised.",
   escalated_review_required:
-    "Cannot advance to 'Ready for deposit': AVM deviation exceeds the escalation threshold. This deal requires escalated review before it can progress.",
+    "Cannot advance to 'Ready for signatures': AVM deviation exceeds the escalation threshold. Resolve via the stronger valuation pathway on the property review page.",
   manual_review_required:
-    "AVM deviation exceeds the manual review threshold. Enter an admin note acknowledging the deviation before advancing to 'Ready for deposit'.",
+    "AVM deviation exceeds the manual review threshold. Enter an admin note acknowledging the deviation before advancing to 'Ready for signatures'.",
 };
 
 export function AdminDealActions({
@@ -69,8 +74,8 @@ export function AdminDealActions({
   const [success, setSuccess] = useState<string | null>(null);
 
   // Derive AVM gate for the currently-selected state.
-  // Only "ready_for_deposit" is a progression action — the other two are always allowed.
-  const isProgressionAction = selectedState === "ready_for_deposit";
+  // Only "ready_for_signatures" is a progression action — the other two are always allowed.
+  const isProgressionAction = selectedState === "ready_for_signatures";
   const isHardBlocked =
     isProgressionAction &&
     avmEligibilityResult !== null &&
@@ -176,10 +181,10 @@ export function AdminDealActions({
           <div className="rounded-md px-3 py-2 text-xs border bg-yellow-50 border-yellow-200 text-yellow-800">
             <span className="font-semibold">Open information request</span>
             {" — "}
-            There is an unresolved additional-information request on this property. Resolve it on the property
-            review page before advancing to{" "}
-            <span className="font-medium">Ready for deposit</span>, or proceed only if the outstanding
-            information is no longer required.
+            There is an unresolved additional-information request on this property. Resolve it on the
+            property review page before advancing to{" "}
+            <span className="font-medium">Ready for signatures</span>, or proceed only if the
+            outstanding information is no longer required.
           </div>
         )}
 
@@ -218,10 +223,10 @@ export function AdminDealActions({
         {success && <div className="text-xs text-green-700">{success}</div>}
       </div>
 
-      {/* Deferred actions */}
+      {/* Deferred / property-review–owned actions */}
       <div className="border-t pt-3 space-y-2">
         <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          Deferred actions
+          Deferred / property-review actions
         </div>
         <div className="space-y-1.5">
           {DEFERRED_ACTIONS.map((a) => (

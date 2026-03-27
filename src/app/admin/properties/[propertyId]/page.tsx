@@ -18,6 +18,13 @@ import { AdminVendorReviewPanel } from "@/components/admin/AdminVendorReviewPane
 import { AppHeader } from "@/components/layout/AppHeader";
 import { computeLtvPolicy } from "@/lib/ltvPolicy";
 import type { NormalizedPropertyProfile } from "@/lib/property-review/providers/rentcast";
+import {
+  computeAvmEligibility,
+  extractAvmDealTerms,
+  DEFAULT_LTV_RATIO,
+  DEVIATION_ESCALATION_THRESHOLD_PCT,
+  type AvmEligibilityCard,
+} from "@/lib/avmEligibility";
 
 function requirePreviewSecret(): string {
   const v = process.env.ADMIN_DOC_PREVIEW_SECRET;
@@ -171,7 +178,7 @@ export default async function AdminPropertyAuditPage({
       .order("captured_at", { ascending: false })
       .limit(20),
     (supabase.from("deal_threads") as any)
-      .select("deal_id")
+      .select("id, deal_id")
       .eq("property_id", propertyId)
       .eq("status", "accepted")
       .order("created_at", { ascending: false })
@@ -207,6 +214,23 @@ export default async function AdminPropertyAuditPage({
     linkedDeal = dealRow ?? null;
   }
 
+  // Fetch the linked deal's latest proposal (for deal-term eligibility context).
+  // NOTE: proposalSnapshot is stored here; AVM eligibility is computed after vendorSummary is declared below.
+  let linkedDealProposalSnapshot: unknown = null;
+  if (linkedDeal) {
+    const linkedThreadId: string | null = linkedThreadRes.data?.id ?? null;
+    if (linkedThreadId) {
+      const { data: proposalRow } = await (supabase.from("deal_proposals") as any)
+        .select("terms_snapshot")
+        .eq("thread_id", linkedThreadId)
+        .in("status", ["submitted", "accepted"])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      linkedDealProposalSnapshot = proposalRow?.terms_snapshot ?? null;
+    }
+  }
+
   // Fetch all review requests for this deal+property (including resolved), newest first.
   // currentReviewRequest = latest open/submitted (for the editable panel).
   // allReviewRequests   = complete history (for the read-only history section).
@@ -230,6 +254,26 @@ export default async function AdminPropertyAuditPage({
   const underwritingRows = (underwritingRes.data ?? []) as any[];
 
   const vendorSummary = summaryRes.data ?? null;
+
+  // Compute linked-deal AVM eligibility using the shared helper.
+  // Uses the same vendorSummary (AVM data) and linked deal's proposal terms.
+  let linkedDealAvmEligibility: AvmEligibilityCard | null = null;
+  if (linkedDeal) {
+    const proposalTerms = extractAvmDealTerms(linkedDealProposalSnapshot);
+    const securedDebt =
+      p.has_secured_property_debt === true ? (p.secured_property_debt_amount ?? 0) : 0;
+    linkedDealAvmEligibility = computeAvmEligibility({
+      verifiedFmv: (vendorSummary?.fmv_amount as number | null) ?? null,
+      fmvProvider: (vendorSummary?.fmv_provider as string | null) ?? null,
+      fmvFetchedAt: (vendorSummary?.fmv_fetched_at as string | null) ?? null,
+      fmvExpiresAt: (vendorSummary?.fmv_expires_at as string | null) ?? null,
+      proposedFmv: proposalTerms.property_value,
+      securedDebt,
+      ltvRatio: (p.ltv_policy_ratio as number | null) ?? DEFAULT_LTV_RATIO,
+      requestedCash: proposalTerms.upfront_payment,
+    });
+  }
+
   const recentRuns = (recentRunsRes.data ?? []) as {
     artifact_type: string;
     status: string;
@@ -298,7 +342,9 @@ export default async function AdminPropertyAuditPage({
   const reviewStatusMeta = reviewStatus ? (REVIEW_STATUS_META[reviewStatus] ?? null) : null;
 
   const TRIAGE_BADGE: Record<string, { label: string; cls: string }> = {
-    ready_for_deposit: { label: "Ready for deposit request", cls: "bg-green-100 text-green-800" },
+    ready_for_signatures: { label: "Ready for signatures", cls: "bg-green-100 text-green-800" },
+    // "ready_for_deposit" kept for backward compatibility with legacy rows.
+    ready_for_deposit: { label: "Ready for signatures (legacy)", cls: "bg-green-100 text-green-800" },
     triage_in_progress: { label: "Triage in progress", cls: "bg-blue-100 text-blue-800" },
     more_info_needed: { label: "Additional information required", cls: "bg-yellow-100 text-yellow-800" },
     ineligible: { label: "Ineligible", cls: "bg-red-100 text-red-800" },
@@ -729,7 +775,67 @@ export default async function AdminPropertyAuditPage({
         initialProfileDetails={persistedProfileDetails}
       />
 
-      {/* ── Linked deal (secondary) ── */}
+      {/* ── Stronger valuation pathway (property-review–owned) ── */}
+      {/*
+        This section is the single entry point for escalated valuation and deposit workflows.
+        Deal review does not own or surface deposit/escalation actions.
+
+        TODO(stripe):  Collect escalation deposit via Stripe before initiating a stronger review.
+        TODO(attom):   Trigger an ATTOM valuation run once deposit is confirmed.
+        TODO(fmv-badge): After ATTOM result is received, update property-level verified FMV
+                         (property_review_summary.fmv_amount / fmv_expires_at). Deal eligibility
+                         re-derives automatically from the refreshed basis — no deal-page action needed.
+      */}
+      <div className="rounded-lg border overflow-hidden">
+        <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b flex items-center gap-2">
+          <span>Stronger valuation pathway</span>
+          <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-gray-100 text-gray-500">
+            Integration pending
+          </span>
+        </div>
+        <div className="p-4 space-y-3 text-sm">
+          <p className="text-xs text-muted-foreground">
+            When a deal is blocked pending a stronger property valuation, this is the only place to
+            initiate that workflow. No deal-page action is required or available — valuation
+            escalation is property-review–owned.
+          </p>
+          <div className="space-y-2">
+            {/* TODO(stripe): Replace this placeholder with live Stripe deposit collection */}
+            <div className="rounded-md border border-dashed px-3 py-2.5 text-xs space-y-0.5">
+              <div className="font-medium text-muted-foreground">
+                Request escalation deposit
+              </div>
+              <div className="text-muted-foreground">
+                Pending: Stripe payment collection to fund an escalated valuation review.
+              </div>
+            </div>
+            {/* TODO(attom): Replace this placeholder with live ATTOM API call after deposit confirms */}
+            <div className="rounded-md border border-dashed px-3 py-2.5 text-xs space-y-0.5">
+              <div className="font-medium text-muted-foreground">
+                Initiate stronger valuation review
+              </div>
+              <div className="text-muted-foreground">
+                Pending: ATTOM valuation run triggered after deposit confirmation.
+              </div>
+            </div>
+            {/* TODO(fmv-badge): Write new fmv_amount + fmv_expires_at to property_review_summary
+                after ATTOM result arrives; deal eligibility re-derives from updated basis */}
+            <div className="rounded-md border border-dashed px-3 py-2.5 text-xs space-y-0.5">
+              <div className="font-medium text-muted-foreground">
+                Update verified FMV basis
+              </div>
+              <div className="text-muted-foreground">
+                Post-escalation: refresh property verified FMV from the ATTOM result. Deal-term
+                eligibility re-derives automatically — no deal-review action required.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Linked deal ── */}
+      {/* Shows the downstream deal-eligibility impact of this property's valuation state.
+          Deposit/escalation actions are never surfaced here — they live in the section above. */}
       <div className="rounded-lg border overflow-hidden">
         <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b flex items-center gap-2 flex-wrap">
           <span>Linked deal</span>
@@ -743,12 +849,10 @@ export default async function AdminPropertyAuditPage({
           })()}
           {linkedDeal && (
             <a
-              href={`/deal/${linkedDeal.id}`}
-              target="_blank"
-              rel="noopener noreferrer"
+              href={`/admin/deals/${linkedDeal.id}`}
               className="ml-auto text-xs underline text-muted-foreground hover:text-foreground font-normal"
             >
-              View deal →
+              Admin deal review →
             </a>
           )}
         </div>
@@ -765,13 +869,14 @@ export default async function AdminPropertyAuditPage({
                   Deal {linkedDeal.id.slice(0, 8)}…
                 </div>
               </div>
+
               <div className="grid grid-cols-2 gap-x-6 gap-y-2">
                 <div>
-                  <div className="text-muted-foreground text-xs">Triage status</div>
+                  <div className="text-muted-foreground text-xs">Deal review status</div>
                   <div className="font-medium">
                     {linkedDeal.triage_status
                       ? (TRIAGE_BADGE[linkedDeal.triage_status]?.label ?? linkedDeal.triage_status.replace(/_/g, " "))
-                      : <span className="text-muted-foreground">Accepted – pending review</span>}
+                      : <span className="text-muted-foreground">Accepted — pending review</span>}
                   </div>
                 </div>
                 <div>
@@ -779,9 +884,56 @@ export default async function AdminPropertyAuditPage({
                   <div className="font-medium">{formatDate(linkedDeal.accepted_at)}</div>
                 </div>
               </div>
+
+              {/* Deal eligibility context — derived from the shared AVM helper */}
+              {linkedDealAvmEligibility && (() => {
+                const { result } = linkedDealAvmEligibility;
+                type EligCtx = { label: string; cls: string; detail: string };
+                let ctx: EligCtx | null = null;
+                if (result === "blocked_pending_fmv") {
+                  ctx = {
+                    label: "Deal blocked — awaiting property valuation",
+                    cls: "bg-yellow-50 border-yellow-200 text-yellow-800",
+                    detail: linkedDealAvmEligibility.isFmvExpired
+                      ? "The verified AVM has expired. Deal-term eligibility cannot be assessed until a fresh AVM is run on this property."
+                      : "No verified AVM is on file. Deal-term eligibility is blocked until an AVM run completes.",
+                  };
+                } else if (result === "escalated_review_required") {
+                  ctx = {
+                    label: "Deal blocked — escalated valuation review required",
+                    cls: "bg-red-50 border-red-200 text-red-800",
+                    detail: `AVM deviation (${linkedDealAvmEligibility.deviationPct?.toFixed(1)}%) exceeds the ${DEVIATION_ESCALATION_THRESHOLD_PCT}% escalation threshold. Deal-term eligibility is blocked pending a stronger valuation review. Use the stronger valuation pathway above.`,
+                  };
+                } else if (result === "manual_review_required") {
+                  ctx = {
+                    label: "Deal review — admin acknowledgment required",
+                    cls: "bg-orange-50 border-orange-200 text-orange-800",
+                    detail: `AVM deviation (${linkedDealAvmEligibility.deviationPct?.toFixed(1)}%) requires admin acknowledgment on the deal review page before the deal can advance to ready for signatures.`,
+                  };
+                } else if (result === "ineligible_ltv") {
+                  ctx = {
+                    label: "Deal blocked — terms exceed LTV eligibility",
+                    cls: "bg-red-50 border-red-200 text-red-800",
+                    detail: `Proposed cash (${formatCurrency(linkedDealAvmEligibility.requestedCash)}) exceeds the maximum eligible amount (${formatCurrency(linkedDealAvmEligibility.maxEligibleCash)}) under the LTV policy. Deal terms must be revised or countered.`,
+                  };
+                } else if (result === "eligible") {
+                  ctx = {
+                    label: "Deal eligible for signatures",
+                    cls: "bg-green-50 border-green-200 text-green-800",
+                    detail: "Property valuation and deal terms both pass eligibility checks. The deal may be advanced to ready for signatures on the deal review page.",
+                  };
+                }
+                return ctx ? (
+                  <div className={`rounded-md border px-3 py-2.5 text-xs space-y-0.5 ${ctx.cls}`}>
+                    <div className="font-semibold">{ctx.label}</div>
+                    <div>{ctx.detail}</div>
+                  </div>
+                ) : null;
+              })()}
+
               {linkedDeal.triage_reason_tags && linkedDeal.triage_reason_tags.length > 0 && (
                 <div>
-                  <div className="text-muted-foreground text-xs mb-1.5">Reason tags</div>
+                  <div className="text-muted-foreground text-xs mb-1.5">Triage reason tags</div>
                   <div className="flex flex-wrap gap-1">
                     {linkedDeal.triage_reason_tags.map((tag) => (
                       <span
@@ -794,6 +946,7 @@ export default async function AdminPropertyAuditPage({
                   </div>
                 </div>
               )}
+
               <div className="flex items-center gap-4 pt-1">
                 <a
                   href="/admin/deals"
@@ -802,12 +955,10 @@ export default async function AdminPropertyAuditPage({
                   View triage queue →
                 </a>
                 <a
-                  href={`/deal/${linkedDeal.id}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                  href={`/admin/deals/${linkedDeal.id}`}
                   className="text-xs underline text-muted-foreground hover:text-foreground"
                 >
-                  View deal →
+                  Go to deal review →
                 </a>
               </div>
             </div>

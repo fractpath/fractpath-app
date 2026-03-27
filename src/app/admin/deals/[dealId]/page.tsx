@@ -121,13 +121,17 @@ function deriveAdminDealReviewState(args: {
     };
   }
 
-  if (triage_status === "ready_for_deposit") {
+  // "ready_for_signatures" is the canonical terminal-success state.
+  // "ready_for_deposit" is kept for backward compatibility with legacy rows.
+  if (triage_status === "ready_for_signatures" || triage_status === "ready_for_deposit") {
     return {
-      label: "Ready for deposit request",
+      label: "Ready for signatures",
       tone: "success",
-      explanation: "Initial triage passed. The deal is ready for a deposit request to be issued.",
+      explanation:
+        "Property valuation and deal terms are both eligible. The deal is ready for the DocuSign signature stage.",
       blocking_dependency: null,
-      next_step_hint: "Issue deposit request. Deposit receipt will unlock further review stages.",
+      next_step_hint:
+        "Initiate the DocuSign envelope. Signatures from all parties are required before the deal closes.",
     };
   }
 
@@ -391,7 +395,9 @@ export default async function AdminDealReviewPage({
 
   // ── Triage badge ─────────────────────────────────────────────────────────
   const TRIAGE_BADGE: Record<string, { label: string; cls: string }> = {
-    ready_for_deposit: { label: "Ready for deposit request", cls: "bg-green-100 text-green-800" },
+    ready_for_signatures: { label: "Ready for signatures", cls: "bg-green-100 text-green-800" },
+    // "ready_for_deposit" kept for backward compatibility with rows written before this refactor.
+    ready_for_deposit: { label: "Ready for signatures (legacy)", cls: "bg-green-100 text-green-800" },
     triage_in_progress: { label: "Triage in progress", cls: "bg-blue-100 text-blue-800" },
     more_info_needed: { label: "Additional information required", cls: "bg-yellow-100 text-yellow-800" },
     ineligible: { label: "Ineligible", cls: "bg-red-100 text-red-800" },
