@@ -59,8 +59,8 @@ function extractDealTerms(snapshot: unknown): {
 
 // ─── AVM / LTV eligibility ───────────────────────────────────────────────────
 
-const DEVIATION_REVIEW_THRESHOLD_PCT = 20;     // flag for manual review
-const DEVIATION_ESCALATION_THRESHOLD_PCT = 40; // flag for escalated review
+const DEVIATION_REVIEW_THRESHOLD_PCT = 7.5;    // flag for manual review (~5–10%)
+const DEVIATION_ESCALATION_THRESHOLD_PCT = 12.5; // flag for escalated review (~10–15%)
 const DEFAULT_LTV_RATIO = 0.75;
 
 type AvmEligibilityResult =
