@@ -933,7 +933,11 @@ export default async function AdminDealReviewPage({
           Deal actions
         </div>
         <div className="p-4">
-          <AdminDealActions dealId={dealId} currentTriageStatus={deal.triage_status ?? null} />
+          <AdminDealActions
+            dealId={dealId}
+            currentTriageStatus={deal.triage_status ?? null}
+            avmEligibilityResult={avmEligibility.result}
+          />
         </div>
       </div>
 
