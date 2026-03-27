@@ -4,6 +4,14 @@ import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getDealEvents } from "@/lib/dealTimeline";
 import { AdminDealActions } from "@/components/admin/AdminDealActions";
+import {
+  DEFAULT_LTV_RATIO,
+  DEVIATION_ESCALATION_THRESHOLD_PCT,
+  DEVIATION_REVIEW_THRESHOLD_PCT,
+  AVM_RESULT_META,
+  computeAvmEligibility,
+  type AvmEligibilityCard,
+} from "@/lib/avmEligibility";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -55,78 +63,6 @@ function extractDealTerms(snapshot: unknown): {
     number_of_payments: (dealTerms.number_of_payments as number) ?? null,
     property_value: (dealTerms.property_value as number) ?? null,
   };
-}
-
-// ─── AVM / LTV eligibility ───────────────────────────────────────────────────
-
-const DEVIATION_REVIEW_THRESHOLD_PCT = 7.5;    // flag for manual review (~5–10%)
-const DEVIATION_ESCALATION_THRESHOLD_PCT = 12.5; // flag for escalated review (~10–15%)
-const DEFAULT_LTV_RATIO = 0.75;
-
-type AvmEligibilityResult =
-  | "eligible"
-  | "ineligible_ltv"
-  | "blocked_pending_fmv"
-  | "manual_review_required"
-  | "escalated_review_required";
-
-interface AvmEligibilityCard {
-  result: AvmEligibilityResult;
-  verifiedFmv: number | null;
-  fmvProvider: string | null;
-  fmvFetchedAt: string | null;
-  fmvExpiresAt: string | null;
-  isFmvExpired: boolean;
-  proposedFmv: number | null;
-  deviationPct: number | null;
-  securedDebt: number;
-  ltvRatio: number;
-  maxEligibleCash: number | null;
-  requestedCash: number | null;
-}
-
-const AVM_RESULT_META: Record<AvmEligibilityResult, { label: string; cls: string }> = {
-  eligible: { label: "Eligible", cls: "bg-green-100 text-green-800" },
-  ineligible_ltv: { label: "Ineligible — LTV exceeded", cls: "bg-red-100 text-red-800" },
-  blocked_pending_fmv: { label: "Blocked — verified FMV pending", cls: "bg-yellow-100 text-yellow-800" },
-  manual_review_required: { label: "Manual review required", cls: "bg-orange-100 text-orange-800" },
-  escalated_review_required: { label: "Escalated review required", cls: "bg-red-100 text-red-800" },
-};
-
-function computeAvmEligibility(args: {
-  verifiedFmv: number | null;
-  fmvProvider: string | null;
-  fmvFetchedAt: string | null;
-  fmvExpiresAt: string | null;
-  proposedFmv: number | null;
-  securedDebt: number;
-  ltvRatio: number;
-  requestedCash: number | null;
-}): AvmEligibilityCard {
-  const { verifiedFmv, fmvProvider, fmvFetchedAt, fmvExpiresAt, proposedFmv, securedDebt, ltvRatio, requestedCash } = args;
-  const isFmvExpired = fmvExpiresAt ? new Date(fmvExpiresAt) < new Date() : false;
-
-  if (!verifiedFmv || isFmvExpired) {
-    return { result: "blocked_pending_fmv", verifiedFmv, fmvProvider, fmvFetchedAt, fmvExpiresAt, isFmvExpired, proposedFmv, deviationPct: null, securedDebt, ltvRatio, maxEligibleCash: null, requestedCash };
-  }
-
-  const maxEligibleCash = Math.max(0, verifiedFmv * ltvRatio - securedDebt);
-  const deviationPct = proposedFmv != null
-    ? Math.abs(proposedFmv - verifiedFmv) / verifiedFmv * 100
-    : null;
-
-  let result: AvmEligibilityResult;
-  if (requestedCash !== null && requestedCash > maxEligibleCash) {
-    result = "ineligible_ltv";
-  } else if (deviationPct !== null && deviationPct >= DEVIATION_ESCALATION_THRESHOLD_PCT) {
-    result = "escalated_review_required";
-  } else if (deviationPct !== null && deviationPct >= DEVIATION_REVIEW_THRESHOLD_PCT) {
-    result = "manual_review_required";
-  } else {
-    result = "eligible";
-  }
-
-  return { result, verifiedFmv, fmvProvider, fmvFetchedAt, fmvExpiresAt, isFmvExpired, proposedFmv, deviationPct, securedDebt, ltvRatio, maxEligibleCash, requestedCash };
 }
 
 // ─── Deal review state derivation ───────────────────────────────────────────

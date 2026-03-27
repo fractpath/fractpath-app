@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { createServiceClient } from "@/lib/supabase/service";
+import {
+  computeAvmEligibility,
+  extractAvmDealTerms,
+  HARD_BLOCKED_AVM_RESULTS,
+  safeNum,
+  DEFAULT_LTV_RATIO,
+  type AvmEligibilityResult,
+} from "@/lib/avmEligibility";
 
 const STATE_TO_TRIAGE: Record<string, string> = {
   triage_in_progress: "triage_in_progress",
@@ -14,38 +22,21 @@ const STATE_TO_EVENT: Record<string, string> = {
   ineligible: "DEAL_TRIAGE_INELIGIBLE",
 };
 
-// Must stay in sync with page-level constants.
-const DEVIATION_ESCALATION_THRESHOLD_PCT = 12.5;
-
-// AVM/LTV result values that hard-block ready_for_deposit transitions.
-const HARD_BLOCKED_AVM_RESULTS = new Set([
-  "blocked_pending_fmv",
-  "ineligible_ltv",
-  "escalated_review_required",
-]);
-
 function jsonError(msg: string, status: number) {
   return NextResponse.json({ ok: false, error: msg }, { status });
 }
 
-/** Safely extract a number from an unknown value. */
-function safeNum(v: unknown): number | null {
-  return typeof v === "number" && isFinite(v) ? v : null;
-}
-
-/** Extract deal_terms from a terms_snapshot. */
-function extractDealTermsFromSnapshot(snapshot: unknown): {
-  upfront_payment: number | null;
-  property_value: number | null;
-} {
-  if (!snapshot || typeof snapshot !== "object") return { upfront_payment: null, property_value: null };
-  const s = snapshot as Record<string, unknown>;
-  const inputs = s.inputs as Record<string, unknown> | undefined;
-  const dealTerms = (inputs?.deal_terms ?? s.deal_terms ?? {}) as Record<string, unknown>;
-  return {
-    upfront_payment: safeNum(dealTerms.upfront_payment),
-    property_value: safeNum(dealTerms.property_value),
-  };
+function blockMessage(result: AvmEligibilityResult, deviationPct: number | null): string {
+  switch (result) {
+    case "blocked_pending_fmv":
+      return "Transition blocked: no current verified AVM is on file for this property. Complete the AVM run first.";
+    case "ineligible_ltv":
+      return "Transition blocked: requested upfront cash exceeds maximum eligible cash under the LTV policy.";
+    case "escalated_review_required":
+      return `Transition blocked: AVM deviation (${deviationPct?.toFixed(1) ?? "?"}%) exceeds escalation threshold. Escalated review required before advancing.`;
+    default:
+      return "Transition blocked by AVM/LTV policy.";
+  }
 }
 
 type Ctx = { params: Promise<{ dealId: string }> };
@@ -76,19 +67,21 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const svc = createServiceClient();
 
   // ── Server-side AVM/LTV gate for ready_for_deposit ───────────────────────
-  // Hard blocks are enforced independently of the client-supplied result so the
-  // route cannot be bypassed by a crafted request.
+  // Checks are independent of the client-supplied result so the route cannot be
+  // bypassed by a crafted request. Uses the shared computeAvmEligibility helper.
   if (state === "ready_for_deposit") {
-    // First: reject if the client-supplied result is itself a hard-blocked value.
-    // This gives an early, cheap rejection for known-bad payloads.
-    if (avm_eligibility_result && HARD_BLOCKED_AVM_RESULTS.has(avm_eligibility_result)) {
+    // Layer 1: cheap early reject on client-reported hard-blocked result.
+    if (
+      avm_eligibility_result &&
+      HARD_BLOCKED_AVM_RESULTS.has(avm_eligibility_result as AvmEligibilityResult)
+    ) {
       return jsonError(
         `Transition blocked (client-reported AVM result: ${avm_eligibility_result}). Resolve AVM/LTV issues before advancing.`,
         422,
       );
     }
 
-    // Second: independently verify by re-deriving the critical inputs from the DB.
+    // Layer 2: independent DB re-derivation using the shared policy helper.
     try {
       const { data: thread } = await (svc.from("deal_threads") as any)
         .select(
@@ -118,44 +111,33 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         ]);
 
         const summary: any = summaryRes.data ?? null;
-        const verifiedFmv = safeNum(summary?.fmv_amount);
-        const isFmvExpired = summary?.fmv_expires_at
-          ? new Date(summary.fmv_expires_at) < new Date()
-          : false;
-
-        if (!verifiedFmv || isFmvExpired) {
-          return jsonError(
-            "Transition blocked: no current verified AVM is on file for this property. Complete the AVM run first.",
-            422,
-          );
-        }
-
-        const proposalTerms = extractDealTermsFromSnapshot(proposalRes.data?.terms_snapshot);
-        const ltvRatio = safeNum(property?.ltv_policy_ratio) ?? 0.75;
+        const proposalTerms = extractAvmDealTerms(proposalRes.data?.terms_snapshot);
+        const ltvRatio = safeNum(property?.ltv_policy_ratio) ?? DEFAULT_LTV_RATIO;
         const securedDebt = property?.has_secured_property_debt
           ? (safeNum(property?.secured_property_debt_amount) ?? 0)
           : 0;
-        const maxEligibleCash = Math.max(0, verifiedFmv * ltvRatio - securedDebt);
 
-        if (
-          proposalTerms.upfront_payment !== null &&
-          proposalTerms.upfront_payment > maxEligibleCash
-        ) {
-          return jsonError(
-            "Transition blocked: requested upfront cash exceeds maximum eligible cash under the LTV policy.",
-            422,
-          );
+        const eligibility = computeAvmEligibility({
+          verifiedFmv: safeNum(summary?.fmv_amount),
+          fmvProvider: null,
+          fmvFetchedAt: null,
+          fmvExpiresAt: (summary?.fmv_expires_at as string | null) ?? null,
+          proposedFmv: proposalTerms.property_value,
+          securedDebt,
+          ltvRatio,
+          requestedCash: proposalTerms.upfront_payment,
+        });
+
+        if (HARD_BLOCKED_AVM_RESULTS.has(eligibility.result)) {
+          return jsonError(blockMessage(eligibility.result, eligibility.deviationPct), 422);
         }
 
-        if (proposalTerms.property_value !== null) {
-          const deviationPct =
-            (Math.abs(proposalTerms.property_value - verifiedFmv) / verifiedFmv) * 100;
-          if (deviationPct >= DEVIATION_ESCALATION_THRESHOLD_PCT) {
-            return jsonError(
-              `Transition blocked: AVM deviation (${deviationPct.toFixed(1)}%) exceeds escalation threshold. Escalated review required before advancing.`,
-              422,
-            );
-          }
+        // manual_review_required: allowed but only with a non-empty acknowledgment note.
+        if (eligibility.result === "manual_review_required" && !note?.trim()) {
+          return jsonError(
+            "Acknowledgment note required: enter an admin note to proceed with manual AVM review.",
+            422,
+          );
         }
       }
     } catch (gateErr) {
@@ -187,14 +169,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       set_by_admin: admin.user.id,
       note: note?.trim() || null,
       source: "admin_deal_review",
-      ...(avm_eligibility_result
-        ? { avm_eligibility_result }
-        : {}),
+      ...(avm_eligibility_result ? { avm_eligibility_result } : {}),
       ...(isManualReviewAck
-        ? {
-            avm_acknowledgment: true,
-            avm_acknowledgment_note: note?.trim() || null,
-          }
+        ? { avm_acknowledgment: true, avm_acknowledgment_note: note?.trim() || null }
         : {}),
     },
     created_by: admin.user.id,
