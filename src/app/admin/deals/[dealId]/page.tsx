@@ -8,7 +8,6 @@ import {
   DEFAULT_LTV_RATIO,
   DEVIATION_ESCALATION_THRESHOLD_PCT,
   DEVIATION_REVIEW_THRESHOLD_PCT,
-  AVM_RESULT_META,
   computeAvmEligibility,
   type AvmEligibilityCard,
 } from "@/lib/avmEligibility";
@@ -365,8 +364,6 @@ export default async function AdminDealReviewPage({
   const upfront = proposedTerms?.upfront_payment ?? null;
   const monthly = proposedTerms?.monthly_payment ?? null;
   const months = proposedTerms?.number_of_payments ?? null;
-  const maxCash = property?.max_accessible_cash_current ?? null;
-  const fmvBasis = property?.latest_verified_fmv ?? property?.owner_stated_fmv ?? null;
   const debtBasis = property?.has_secured_property_debt ? (property?.secured_property_debt_amount ?? 0) : 0;
 
   // ── AVM eligibility ───────────────────────────────────────────────────────
@@ -380,31 +377,17 @@ export default async function AdminDealReviewPage({
     ltvRatio: (property?.ltv_policy_ratio as number | null) ?? DEFAULT_LTV_RATIO,
     requestedCash: upfront,
   });
-  const avmMeta = AVM_RESULT_META[avmEligibility.result];
 
-  // Simple envelope check: compare proposed upfront against max available cash
-  let economicsResult: { label: string; cls: string; detail: string } | null = null;
-  if (upfront !== null && maxCash !== null) {
-    if (upfront > maxCash * 1.02) {
-      economicsResult = {
-        label: "Exceeds current property envelope",
-        cls: "bg-red-100 text-red-800",
-        detail: `Proposed upfront (${formatCurrency(upfront)}) exceeds max available deal cash (${formatCurrency(maxCash)}).`,
-      };
-    } else {
-      economicsResult = {
-        label: "Within current property envelope",
-        cls: "bg-green-100 text-green-800",
-        detail: `Proposed upfront (${formatCurrency(upfront)}) is within max available deal cash (${formatCurrency(maxCash)}).`,
-      };
-    }
-  } else if (upfront !== null && maxCash === null) {
-    economicsResult = {
-      label: "Insufficient property review data",
-      cls: "bg-yellow-100 text-yellow-800",
-      detail: "Max available deal cash not yet set on property review. Cannot compare proposed economics.",
-    };
-  }
+  // ── Valuation gate (property-owned) ──────────────────────────────────────
+  // Valuation is sufficient when we have a live, non-expired verified FMV and
+  // the proposed-value deviation is not above the escalation threshold.
+  // blocked_pending_fmv  → no/expired AVM           → property review must run AVM
+  // escalated_review_required → deviation too high  → property review must escalate
+  // manual_review_required    → deviation moderate  → FMV is usable, admin acknowledgment required
+  // ineligible_ltv            → deal-term failure   → deal cash exceeds max eligible
+  const isValuationSufficient =
+    avmEligibility.result !== "blocked_pending_fmv" &&
+    avmEligibility.result !== "escalated_review_required";
 
   // ── Triage badge ─────────────────────────────────────────────────────────
   const TRIAGE_BADGE: Record<string, { label: string; cls: string }> = {
@@ -661,98 +644,6 @@ export default async function AdminDealReviewPage({
               </div>
             )}
 
-            {/* AVM / LTV eligibility card */}
-            <div className={`rounded-md border text-xs ${
-              avmEligibility.result === "eligible"
-                ? "border-green-200 bg-green-50"
-                : avmEligibility.result === "blocked_pending_fmv"
-                  ? "border-yellow-200 bg-yellow-50"
-                  : avmEligibility.result === "manual_review_required"
-                    ? "border-orange-200 bg-orange-50"
-                    : "border-red-200 bg-red-50"
-            }`}>
-              <div className="flex items-center gap-2 px-3 py-2 border-b border-inherit">
-                <span className="font-semibold">AVM / LTV eligibility</span>
-                <span className={`rounded-full px-2 py-0.5 font-medium ${avmMeta.cls}`}>
-                  {avmMeta.label}
-                </span>
-              </div>
-              <div className="px-3 py-2.5 grid grid-cols-2 gap-x-6 gap-y-2">
-                <div>
-                  <div className="text-muted-foreground">Verified FMV</div>
-                  <div className="font-medium">
-                    {avmEligibility.verifiedFmv
-                      ? formatCurrency(avmEligibility.verifiedFmv)
-                      : <span className="text-muted-foreground">Not available</span>}
-                    {avmEligibility.fmvProvider && (
-                      <span className="ml-1 text-muted-foreground">({avmEligibility.fmvProvider})</span>
-                    )}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground">Proposed deal FMV</div>
-                  <div className="font-medium">
-                    {avmEligibility.proposedFmv != null
-                      ? formatCurrency(avmEligibility.proposedFmv)
-                      : <span className="text-muted-foreground">Not available</span>}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground">Deviation</div>
-                  <div className="font-medium">
-                    {avmEligibility.deviationPct != null
-                      ? `${avmEligibility.deviationPct.toFixed(1)}%`
-                      : "—"}
-                    {avmEligibility.deviationPct !== null && avmEligibility.deviationPct >= DEVIATION_ESCALATION_THRESHOLD_PCT && (
-                      <span className="ml-1 text-red-700">↑ escalation threshold</span>
-                    )}
-                    {avmEligibility.deviationPct !== null &&
-                      avmEligibility.deviationPct >= DEVIATION_REVIEW_THRESHOLD_PCT &&
-                      avmEligibility.deviationPct < DEVIATION_ESCALATION_THRESHOLD_PCT && (
-                      <span className="ml-1 text-orange-700">↑ review threshold</span>
-                    )}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground">LTV ratio</div>
-                  <div className="font-medium">
-                    {(avmEligibility.ltvRatio * 100).toFixed(0)}%
-                  </div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground">Secured debt</div>
-                  <div className="font-medium">{formatCurrency(avmEligibility.securedDebt)}</div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground">Max eligible cash</div>
-                  <div className="font-medium">
-                    {avmEligibility.maxEligibleCash != null
-                      ? formatCurrency(avmEligibility.maxEligibleCash)
-                      : "—"}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground">Requested cash</div>
-                  <div className="font-medium">
-                    {avmEligibility.requestedCash != null
-                      ? formatCurrency(avmEligibility.requestedCash)
-                      : "—"}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground">AVM fetched</div>
-                  <div className="font-medium">
-                    {avmEligibility.fmvFetchedAt
-                      ? formatDateShort(avmEligibility.fmvFetchedAt)
-                      : "—"}
-                    {avmEligibility.isFmvExpired && (
-                      <span className="ml-1 text-red-600">(expired)</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-
             {property.property_review_note && (
               <div>
                 <div className="text-xs text-muted-foreground mb-1">Latest property review note</div>
@@ -765,40 +656,218 @@ export default async function AdminDealReviewPage({
         )}
       </div>
 
-      {/* ── Economics / policy comparison ── */}
+      {/* ── Property valuation ── */}
+      {/* Answers: does this property have a usable verified AVM? (property-review-owned) */}
       <div className="rounded-lg border overflow-hidden">
         <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b flex items-center gap-2 flex-wrap">
-          <span>Economics / policy comparison</span>
-          {economicsResult && (
-            <span className={`text-xs rounded-full px-2 py-0.5 font-normal ${economicsResult.cls}`}>
-              {economicsResult.label}
+          <span>Property valuation</span>
+          {avmEligibility.result === "blocked_pending_fmv" ? (
+            <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-yellow-100 text-yellow-800">
+              {avmEligibility.isFmvExpired ? "AVM expired" : "AVM pending"}
+            </span>
+          ) : avmEligibility.result === "escalated_review_required" ? (
+            <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-red-100 text-red-800">
+              Escalated review required
+            </span>
+          ) : avmEligibility.result === "manual_review_required" ? (
+            <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-orange-100 text-orange-800">
+              Deviation — acknowledgment required
+            </span>
+          ) : (
+            <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-green-100 text-green-800">
+              Valuation sufficient
+            </span>
+          )}
+          {propertyId && (
+            <Link
+              href={`/admin/properties/${propertyId}`}
+              className="ml-auto text-xs underline text-muted-foreground hover:text-foreground font-normal"
+            >
+              Property review →
+            </Link>
+          )}
+        </div>
+
+        <div className="p-4 text-sm space-y-3">
+          {/* Blocking messages (property-review-owned: admin directed there to resolve) */}
+          {avmEligibility.result === "blocked_pending_fmv" && (
+            <div className="rounded-md bg-yellow-50 border border-yellow-200 px-3 py-2.5 text-xs text-yellow-800 space-y-1.5">
+              <div className="font-semibold">
+                {avmEligibility.isFmvExpired
+                  ? "Verified AVM has expired"
+                  : "No verified AVM on file"}
+              </div>
+              <div>
+                {avmEligibility.isFmvExpired
+                  ? "The AVM on file has expired. A fresh AVM run is required before deal-term eligibility can be assessed."
+                  : "No verified AVM is on file for this property. Run the AVM on the property review page to unlock deal-term eligibility."}
+              </div>
+              {propertyId && (
+                <Link
+                  href={`/admin/properties/${propertyId}`}
+                  className="inline-flex items-center gap-1 underline font-medium text-yellow-700 hover:text-yellow-900"
+                >
+                  Go to property review to run AVM →
+                </Link>
+              )}
+            </div>
+          )}
+
+          {avmEligibility.result === "escalated_review_required" && (
+            <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2.5 text-xs text-red-800 space-y-1.5">
+              <div className="font-semibold">AVM deviation requires escalated review</div>
+              <div>
+                The proposed property value deviates from the verified AVM by{" "}
+                <span className="font-medium">{avmEligibility.deviationPct?.toFixed(1)}%</span>{" "}
+                — above the {DEVIATION_ESCALATION_THRESHOLD_PCT}% escalation threshold. Deal-term
+                eligibility cannot be assessed until the property valuation dispute is resolved via
+                escalated review.
+              </div>
+              {propertyId && (
+                <Link
+                  href={`/admin/properties/${propertyId}`}
+                  className="inline-flex items-center gap-1 underline font-medium text-red-700 hover:text-red-900"
+                >
+                  Go to property review to resolve →
+                </Link>
+              )}
+            </div>
+          )}
+
+          {avmEligibility.result === "manual_review_required" && (
+            <div className="rounded-md bg-orange-50 border border-orange-200 px-3 py-2.5 text-xs text-orange-800 space-y-1">
+              <div className="font-semibold">AVM deviation — admin acknowledgment required</div>
+              <div>
+                The proposed property value deviates from the verified AVM by{" "}
+                <span className="font-medium">{avmEligibility.deviationPct?.toFixed(1)}%</span>{" "}
+                (review threshold: {DEVIATION_REVIEW_THRESHOLD_PCT}%). Deal-term eligibility can be
+                computed, but advancing to ready-for-deposit requires entering an admin note in the
+                Deal actions panel below.
+              </div>
+            </div>
+          )}
+
+          {/* AVM data — shown whenever a verified FMV is present */}
+          {avmEligibility.verifiedFmv != null && (
+            <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
+              <div>
+                <div className="text-muted-foreground">Verified FMV</div>
+                <div className="font-medium">
+                  {formatCurrency(avmEligibility.verifiedFmv)}
+                  {avmEligibility.fmvProvider && (
+                    <span className="ml-1 text-muted-foreground">({avmEligibility.fmvProvider})</span>
+                  )}
+                </div>
+              </div>
+              <div>
+                <div className="text-muted-foreground">AVM fetched</div>
+                <div className="font-medium">
+                  {avmEligibility.fmvFetchedAt ? formatDateShort(avmEligibility.fmvFetchedAt) : "—"}
+                  {avmEligibility.isFmvExpired && (
+                    <span className="ml-1 text-red-600">(expired)</span>
+                  )}
+                </div>
+              </div>
+              {avmEligibility.proposedFmv != null && (
+                <div>
+                  <div className="text-muted-foreground">Proposed deal FMV</div>
+                  <div className="font-medium">{formatCurrency(avmEligibility.proposedFmv)}</div>
+                </div>
+              )}
+              {avmEligibility.deviationPct != null && (
+                <div>
+                  <div className="text-muted-foreground">FMV deviation</div>
+                  <div className={`font-medium ${
+                    avmEligibility.deviationPct >= DEVIATION_ESCALATION_THRESHOLD_PCT
+                      ? "text-red-700"
+                      : avmEligibility.deviationPct >= DEVIATION_REVIEW_THRESHOLD_PCT
+                        ? "text-orange-700"
+                        : ""
+                  }`}>
+                    {avmEligibility.deviationPct.toFixed(1)}%
+                    {avmEligibility.deviationPct >= DEVIATION_ESCALATION_THRESHOLD_PCT && (
+                      <span className="ml-1">↑ escalation threshold</span>
+                    )}
+                    {avmEligibility.deviationPct >= DEVIATION_REVIEW_THRESHOLD_PCT &&
+                      avmEligibility.deviationPct < DEVIATION_ESCALATION_THRESHOLD_PCT && (
+                      <span className="ml-1">↑ review threshold</span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Deal-term eligibility ── */}
+      {/* Answers: do the proposed deal terms fit within the verified property envelope? (deal-owned) */}
+      <div className="rounded-lg border overflow-hidden">
+        <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b flex items-center gap-2 flex-wrap">
+          <span>Deal-term eligibility</span>
+          {!isValuationSufficient ? (
+            <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-gray-100 text-gray-500">
+              Awaiting valuation
+            </span>
+          ) : !latestProposal ? (
+            <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-gray-100 text-gray-500">
+              No proposal
+            </span>
+          ) : avmEligibility.result === "ineligible_ltv" ? (
+            <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-red-100 text-red-800">
+              Terms ineligible — LTV exceeded
+            </span>
+          ) : (
+            <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-green-100 text-green-800">
+              Terms eligible
             </span>
           )}
         </div>
+
         <div className="p-4 text-sm space-y-4">
-          {!latestProposal ? (
-            <p className="text-muted-foreground text-sm">No submitted proposal found for this deal.</p>
+          {!isValuationSufficient ? (
+            <p className="text-xs text-muted-foreground">
+              Deal-term eligibility cannot be assessed until property valuation is complete.{" "}
+              {avmEligibility.result === "escalated_review_required"
+                ? "Resolve the AVM deviation via escalated review on the property review page."
+                : "Run the AVM on the property review page."}
+            </p>
+          ) : !latestProposal ? (
+            <p className="text-sm text-muted-foreground">No submitted proposal found for this deal.</p>
           ) : (
             <>
+              {avmEligibility.result === "ineligible_ltv" && (
+                <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2.5 text-xs text-red-800 space-y-1">
+                  <div className="font-semibold">Proposed cash exceeds maximum eligible amount</div>
+                  <div>
+                    The proposed upfront payment ({formatCurrency(avmEligibility.requestedCash)}) exceeds
+                    the maximum eligible cash ({formatCurrency(avmEligibility.maxEligibleCash)}) under the
+                    LTV policy. Deal terms must be revised before this deal can proceed.
+                  </div>
+                </div>
+              )}
+
               <div>
                 <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
-                  Proposed deal terms
+                  Proposed terms
                 </div>
-                <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+                <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
                   <div>
-                    <div className="text-muted-foreground text-xs">Proposed upfront</div>
-                    <div className="font-medium">{formatCurrency(upfront)}</div>
+                    <div className="text-muted-foreground">Proposed upfront</div>
+                    <div className={`font-medium ${avmEligibility.result === "ineligible_ltv" ? "text-red-700" : ""}`}>
+                      {formatCurrency(upfront)}
+                    </div>
                   </div>
                   <div>
-                    <div className="text-muted-foreground text-xs">Proposed monthly</div>
+                    <div className="text-muted-foreground">Proposed monthly</div>
                     <div className="font-medium">{formatCurrency(monthly)}</div>
                   </div>
                   <div>
-                    <div className="text-muted-foreground text-xs">Number of payments</div>
+                    <div className="text-muted-foreground">Number of payments</div>
                     <div className="font-medium">{months ?? "—"}</div>
                   </div>
                   <div>
-                    <div className="text-muted-foreground text-xs">Proposal status</div>
+                    <div className="text-muted-foreground">Proposal status</div>
                     <div className="font-medium capitalize">{latestProposal.status}</div>
                   </div>
                 </div>
@@ -806,65 +875,45 @@ export default async function AdminDealReviewPage({
 
               <div>
                 <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
-                  Property review outputs
+                  Eligibility from verified FMV
                 </div>
-                <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+                <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
                   <div>
-                    <div className="text-muted-foreground text-xs">FMV basis</div>
+                    <div className="text-muted-foreground">Verified FMV</div>
+                    <div className="font-medium">{formatCurrency(avmEligibility.verifiedFmv)}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">LTV policy cap</div>
                     <div className="font-medium">
-                      {formatCurrency(fmvBasis)}
-                      {property?.latest_verified_fmv
-                        ? <span className="ml-1 text-xs text-muted-foreground">(verified)</span>
-                        : property?.owner_stated_fmv
-                          ? <span className="ml-1 text-xs text-muted-foreground">(owner-stated)</span>
-                          : null}
+                      {(avmEligibility.ltvRatio * 100).toFixed(0)}%
                     </div>
                   </div>
                   <div>
-                    <div className="text-muted-foreground text-xs">Secured debt basis</div>
-                    <div className="font-medium">
-                      {property?.has_secured_property_debt === null
-                        ? "Not declared"
-                        : property?.has_secured_property_debt
-                          ? formatCurrency(debtBasis)
-                          : "None"}
-                    </div>
+                    <div className="text-muted-foreground">Secured debt</div>
+                    <div className="font-medium">{formatCurrency(avmEligibility.securedDebt)}</div>
                   </div>
                   <div>
-                    <div className="text-muted-foreground text-xs">LTV policy cap</div>
-                    <div className="font-medium">
-                      {property?.ltv_policy_ratio != null
-                        ? `${(property.ltv_policy_ratio * 100).toFixed(0)}%`
+                    <div className="text-muted-foreground">Max eligible cash</div>
+                    <div className={`font-medium ${avmEligibility.result === "ineligible_ltv" ? "text-red-700" : "text-green-800"}`}>
+                      {avmEligibility.maxEligibleCash != null
+                        ? formatCurrency(avmEligibility.maxEligibleCash)
                         : "—"}
                     </div>
                   </div>
                   <div>
-                    <div className="text-muted-foreground text-xs">Max available deal cash</div>
-                    <div className="font-medium">
-                      {hasPropMaxCash
-                        ? formatCurrency(property.max_accessible_cash_current)
-                        : <span className="text-muted-foreground text-xs">Not yet set</span>}
+                    <div className="text-muted-foreground">Requested cash</div>
+                    <div className={`font-medium ${avmEligibility.result === "ineligible_ltv" ? "text-red-700 font-semibold" : ""}`}>
+                      {avmEligibility.requestedCash != null
+                        ? formatCurrency(avmEligibility.requestedCash)
+                        : "—"}
                     </div>
                   </div>
                 </div>
               </div>
 
-              {economicsResult && (
-                <div className={`rounded-md px-3 py-2 text-sm ${
-                  economicsResult.cls.includes("red")
-                    ? "bg-red-50 border border-red-200"
-                    : economicsResult.cls.includes("green")
-                      ? "bg-green-50 border border-green-200"
-                      : "bg-yellow-50 border border-yellow-200"
-                }`}>
-                  {economicsResult.detail}
-                </div>
-              )}
-
               <div className="rounded-md bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-                Envelope comparison uses proposed upfront payment vs. max available deal cash. Full economics
-                validation requires the canonical compute engine and may include monthly payment obligations.
-                This comparison is directional, not final.
+                Max eligible cash = (Verified FMV × LTV cap) − Secured debt. This comparison is
+                directional; full economics validation uses the canonical compute engine.
               </div>
             </>
           )}
