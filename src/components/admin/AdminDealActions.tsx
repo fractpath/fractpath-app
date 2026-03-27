@@ -23,19 +23,6 @@ const ACTION_META: Record<DealReviewState, { label: string; description: string;
   },
 };
 
-// Deferred actions that are property-review–owned or require future integrations.
-// Deposit collection is intentionally absent from the deal-review surface.
-const DEFERRED_ACTIONS = [
-  {
-    label: "Mark awaiting deposit",
-    reason: "Deposit collection is a property-review–owned step — not a deal action",
-  },
-  { label: "Mark awaiting AMV", reason: "Requires AMV integration" },
-  { label: "Mark counter required", reason: "Requires counter-offer workflow context" },
-  { label: "Mark executed", reason: "Requires signature completion" },
-  { label: "Archive deal", reason: "Requires archival flow" },
-];
-
 const ACTIVE_STATES = Object.keys(ACTION_META) as DealReviewState[];
 
 // AVM/LTV results that hard-block progression to ready_for_signatures
@@ -56,6 +43,13 @@ const PROGRESSION_BLOCK_REASON: Record<string, string> = {
     "AVM deviation exceeds the manual review threshold. Enter an admin note acknowledging the deviation before advancing to 'Ready for signatures'.",
 };
 
+// Normalize DB value: the DB stores "ready_for_deposit" for the state the UI
+// calls "ready_for_signatures" (the CHECK constraint predates the rename).
+function normalizeTriageStatus(raw: string | null): string | null {
+  if (raw === "ready_for_deposit") return "ready_for_signatures";
+  return raw;
+}
+
 export function AdminDealActions({
   dealId,
   currentTriageStatus,
@@ -72,6 +66,9 @@ export function AdminDealActions({
   const [pending, setPending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  // Normalize so "ready_for_deposit" (DB value) compares correctly to "ready_for_signatures" (UI key).
+  const normalizedTriageStatus = normalizeTriageStatus(currentTriageStatus);
 
   // Derive AVM gate for the currently-selected state.
   // Only "ready_for_signatures" is a progression action — the other two are always allowed.
@@ -92,14 +89,14 @@ export function AdminDealActions({
 
   const applyDisabled =
     pending ||
-    selectedState === currentTriageStatus ||
+    selectedState === normalizedTriageStatus ||
     isHardBlocked ||
     isManualReviewBlocked;
 
   async function handleApply() {
     setErr(null);
     setSuccess(null);
-    if (selectedState === currentTriageStatus) {
+    if (selectedState === normalizedTriageStatus) {
       setErr("Select a different state to apply.");
       return;
     }
@@ -137,7 +134,6 @@ export function AdminDealActions({
 
   return (
     <div className="space-y-4">
-      {/* Active actions */}
       <div className="space-y-3">
         <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
           Deal review actions
@@ -172,7 +168,7 @@ export function AdminDealActions({
           </button>
         </div>
 
-        {selectedState !== currentTriageStatus && !avmBlockReason && (
+        {selectedState !== normalizedTriageStatus && !avmBlockReason && (
           <p className="text-xs text-muted-foreground">{meta.description}</p>
         )}
 
@@ -221,27 +217,6 @@ export function AdminDealActions({
 
         {err && <div className="text-xs text-red-600">{err}</div>}
         {success && <div className="text-xs text-green-700">{success}</div>}
-      </div>
-
-      {/* Deferred / property-review–owned actions */}
-      <div className="border-t pt-3 space-y-2">
-        <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          Deferred / property-review actions
-        </div>
-        <div className="space-y-1.5">
-          {DEFERRED_ACTIONS.map((a) => (
-            <div key={a.label} className="flex items-center gap-3">
-              <button
-                type="button"
-                disabled
-                className="text-xs px-2 py-0.5 rounded border opacity-40 cursor-not-allowed"
-              >
-                {a.label}
-              </button>
-              <span className="text-xs text-muted-foreground">{a.reason}</span>
-            </div>
-          ))}
-        </div>
       </div>
     </div>
   );

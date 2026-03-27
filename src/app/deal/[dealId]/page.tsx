@@ -425,6 +425,13 @@ export default async function DealPage(ctx: PageProps) {
             />
           )}
 
+          {/*
+           * TODO(fmv-badge): Shared FMV badge for homeowner/investor visibility.
+           * Should only appear AFTER the stronger ATTOM-style valuation review is
+           * completed and admin writes back a verified fmv_amount to
+           * property_review_summary. Do NOT expose RentCast AVM detail here.
+           * Keyed off property_review_summary.fmv_provider and fmv_expires_at.
+           */}
           <DealDetailWidgetPanel
             dealId={dealId}
             initialSnapshot={effectiveSnapshotRecord}

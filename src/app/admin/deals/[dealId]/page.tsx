@@ -180,7 +180,7 @@ function deriveAdminDealReviewState(args: {
             : "Property review has progressed but max available deal cash is not yet set. Review may be incomplete.",
           blocking_dependency: has_max_cash ? null : "Max available deal cash not set on property",
           next_step_hint: has_max_cash
-            ? "Review economics comparison below. Advance deal to 'Ready for deposit' or 'Ineligible'."
+            ? "Review economics comparison below. Advance deal to 'Ready for signatures' or 'Ineligible'."
             : "Ensure max available deal cash is set on the property review page.",
         };
       case "property_review_expired":
@@ -225,7 +225,8 @@ function adminEventLabel(eventType: string): string {
     case "OFFER_ACCEPTED": return "Offer accepted";
     case "OFFER_REJECTED": return "Offer declined";
     case "DEAL_TRIAGE_EVALUATED": return "Initial triage evaluated";
-    case "DEAL_TRIAGE_READY_FOR_DEPOSIT": return "Marked ready for deposit";
+    case "DEAL_TRIAGE_READY_FOR_DEPOSIT": return "Marked ready for deposit (legacy)";
+    case "DEAL_TRIAGE_READY_FOR_SIGNATURES": return "Marked ready for signatures";
     case "DEAL_TRIAGE_MORE_INFO_NEEDED": return "Flagged: additional information needed";
     case "DEAL_TRIAGE_INELIGIBLE": return "Marked ineligible";
     case "DEAL_REVIEW_REQUEST_CREATED": return "Additional information request opened";

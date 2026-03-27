@@ -11,11 +11,13 @@ import {
 } from "@/lib/avmEligibility";
 
 // Canonical deal review states owned by the deal surface.
-// "ready_for_deposit" is intentionally absent — deposit collection is
-// a property-review–owned action, not a deal-page action.
+// "ready_for_signatures" maps to "ready_for_deposit" in the DB because the
+// CHECK constraint (chk_deal_triage_status) was written before the rename.
+// The UI label and event type use "ready_for_signatures"; the persisted DB
+// value stays "ready_for_deposit" to satisfy the constraint without a migration.
 const STATE_TO_TRIAGE: Record<string, string> = {
   triage_in_progress: "triage_in_progress",
-  ready_for_signatures: "ready_for_signatures",
+  ready_for_signatures: "ready_for_deposit",
   ineligible: "ineligible",
 };
 
