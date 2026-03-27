@@ -55,10 +55,12 @@ export function AdminDealActions({
   dealId,
   currentTriageStatus,
   avmEligibilityResult,
+  hasOpenReviewRequest = false,
 }: {
   dealId: string;
   currentTriageStatus: string | null;
   avmEligibilityResult: string | null;
+  hasOpenReviewRequest?: boolean;
 }) {
   const [selectedState, setSelectedState] = useState<DealReviewState>("triage_in_progress");
   const [note, setNote] = useState("");
@@ -167,6 +169,18 @@ export function AdminDealActions({
 
         {selectedState !== currentTriageStatus && !avmBlockReason && (
           <p className="text-xs text-muted-foreground">{meta.description}</p>
+        )}
+
+        {/* Open review request soft warning */}
+        {hasOpenReviewRequest && isProgressionAction && (
+          <div className="rounded-md px-3 py-2 text-xs border bg-yellow-50 border-yellow-200 text-yellow-800">
+            <span className="font-semibold">Open information request</span>
+            {" — "}
+            There is an unresolved additional-information request on this property. Resolve it on the property
+            review page before advancing to{" "}
+            <span className="font-medium">Ready for deposit</span>, or proceed only if the outstanding
+            information is no longer required.
+          </div>
         )}
 
         {/* AVM/LTV blocking reason */}

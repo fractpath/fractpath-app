@@ -207,24 +207,23 @@ export default async function AdminPropertyAuditPage({
     linkedDeal = dealRow ?? null;
   }
 
-  // Fetch current open/submitted review request for linked deal.
-  // Only pass open/submitted requests to the panel — a resolved request must
-  // not prevent the admin from creating a new one after a status reset.
+  // Fetch all review requests for this deal+property (including resolved), newest first.
+  // currentReviewRequest = latest open/submitted (for the editable panel).
+  // allReviewRequests   = complete history (for the read-only history section).
   let currentReviewRequest: AdminReviewRequest | null = null;
+  let allReviewRequests: AdminReviewRequest[] = [];
   if (linkedDeal?.id) {
-    const { data: reqRow } = await (supabase.from("deal_review_requests") as any)
+    const { data: reqRows } = await (supabase.from("deal_review_requests") as any)
       .select(
         "id, deal_id, property_id, status, requested_items, admin_note, homeowner_note, resolved_note, submitted_at, resolved_at, created_at",
       )
       .eq("deal_id", linkedDeal.id)
       .eq("property_id", propertyId)
-      .in("status", ["open", "submitted"])
       .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (reqRow) {
-      currentReviewRequest = reqRow as AdminReviewRequest;
-    }
+      .limit(20);
+    allReviewRequests = (reqRows ?? []) as AdminReviewRequest[];
+    currentReviewRequest =
+      allReviewRequests.find((r) => r.status === "open" || r.status === "submitted") ?? null;
   }
 
   const auditRows = (auditRes.data ?? []) as any[];
@@ -522,6 +521,85 @@ export default async function AdminPropertyAuditPage({
           initialRequest={currentReviewRequest}
         />
       )}
+
+      {/* ── Additional information request history (read-only audit) ── */}
+      {allReviewRequests.length > 0 && (() => {
+        const REQ_STATUS_BADGE: Record<string, { label: string; cls: string }> = {
+          open: { label: "Open", cls: "bg-yellow-100 text-yellow-800" },
+          submitted: { label: "Homeowner responded", cls: "bg-blue-100 text-blue-800" },
+          resolved: { label: "Resolved", cls: "bg-green-100 text-green-800" },
+        };
+        return (
+          <div className="rounded-lg border overflow-hidden">
+            <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b">
+              Additional information request history
+            </div>
+            <div className="divide-y">
+              {allReviewRequests.map((req) => {
+                const badge = REQ_STATUS_BADGE[req.status];
+                return (
+                  <div key={req.id} className="p-4 text-sm space-y-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {badge && (
+                        <span className={`text-xs rounded-full px-2 py-0.5 font-medium ${badge.cls}`}>
+                          {badge.label}
+                        </span>
+                      )}
+                      <span className="text-xs text-muted-foreground">
+                        Opened {formatDate(req.created_at)}
+                      </span>
+                    </div>
+                    {req.requested_items.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {req.requested_items.map((item) => (
+                          <span
+                            key={item.type}
+                            className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-muted text-foreground"
+                          >
+                            {item.label}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {req.admin_note && (
+                      <div>
+                        <div className="text-xs text-muted-foreground">Admin note</div>
+                        <div className="text-sm whitespace-pre-wrap mt-0.5">{req.admin_note}</div>
+                      </div>
+                    )}
+                    {req.homeowner_note && (
+                      <div className="rounded-md bg-blue-50 border border-blue-100 px-3 py-2">
+                        <div className="text-xs text-blue-700 font-medium">Homeowner response</div>
+                        <div className="text-sm whitespace-pre-wrap mt-0.5">{req.homeowner_note}</div>
+                        {req.submitted_at && (
+                          <div className="text-xs text-blue-600 mt-1">
+                            Submitted {formatDate(req.submitted_at)}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {req.status === "resolved" && (
+                      <div className="rounded-md bg-green-50 border border-green-100 px-3 py-2">
+                        <div className="text-xs text-green-700 font-medium">Resolution</div>
+                        {req.resolved_note ? (
+                          <div className="text-sm whitespace-pre-wrap mt-0.5">{req.resolved_note}</div>
+                        ) : (
+                          <div className="text-xs text-green-600 mt-0.5">No resolution note.</div>
+                        )}
+                        {req.resolved_at && (
+                          <div className="text-xs text-green-600 mt-1">
+                            Resolved {formatDate(req.resolved_at)}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Property review ── */}
       <div className="rounded-lg border overflow-hidden">

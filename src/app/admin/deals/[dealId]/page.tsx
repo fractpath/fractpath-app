@@ -631,20 +631,28 @@ export default async function AdminDealReviewPage({
 
             {/* Open review request indicator */}
             {reviewRequest && (
-              <div className={`rounded-md px-3 py-2 text-xs ${
+              <div className={`rounded-md px-3 py-2 text-xs space-y-1.5 ${
                 hasOpenReviewRequest
                   ? "bg-yellow-50 text-yellow-800 border border-yellow-200"
                   : "bg-muted/30 text-muted-foreground"
               }`}>
                 {hasOpenReviewRequest ? (
                   <>
-                    <span className="font-medium">Open information request</span>
-                    {" — "}
-                    {reviewRequest.status === "submitted"
-                      ? "Homeowner has responded. Review their submission."
-                      : "Awaiting homeowner response."}
+                    <div>
+                      <span className="font-medium">Open information request</span>
+                      {" — "}
+                      {reviewRequest.status === "submitted"
+                        ? "Homeowner has responded."
+                        : "Awaiting homeowner response."}
+                    </div>
                     {reviewRequest.admin_note && (
-                      <div className="mt-1 text-muted-foreground">Note: {reviewRequest.admin_note}</div>
+                      <div className="text-muted-foreground">Admin note: {reviewRequest.admin_note}</div>
+                    )}
+                    {reviewRequest.homeowner_note && reviewRequest.status === "submitted" && (
+                      <div className="rounded bg-white border border-yellow-100 px-2 py-1.5">
+                        <span className="font-medium text-yellow-900">Homeowner note: </span>
+                        <span className="whitespace-pre-wrap">{reviewRequest.homeowner_note}</span>
+                      </div>
                     )}
                   </>
                 ) : (
@@ -873,6 +881,7 @@ export default async function AdminDealReviewPage({
             dealId={dealId}
             currentTriageStatus={deal.triage_status ?? null}
             avmEligibilityResult={avmEligibility.result}
+            hasOpenReviewRequest={hasOpenReviewRequest}
           />
         </div>
       </div>
