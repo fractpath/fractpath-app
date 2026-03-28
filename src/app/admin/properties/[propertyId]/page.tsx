@@ -16,6 +16,7 @@ import { AdminPropertyReviewControls } from "@/components/admin/AdminPropertyRev
 import type { PropertyReviewStatus } from "@/components/admin/AdminPropertyReviewControls";
 import { AdminVendorReviewPanel } from "@/components/admin/AdminVendorReviewPanel";
 import { AdminEscalationSimPanel } from "@/components/admin/AdminEscalationSimPanel";
+import { AdminPropertyClosingPanel } from "@/components/admin/AdminPropertyClosingPanel";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { computeLtvPolicy } from "@/lib/ltvPolicy";
 import type { NormalizedPropertyProfile } from "@/lib/property-review/providers/rentcast";
@@ -130,7 +131,7 @@ export default async function AdminPropertyAuditPage({
 
   const propRes = await (supabase.from("properties") as any)
     .select(
-      "id, owner_user_id, address_line1, address_line2, city, state, postal_code, status, created_at, updated_at, reviewed_at, reviewed_by, verified_at, verified_by, review_notes, has_secured_property_debt, secured_property_debt_amount, secured_debt_certified_at, secured_debt_last_verified_at, secured_debt_fresh_until, secured_debt_verification_status, latest_verified_fmv, fmv_verified_at, fmv_verification_source, ltv_policy_ratio, max_accessible_cash_current, ownership_type, occupancy_use, occupancy_use_other, major_condition_issue, major_condition_issue_details, known_liens_and_claims, total_known_debt_amount, total_known_debt_confidence, debt_statement_availability, title_claims_known, title_claims_details, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, owner_stated_fmv_source_other, willing_to_proceed_formal_review, property_review_status, property_review_status_updated_at, property_review_note, property_review_expires_at, property_review_completed_at, escalation_deposit_status, escalation_avm_status",
+      "id, owner_user_id, address_line1, address_line2, city, state, postal_code, status, created_at, updated_at, reviewed_at, reviewed_by, verified_at, verified_by, review_notes, has_secured_property_debt, secured_property_debt_amount, secured_debt_certified_at, secured_debt_last_verified_at, secured_debt_fresh_until, secured_debt_verification_status, latest_verified_fmv, fmv_verified_at, fmv_verification_source, ltv_policy_ratio, max_accessible_cash_current, ownership_type, occupancy_use, occupancy_use_other, major_condition_issue, major_condition_issue_details, known_liens_and_claims, total_known_debt_amount, total_known_debt_confidence, debt_statement_availability, title_claims_known, title_claims_details, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, owner_stated_fmv_source_other, willing_to_proceed_formal_review, property_review_status, property_review_status_updated_at, property_review_note, property_review_expires_at, property_review_completed_at, escalation_deposit_status, escalation_avm_status, closing_review_status, closing_review_note",
     )
     .eq("id", propertyId)
     .maybeSingle();
@@ -818,6 +819,49 @@ export default async function AdminPropertyAuditPage({
               (vendorSummary?.fmv_amount as number | null) ??
               null
             }
+          />
+        </div>
+      </div>
+
+      {/* ── Closing review (property-owned stages 7-9) ── */}
+      {/*
+        Title search, closing documentation, and final pre-close checks.
+        This section owns closing_review_status: pending → issue_found → ready.
+        Transitions trigger customer notifications and are logged in the property audit trail.
+        Deal close and servicing (stages 14-16) are owned by the deal review page.
+
+        TODO(title-partner): Replace simulation with real title/settlement partner status ingestion.
+      */}
+      <div className="rounded-lg border overflow-hidden">
+        <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b flex items-center gap-2">
+          <span>Closing review</span>
+          {p.closing_review_status === "ready" ? (
+            <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-emerald-100 text-emerald-800">
+              Ready for closing
+            </span>
+          ) : p.closing_review_status === "issue_found" ? (
+            <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-red-100 text-red-800">
+              Issue found
+            </span>
+          ) : p.closing_review_status === "pending" ? (
+            <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-blue-100 text-blue-800">
+              Review pending
+            </span>
+          ) : (
+            <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-gray-100 text-gray-500">
+              Not started
+            </span>
+          )}
+          <span className="ml-auto text-xs text-muted-foreground font-normal italic">
+            [SIMULATION]
+          </span>
+        </div>
+        <div className="p-4">
+          <AdminPropertyClosingPanel
+            propertyId={propertyId}
+            dealId={linkedDeal?.id ?? null}
+            closingReviewStatus={(p.closing_review_status as "pending" | "issue_found" | "ready" | null) ?? null}
+            closingReviewNote={(p.closing_review_note as string | null) ?? null}
           />
         </div>
       </div>

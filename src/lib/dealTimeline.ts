@@ -72,6 +72,8 @@ function eventTypeLabel(et: string): string {
     case "DEAL_TRIAGE_INELIGIBLE": return "Review not applicable";
     case "DEAL_REVIEW_REQUEST_RESOLVED": return "Information request resolved";
     case "DEAL_TRIAGE_RETURNED_TO_REVIEW": return "Returned to triage in progress";
+    case "DEAL_WORKFLOW_STAGE_CHANGED": return "Workflow stage updated";
+    case "DEAL_WORKFLOW_NOTIFICATION_SENT": return "Customer notification sent";
     default: return et.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   }
 }

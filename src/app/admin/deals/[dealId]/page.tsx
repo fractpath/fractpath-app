@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getDealEvents } from "@/lib/dealTimeline";
 import { AdminDealActions } from "@/components/admin/AdminDealActions";
+import { AdminDealServicingPanel } from "@/components/admin/AdminDealServicingPanel";
 import { SignatureCard } from "@/components/deal/SignatureCard";
 import type { SignaturePacketView, SignatureRecipientView } from "@/components/deal/SignatureCard";
 import { getArtifactSignedUrls } from "@/lib/signature/artifacts";
@@ -236,6 +237,8 @@ function adminEventLabel(eventType: string): string {
     case "DEAL_REVIEW_REQUEST_RESOLVED": return "Additional information request resolved";
     case "DEAL_TRIAGE_RETURNED_TO_REVIEW": return "Returned to triage in progress";
     case "DEAL_HEADER_UPDATED": return "Deal header updated";
+    case "DEAL_WORKFLOW_STAGE_CHANGED": return "Workflow stage transition";
+    case "DEAL_WORKFLOW_NOTIFICATION_SENT": return "Customer notification sent";
     default: return eventType.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   }
 }
@@ -471,7 +474,7 @@ export default async function AdminDealReviewPage({
 
   // ── Fetch deal ──────────────────────────────────────────────────────────
   const { data: deal, error: dealErr } = await (svc.from("deals") as any)
-    .select("id, status, triage_status, triage_reason_tags, fmv_plausibility_flag, accepted_at, created_at")
+    .select("id, status, triage_status, triage_reason_tags, fmv_plausibility_flag, accepted_at, created_at, servicing_status, servicing_note")
     .eq("id", dealId)
     .maybeSingle();
 
@@ -1267,6 +1270,50 @@ export default async function AdminDealReviewPage({
             currentTriageStatus={deal.triage_status ?? null}
             avmEligibilityResult={avmEligibility.result}
             hasOpenReviewRequest={hasOpenReviewRequest}
+          />
+        </div>
+      </div>
+
+      {/* ── Deal close + servicing ── */}
+      {/*
+        Post-signature workflow for deal close and servicing tracking.
+        Owns deal stages 14 (closed), 15 (servicing active), 16 (servicing issue).
+        Property artifacts (title docs, review notes) remain on the property page.
+        Deal artifacts (signed docs, servicing notes) remain here.
+
+        TODO(servicing-partner): Replace simulation with real servicing partner status ingestion.
+      */}
+      <div className="rounded-lg border overflow-hidden">
+        <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b flex items-center gap-2">
+          <span>Deal close &amp; servicing</span>
+          {deal.servicing_status === "active" ? (
+            <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-emerald-100 text-emerald-800">
+              Servicing active
+            </span>
+          ) : deal.servicing_status === "issue" ? (
+            <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-red-100 text-red-800">
+              Servicing issue
+            </span>
+          ) : effectiveThreadStatus === "closed" ? (
+            <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-gray-800 text-white">
+              Closed
+            </span>
+          ) : (
+            <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-gray-100 text-gray-500">
+              Not closed
+            </span>
+          )}
+          <span className="ml-auto text-xs text-muted-foreground font-normal italic">
+            [SIMULATION]
+          </span>
+        </div>
+        <div className="p-4">
+          <AdminDealServicingPanel
+            dealId={dealId}
+            threadStatus={effectiveThreadStatus}
+            packetStatus={sigData.packet?.status ?? null}
+            servicingStatus={(deal.servicing_status as "active" | "issue" | null) ?? null}
+            servicingNote={(deal.servicing_note as string | null) ?? null}
           />
         </div>
       </div>

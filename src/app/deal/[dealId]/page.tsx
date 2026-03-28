@@ -12,6 +12,12 @@ import { WaitingBanner } from "@/components/deal/WaitingBanner";
 import { RecomputeSnapshotButton } from "@/components/deal/RecomputeSnapshotButton";
 import { SignatureCard } from "@/components/deal/SignatureCard";
 import type { SignaturePacketView, SignatureRecipientView } from "@/components/deal/SignatureCard";
+import { DealMilestoneTracker } from "@/components/deal/DealMilestoneTracker";
+import {
+  deriveWorkflowStage,
+  getStageMeta,
+  type WorkflowStateInput,
+} from "@/lib/workflow/milestones";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { getArtifactSignedUrls } from "@/lib/signature/artifacts";
 
@@ -223,7 +229,7 @@ export default async function DealPage(ctx: PageProps) {
   const { data: deal } = await supabase
     .from("deals")
     .select(
-      "id, owner_user_id, created_by_user_id, user_id, status, created_at, archived_at",
+      "id, owner_user_id, created_by_user_id, user_id, status, created_at, archived_at, triage_status, servicing_status",
     )
     .eq("id", dealId)
     .maybeSingle();
@@ -292,16 +298,24 @@ export default async function DealPage(ctx: PageProps) {
 
     let livePropertyStatus: string | null = null;
     let liveOwnershipStatus: string | null = null;
+    let liveClosingReviewStatus: string | null = null;
+    let liveEscalationDepositStatus: string | null = null;
+    let liveEscalationAvmStatus: string | null = null;
+    let livePropertyReviewStatus: string | null = null;
 
     if (resolvedPropertyId) {
       const { data: liveProp } = await (svc.from("properties") as any)
-        .select("status, ownership_status")
+        .select("status, ownership_status, closing_review_status, escalation_deposit_status, escalation_avm_status, property_review_status")
         .eq("id", resolvedPropertyId)
         .maybeSingle();
 
       if (liveProp) {
         livePropertyStatus = liveProp.status ?? null;
         liveOwnershipStatus = liveProp.ownership_status ?? null;
+        liveClosingReviewStatus = liveProp.closing_review_status ?? null;
+        liveEscalationDepositStatus = liveProp.escalation_deposit_status ?? null;
+        liveEscalationAvmStatus = liveProp.escalation_avm_status ?? null;
+        livePropertyReviewStatus = liveProp.property_review_status ?? null;
       }
     }
 
@@ -326,14 +340,19 @@ export default async function DealPage(ctx: PageProps) {
     const { data: candidateThreads } = await (svc.from("deal_threads") as any)
       .select("id, status, buyer_user_id, owner_user_id, created_at")
       .eq("deal_id", dealId)
-      .in("status", ["pending_owner", "negotiating", "accepted"])
+      .in("status", ["pending_owner", "negotiating", "accepted", "closed"])
       .order("created_at", { ascending: false })
       .limit(5);
 
+    const allCandidateThreads: any[] = candidateThreads ?? [];
+
     const effectiveThread =
-      candidateThreads && candidateThreads.length > 0
-        ? candidateThreads[0]
-        : null;
+      allCandidateThreads.find((t) =>
+        ["pending_owner", "negotiating", "accepted"].includes(t.status),
+      ) ?? null;
+
+    const threadStatusForMilestone: string | null =
+      allCandidateThreads[0]?.status ?? null;
 
     const negState = await loadNegotiationState(svc, effectiveThread, user.id);
 
@@ -371,6 +390,21 @@ export default async function DealPage(ctx: PageProps) {
       requireAdmin(),
     ]);
     const isAdmin = adminResult.ok;
+
+    const workflowStateInput: WorkflowStateInput = {
+      propertyStatus: livePropertyStatus,
+      propertyReviewStatus: livePropertyReviewStatus,
+      escalationDepositStatus: liveEscalationDepositStatus,
+      escalationAvmStatus: liveEscalationAvmStatus,
+      closingReviewStatus: liveClosingReviewStatus,
+      avmEligibilityResult: null,
+      triageStatus: (deal as any).triage_status ?? null,
+      threadStatus: threadStatusForMilestone,
+      packetStatus: sigData.packet?.status ?? null,
+      servicingStatus: (deal as any).servicing_status ?? null,
+    };
+    const currentStage = deriveWorkflowStage(workflowStateInput);
+    const currentStageMeta = getStageMeta(currentStage);
 
     return (
       <div className="min-h-screen">
@@ -422,6 +456,13 @@ export default async function DealPage(ctx: PageProps) {
               isAdmin={isAdmin}
               execAgreementUrl={sigData.execAgreementUrl}
               certificateUrl={sigData.certificateUrl}
+            />
+          )}
+
+          {currentStageMeta.customerLabel && (
+            <DealMilestoneTracker
+              currentStage={currentStage}
+              stageNote={null}
             />
           )}
 
@@ -714,16 +755,24 @@ export default async function DealPage(ctx: PageProps) {
 
     let livePropertyStatus: string | null = null;
     let liveOwnershipStatus: string | null = null;
+    let liveClosingReviewStatus: string | null = null;
+    let liveEscalationDepositStatus: string | null = null;
+    let liveEscalationAvmStatus: string | null = null;
+    let livePropertyReviewStatus: string | null = null;
 
     if (resolvedPropertyId) {
       const { data: liveProp } = await (svc.from("properties") as any)
-        .select("status, ownership_status")
+        .select("status, ownership_status, closing_review_status, escalation_deposit_status, escalation_avm_status, property_review_status")
         .eq("id", resolvedPropertyId)
         .maybeSingle();
 
       if (liveProp) {
         livePropertyStatus = liveProp.status ?? null;
         liveOwnershipStatus = liveProp.ownership_status ?? null;
+        liveClosingReviewStatus = liveProp.closing_review_status ?? null;
+        liveEscalationDepositStatus = liveProp.escalation_deposit_status ?? null;
+        liveEscalationAvmStatus = liveProp.escalation_avm_status ?? null;
+        livePropertyReviewStatus = liveProp.property_review_status ?? null;
       }
     }
 

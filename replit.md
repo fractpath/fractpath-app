@@ -47,6 +47,12 @@ FractPath is built with Next.js, leveraging API routes for backend logic and Sup
     - **Recompute Button:** Enables owners to regenerate snapshots.
     - **Create Deal Flow:** Supports creation of new deals via an authenticated endpoint.
     - **Deal Review Request Workflow:** Manages structured missing-information requests for deals and properties, with admin and homeowner interfaces.
+    - **Escalation Simulation:** `AdminEscalationSimPanel` simulates enhanced review deposit (`escalation_deposit_status`) and AVM (`escalation_avm_status`) workflows on the admin property page. AVM completion writes to `property_review_summary` and mirrors onto `properties.latest_verified_fmv`.
+    - **Closing Review Workflow:** `AdminPropertyClosingPanel` manages property closing stages 7-9 (`closing_review_status`: pending/issue_found/ready). Route: `POST /api/admin/properties/[propertyId]/closing-review`. Logs to `property_status_audit`. Triggers customer notifications via `notifyMilestoneForProperty`.
+    - **Deal Close & Servicing Workflow:** `AdminDealServicingPanel` manages deal stages 14-16 (close thread, `servicing_status`: active/issue). Routes: `POST /api/admin/deals/[dealId]/close` and `POST /api/admin/deals/[dealId]/servicing`. Logs `DEAL_WORKFLOW_STAGE_CHANGED` to `deal_events`. Triggers notifications via `notifyMilestoneForDeal`.
+    - **Milestone Derivation:** `src/lib/workflow/milestones.ts` defines 16 simplified stages (1-9 property-owned, 10-16 deal-owned), a `deriveWorkflowStage` function, and `CUSTOMER_MILESTONES` for end-user display.
+    - **Milestone Notifications:** `src/lib/workflow/notifyMilestone.ts` sends inline HTML emails via Resend and logs `DEAL_WORKFLOW_NOTIFICATION_SENT` events to `deal_events`. Resolves owner contact from thread→auth→profile. Non-blocking (errors are logged, not propagated).
+    - **DealMilestoneTracker:** Customer-facing `src/components/deal/DealMilestoneTracker.tsx` shows plain-language progress milestones on the homeowner deal page. Only renders when current stage has a customer-visible label. Uses `CUSTOMER_MILESTONES` to mark completed/current/upcoming states.
 - **Thread Status Values:** Canonical values for `deal_threads.status` are `draft`, `pending_owner`, `negotiating`, `decision_pending`, `accepted`, `closed`.
 - **Proposal Status Values:** Canonical values for `deal_proposals.status` are: `draft`, `submitted`, `accepted`, `rejected`, `withdrawn`.
 - **Calculator Widget Package:** Provides React UI components (`DealSnapshotView`, `DealEditModal`) and utilities.
