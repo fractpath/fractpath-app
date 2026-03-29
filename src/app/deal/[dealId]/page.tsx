@@ -315,10 +315,11 @@ export default async function DealPage(ctx: PageProps) {
     let liveEscalationDepositStatus: string | null = null;
     let liveEscalationAvmStatus: string | null = null;
     let livePropertyReviewStatus: string | null = null;
+    let liveManualAppraisalStatus: string | null = null;
 
     if (resolvedPropertyId) {
       const { data: liveProp } = await (svc.from("properties") as any)
-        .select("status, ownership_status, closing_review_status, escalation_deposit_status, escalation_avm_status, property_review_status")
+        .select("status, ownership_status, closing_review_status, escalation_deposit_status, escalation_avm_status, property_review_status, manual_appraisal_status")
         .eq("id", resolvedPropertyId)
         .maybeSingle();
 
@@ -329,6 +330,7 @@ export default async function DealPage(ctx: PageProps) {
         liveEscalationDepositStatus = liveProp.escalation_deposit_status ?? null;
         liveEscalationAvmStatus = liveProp.escalation_avm_status ?? null;
         livePropertyReviewStatus = liveProp.property_review_status ?? null;
+        liveManualAppraisalStatus = liveProp.manual_appraisal_status ?? null;
       }
     }
 
@@ -415,6 +417,7 @@ export default async function DealPage(ctx: PageProps) {
       threadStatus: threadStatusForMilestone,
       packetStatus: sigData.packet?.status ?? null,
       servicingStatus: (deal as any).servicing_status ?? null,
+      manualAppraisalStatus: liveManualAppraisalStatus,
     };
     const canonicalResult = resolveCanonicalLifecycle(workflowStateInput);
     const currentStage = canonicalResult.stage;
@@ -821,10 +824,11 @@ export default async function DealPage(ctx: PageProps) {
     let liveEscalationDepositStatus: string | null = null;
     let liveEscalationAvmStatus: string | null = null;
     let livePropertyReviewStatus: string | null = null;
+    let liveManualAppraisalStatus: string | null = null;
 
     if (resolvedPropertyId) {
       const { data: liveProp } = await (svc.from("properties") as any)
-        .select("status, ownership_status, closing_review_status, escalation_deposit_status, escalation_avm_status, property_review_status")
+        .select("status, ownership_status, closing_review_status, escalation_deposit_status, escalation_avm_status, property_review_status, manual_appraisal_status")
         .eq("id", resolvedPropertyId)
         .maybeSingle();
 
@@ -835,6 +839,7 @@ export default async function DealPage(ctx: PageProps) {
         liveEscalationDepositStatus = liveProp.escalation_deposit_status ?? null;
         liveEscalationAvmStatus = liveProp.escalation_avm_status ?? null;
         livePropertyReviewStatus = liveProp.property_review_status ?? null;
+        liveManualAppraisalStatus = liveProp.manual_appraisal_status ?? null;
       }
     }
 
@@ -917,6 +922,7 @@ export default async function DealPage(ctx: PageProps) {
       threadStatus: thread?.status ?? null,
       packetStatus: fallbackSigData.packet?.status ?? null,
       servicingStatus: fallbackDeal?.servicing_status ?? null,
+      manualAppraisalStatus: liveManualAppraisalStatus,
     };
     const canonicalResult = resolveCanonicalLifecycle(fallbackWorkflowInput);
 

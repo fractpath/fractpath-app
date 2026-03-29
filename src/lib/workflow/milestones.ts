@@ -29,6 +29,8 @@ export interface WorkflowStateInput {
   threadStatus: string | null;
   packetStatus: string | null;
   servicingStatus: string | null;
+  /** Optional: manual appraisal challenge status (exception branch, not happy-path). */
+  manualAppraisalStatus?: string | null;
 }
 
 export interface StageMeta {
@@ -405,6 +407,12 @@ export interface CanonicalLifecycleResult {
   exceptionLabel: string | null;
   /** Longer description for the exception callout card. Null when isExceptionState is false. */
   exceptionDescription: string | null;
+  /**
+   * Current manual appraisal challenge status for the property (exception branch overlay,
+   * not part of the happy-path ladder). Null when no challenge has been initiated.
+   * Values: 'available' | 'payment_pending' | 'in_progress' | 'complete'
+   */
+  manualAppraisalStatus: string | null;
 }
 
 export function resolveCanonicalLifecycle(
@@ -414,6 +422,7 @@ export function resolveCanonicalLifecycle(
   const meta = STAGE_META[stage];
   const guidance = STAGE_ADMIN_GUIDANCE[stage];
   const exceptionCallout = EXCEPTION_CALLOUTS[stage] ?? null;
+  const manualAppraisalStatus = state.manualAppraisalStatus ?? null;
 
   const milestoneStatuses: CustomerMilestoneStatus[] = CUSTOMER_MILESTONES.map(
     (m) => {
@@ -424,6 +433,18 @@ export function resolveCanonicalLifecycle(
       return { label: m.label, state: "upcoming" };
     },
   );
+
+  // Build dynamic exception description — for deal_terms_ineligible, append manual appraisal status.
+  let exceptionDescription = exceptionCallout?.description ?? null;
+  if (stage === "deal_terms_ineligible" && exceptionCallout) {
+    if (manualAppraisalStatus === "payment_pending" || manualAppraisalStatus === "in_progress") {
+      exceptionDescription = (exceptionDescription ?? "") +
+        " An additional valuation review is currently in progress.";
+    } else if (manualAppraisalStatus === "complete") {
+      exceptionDescription = (exceptionDescription ?? "") +
+        " An additional valuation review has been completed. Deal terms will be re-evaluated.";
+    }
+  }
 
   return {
     stage,
@@ -438,6 +459,7 @@ export function resolveCanonicalLifecycle(
     milestoneStatuses,
     isExceptionState: exceptionCallout !== null,
     exceptionLabel: exceptionCallout?.label ?? null,
-    exceptionDescription: exceptionCallout?.description ?? null,
+    exceptionDescription,
+    manualAppraisalStatus,
   };
 }

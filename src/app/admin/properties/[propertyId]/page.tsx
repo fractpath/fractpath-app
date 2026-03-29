@@ -16,6 +16,7 @@ import { AdminPropertyReviewControls } from "@/components/admin/AdminPropertyRev
 import type { PropertyReviewStatus } from "@/components/admin/AdminPropertyReviewControls";
 import { AdminVendorReviewPanel } from "@/components/admin/AdminVendorReviewPanel";
 import { AdminEscalationSimPanel } from "@/components/admin/AdminEscalationSimPanel";
+import { AdminManualAppraisalSimPanel } from "@/components/admin/AdminManualAppraisalSimPanel";
 import { AdminPropertyClosingPanel } from "@/components/admin/AdminPropertyClosingPanel";
 import { AppHeader } from "@/components/layout/AppHeader";
 import {
@@ -135,7 +136,7 @@ export default async function AdminPropertyAuditPage({
 
   const propRes = await (supabase.from("properties") as any)
     .select(
-      "id, owner_user_id, address_line1, address_line2, city, state, postal_code, status, created_at, updated_at, reviewed_at, reviewed_by, verified_at, verified_by, review_notes, has_secured_property_debt, secured_property_debt_amount, secured_debt_certified_at, secured_debt_last_verified_at, secured_debt_fresh_until, secured_debt_verification_status, latest_verified_fmv, fmv_verified_at, fmv_verification_source, ltv_policy_ratio, max_accessible_cash_current, ownership_type, occupancy_use, occupancy_use_other, major_condition_issue, major_condition_issue_details, known_liens_and_claims, total_known_debt_amount, total_known_debt_confidence, debt_statement_availability, title_claims_known, title_claims_details, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, owner_stated_fmv_source_other, willing_to_proceed_formal_review, property_review_status, property_review_status_updated_at, property_review_note, property_review_expires_at, property_review_completed_at, escalation_deposit_status, escalation_avm_status, closing_review_status, closing_review_note",
+      "id, owner_user_id, address_line1, address_line2, city, state, postal_code, status, created_at, updated_at, reviewed_at, reviewed_by, verified_at, verified_by, review_notes, has_secured_property_debt, secured_property_debt_amount, secured_debt_certified_at, secured_debt_last_verified_at, secured_debt_fresh_until, secured_debt_verification_status, latest_verified_fmv, fmv_verified_at, fmv_verification_source, ltv_policy_ratio, max_accessible_cash_current, ownership_type, occupancy_use, occupancy_use_other, major_condition_issue, major_condition_issue_details, known_liens_and_claims, total_known_debt_amount, total_known_debt_confidence, debt_statement_availability, title_claims_known, title_claims_details, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, owner_stated_fmv_source_other, willing_to_proceed_formal_review, property_review_status, property_review_status_updated_at, property_review_note, property_review_expires_at, property_review_completed_at, escalation_deposit_status, escalation_avm_status, closing_review_status, closing_review_note, manual_appraisal_status, manual_appraisal_fmv",
     )
     .eq("id", propertyId)
     .maybeSingle();
@@ -368,6 +369,7 @@ export default async function AdminPropertyAuditPage({
     threadStatus: linkedThreadRes.data ? "accepted" : null,
     packetStatus: null,
     servicingStatus: linkedDeal?.servicing_status ?? null,
+    manualAppraisalStatus: (p.manual_appraisal_status as string | null) ?? null,
   };
   const propCanonical = resolveCanonicalLifecycle(propCanonicalInput);
 
@@ -493,9 +495,11 @@ export default async function AdminPropertyAuditPage({
           <div className="flex gap-2">
             <span className="text-muted-foreground min-w-[120px]">Owner sees:</span>
             <span className="italic">
-              {propCanonical.customerHeroLabel
-                ? `"${propCanonical.customerHeroLabel}"`
-                : "No milestone — accepted/pending review banner"}
+              {propCanonical.isExceptionState
+                ? `Exception callout: "${propCanonical.exceptionLabel}"`
+                : propCanonical.customerHeroLabel
+                  ? `"${propCanonical.customerHeroLabel}"`
+                  : "No milestone — accepted/pending review banner"}
             </span>
           </div>
           {linkedDeal && (
@@ -896,6 +900,56 @@ export default async function AdminPropertyAuditPage({
           />
         </div>
       </div>
+
+      {/* ── Manual appraisal challenge (exception branch — property-owned) ── */}
+      {/*
+        Optional unhappy-path escalation when a stronger AVM result renders the deal ineligible.
+        The homeowner can commission a licensed manual appraisal to challenge the automated valuation.
+        On completion, the controlling FMV basis is updated and the deal must be re-triaged.
+        This branch is outside the normal happy-path milestone ladder.
+
+        TODO(manual-appraisal): Replace simulation with real licensed appraiser ordering + result ingestion.
+      */}
+      {p.escalation_avm_status === "completed" && linkedDeal?.triage_status === "ineligible" && (
+        <div className="rounded-lg border overflow-hidden">
+          <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b flex items-center gap-2">
+            <span>Manual appraisal challenge</span>
+            {!p.manual_appraisal_status && (
+              <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-gray-100 text-gray-500">
+                Not initiated
+              </span>
+            )}
+            {p.manual_appraisal_status && (
+              <span className={`text-xs rounded-full px-2 py-0.5 font-normal ${
+                p.manual_appraisal_status === "complete"
+                  ? "bg-emerald-100 text-emerald-800"
+                  : p.manual_appraisal_status === "in_progress"
+                    ? "bg-blue-100 text-blue-800"
+                    : p.manual_appraisal_status === "payment_pending"
+                      ? "bg-orange-100 text-orange-800"
+                      : "bg-yellow-100 text-yellow-800"
+              }`}>
+                {p.manual_appraisal_status === "complete"
+                  ? "Completed"
+                  : p.manual_appraisal_status === "in_progress"
+                    ? "In progress"
+                    : p.manual_appraisal_status === "payment_pending"
+                      ? "Payment pending"
+                      : "Challenge available"}
+              </span>
+            )}
+            <span className="text-xs text-muted-foreground italic ml-auto">Exception branch — ineligible deal path</span>
+          </div>
+          <div className="p-4">
+            <AdminManualAppraisalSimPanel
+              propertyId={propertyId}
+              appraisalStatus={(p.manual_appraisal_status as string | null) ?? null}
+              appraisalFmv={(p.manual_appraisal_fmv as number | null) ?? null}
+              escalatedFmv={(p.latest_verified_fmv as number | null) ?? null}
+            />
+          </div>
+        </div>
+      )}
 
       {/* ── Closing review (property-owned stages 7-9) ── */}
       {/*

@@ -27,6 +27,12 @@ export type PropertyWorkflowState = {
   fmvVerificationSource: string | null;
   rentcastFmv: number | null;
   rentcastProvider: string | null;
+  /** Triage status of the linked deal — used to detect ineligible deal path. */
+  linkedDealTriageStatus: string | null;
+  /** Manual appraisal challenge status (exception branch, not happy-path). */
+  manualAppraisalStatus: string | null;
+  /** FMV result from completed manual appraisal (null until complete). */
+  manualAppraisalFmv: number | null;
 };
 
 type Props = {
@@ -141,6 +147,13 @@ function Row({ fieldLabel, value }: { fieldLabel: string; value: string | null |
 
 // ── Property workflow widget ──────────────────────────────────────────────────
 
+const MANUAL_APPRAISAL_BADGE: Record<string, { label: string; className: string }> = {
+  available: { label: "Challenge available", className: "bg-yellow-100 text-yellow-800 border-yellow-200" },
+  payment_pending: { label: "Payment requested", className: "bg-orange-100 text-orange-800 border-orange-200" },
+  in_progress: { label: "Appraisal in progress", className: "bg-blue-100 text-blue-800 border-blue-200" },
+  complete: { label: "Appraisal complete", className: "bg-emerald-100 text-emerald-800 border-emerald-200" },
+};
+
 function PropertyWorkflowWidget({ state }: { state: PropertyWorkflowState }) {
   const {
     propertyStatus,
@@ -150,6 +163,9 @@ function PropertyWorkflowWidget({ state }: { state: PropertyWorkflowState }) {
     latestVerifiedFmv,
     rentcastFmv,
     rentcastProvider,
+    linkedDealTriageStatus,
+    manualAppraisalStatus,
+    manualAppraisalFmv,
   } = state;
 
   function fmtUsd(n: number | null | undefined): string | null {
@@ -158,21 +174,102 @@ function PropertyWorkflowWidget({ state }: { state: PropertyWorkflowState }) {
   }
 
   if (escalationAvmStatus === "completed") {
+    const isDealIneligible = linkedDealTriageStatus === "ineligible";
+    const appraisalBadge = manualAppraisalStatus
+      ? MANUAL_APPRAISAL_BADGE[manualAppraisalStatus]
+      : null;
+
     return (
-      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 space-y-1.5">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-semibold text-emerald-900">Property value verified</span>
-          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">
-            Enhanced review complete
-          </span>
-        </div>
-        <p className="text-xs text-emerald-800">
-          A detailed valuation of your property has been completed and your verified fair market value is on file.
-        </p>
-        {latestVerifiedFmv && (
-          <p className="text-sm font-semibold text-emerald-900">
-            Verified value: {fmtUsd(latestVerifiedFmv)}
+      <div className="space-y-3">
+        {/* Enhanced review complete card */}
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 space-y-1.5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold text-emerald-900">Property value verified</span>
+            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">
+              Enhanced review complete
+            </span>
+          </div>
+          <p className="text-xs text-emerald-800">
+            A detailed valuation of your property has been completed and your verified fair market value is on file.
           </p>
+          {latestVerifiedFmv && (
+            <p className="text-sm font-semibold text-emerald-900">
+              Verified value: {fmtUsd(latestVerifiedFmv)}
+            </p>
+          )}
+        </div>
+
+        {/* Ineligible deal — blocked explanation + manual appraisal branch */}
+        {isDealIneligible && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-semibold text-amber-900">Current deal terms require revision</span>
+            </div>
+            <p className="text-xs text-amber-800">
+              Based on the verified property value, the current deal terms exceed FractPath&apos;s
+              value-based policy thresholds. The deal cannot proceed under the current terms.
+              You have two paths forward:
+            </p>
+            <ul className="text-xs text-amber-800 space-y-1 list-disc list-inside pl-1">
+              <li>
+                <strong>Renegotiate the deal terms</strong> — work with the buyer to revise the
+                requested amount so it falls within the eligible range for the verified property value.
+              </li>
+              <li>
+                <strong>Challenge the automated valuation</strong> — if you believe the verified
+                value does not accurately reflect your property&apos;s fair market value, you can
+                commission a licensed manual appraisal through FractPath. Our team will contact you
+                with next steps.
+              </li>
+            </ul>
+
+            {/* Manual appraisal branch status */}
+            {manualAppraisalStatus && appraisalBadge && (
+              <div className="border-t border-amber-200 pt-3 space-y-1.5">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-semibold text-amber-900">Valuation challenge status</span>
+                  <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium border ${appraisalBadge.className}`}>
+                    {appraisalBadge.label}
+                  </span>
+                </div>
+                {manualAppraisalStatus === "available" && (
+                  <p className="text-xs text-amber-800">
+                    Our team has noted your intent to challenge the automated valuation. We will be in
+                    touch with next steps for scheduling a licensed appraisal.
+                  </p>
+                )}
+                {manualAppraisalStatus === "payment_pending" && (
+                  <p className="text-xs text-amber-800">
+                    A payment request for the manual appraisal fee has been sent. Once received, your
+                    appraisal will be scheduled.
+                  </p>
+                )}
+                {manualAppraisalStatus === "in_progress" && (
+                  <p className="text-xs text-amber-800">
+                    A licensed appraisal of your property is currently in progress. We will notify you
+                    when the appraisal report is complete.
+                  </p>
+                )}
+                {manualAppraisalStatus === "complete" && (
+                  <p className="text-xs text-emerald-800">
+                    The manual appraisal has been completed.
+                    {manualAppraisalFmv && (
+                      <> The appraised value is <strong>{fmtUsd(manualAppraisalFmv)}</strong> and
+                      has been applied as the new controlling property value. Our team is re-evaluating
+                      deal eligibility under the updated basis.</>
+                    )}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* No manual appraisal initiated yet */}
+            {!manualAppraisalStatus && (
+              <p className="text-xs text-amber-700 border-t border-amber-200 pt-2">
+                To challenge the automated valuation, contact our team and we will guide you through the process.
+              </p>
+            )}
+          </div>
         )}
       </div>
     );

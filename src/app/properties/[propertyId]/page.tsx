@@ -10,7 +10,7 @@ import type { PropertyWorkflowState } from "@/components/properties/PropertyDeta
 export const runtime = "nodejs";
 
 const OWNED_SELECT =
-  "id, address_line1, address_line2, city, state, postal_code, status, ownership_status, is_private, owner_user_id, claimed_by_user_id, created_by_user_id, created_at, updated_at, has_secured_property_debt, secured_property_debt_amount, secured_debt_verification_status, secured_debt_fresh_until, ownership_type, occupancy_use, occupancy_use_other, major_condition_issue, major_condition_issue_details, known_liens_and_claims, total_known_debt_amount, total_known_debt_confidence, debt_statement_availability, title_claims_known, title_claims_details, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, owner_stated_fmv_source_other, willing_to_proceed_formal_review, property_review_status, escalation_deposit_status, escalation_avm_status, latest_verified_fmv, fmv_verified_at, fmv_verification_source";
+  "id, address_line1, address_line2, city, state, postal_code, status, ownership_status, is_private, owner_user_id, claimed_by_user_id, created_by_user_id, created_at, updated_at, has_secured_property_debt, secured_property_debt_amount, secured_debt_verification_status, secured_debt_fresh_until, ownership_type, occupancy_use, occupancy_use_other, major_condition_issue, major_condition_issue_details, known_liens_and_claims, total_known_debt_amount, total_known_debt_confidence, debt_statement_availability, title_claims_known, title_claims_details, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, owner_stated_fmv_source_other, willing_to_proceed_formal_review, property_review_status, escalation_deposit_status, escalation_avm_status, latest_verified_fmv, fmv_verified_at, fmv_verification_source, manual_appraisal_status, manual_appraisal_fmv";
 
 function formatAddress(row: any): string {
   return [
@@ -76,17 +76,6 @@ export default async function PropertyDetailPage({ params }: PageProps) {
     // non-fatal
   }
 
-  const workflowState: PropertyWorkflowState = {
-    propertyStatus: row.status ?? null,
-    propertyReviewStatus: row.property_review_status ?? null,
-    escalationDepositStatus: row.escalation_deposit_status ?? null,
-    escalationAvmStatus: row.escalation_avm_status ?? null,
-    latestVerifiedFmv: row.latest_verified_fmv ?? null,
-    fmvVerificationSource: row.fmv_verification_source ?? null,
-    rentcastFmv,
-    rentcastProvider,
-  };
-
   // Fetch most recent deal thread linked to this property
   let linkedDeal: {
     thread_id: string;
@@ -94,6 +83,7 @@ export default async function PropertyDetailPage({ params }: PageProps) {
     deal_id: string | null;
     deal_status: string | null;
     deal_title: string | null;
+    deal_triage_status: string | null;
   } | null = null;
 
   try {
@@ -106,7 +96,7 @@ export default async function PropertyDetailPage({ params }: PageProps) {
 
     if (threadRow?.deal_id) {
       const { data: dealRow } = await (svc.from("deals") as any)
-        .select("id, status, title")
+        .select("id, status, title, triage_status")
         .eq("id", threadRow.deal_id)
         .maybeSingle();
 
@@ -116,6 +106,7 @@ export default async function PropertyDetailPage({ params }: PageProps) {
         deal_id: threadRow.deal_id,
         deal_status: dealRow?.status ?? null,
         deal_title: dealRow?.title ?? null,
+        deal_triage_status: dealRow?.triage_status ?? null,
       };
     } else if (threadRow) {
       linkedDeal = {
@@ -124,11 +115,26 @@ export default async function PropertyDetailPage({ params }: PageProps) {
         deal_id: null,
         deal_status: null,
         deal_title: null,
+        deal_triage_status: null,
       };
     }
   } catch {
     // non-fatal — proceed without linked deal
   }
+
+  const workflowState: PropertyWorkflowState = {
+    propertyStatus: row.status ?? null,
+    propertyReviewStatus: row.property_review_status ?? null,
+    escalationDepositStatus: row.escalation_deposit_status ?? null,
+    escalationAvmStatus: row.escalation_avm_status ?? null,
+    latestVerifiedFmv: row.latest_verified_fmv ?? null,
+    fmvVerificationSource: row.fmv_verification_source ?? null,
+    rentcastFmv,
+    rentcastProvider,
+    linkedDealTriageStatus: linkedDeal?.deal_triage_status ?? null,
+    manualAppraisalStatus: row.manual_appraisal_status ?? null,
+    manualAppraisalFmv: row.manual_appraisal_fmv ?? null,
+  };
 
   // Fetch open/submitted review request for the linked deal + this property
   let reviewRequest: HomeownerReviewRequest | null = null;
