@@ -271,7 +271,7 @@ type SearchParams = Record<string, string | string[] | undefined>;
 
                 const triageStatus = triageByProperty[p.id] ?? null;
                 const TRIAGE_CHIP: Record<string, { label: string; cls: string }> = {
-                  ready_for_deposit: { label: "Ready for deposit", cls: "bg-green-100 text-green-800 border-green-200" },
+                  ready_for_deposit: { label: "Ready for signatures", cls: "bg-green-100 text-green-800 border-green-200" },
                   triage_in_progress: { label: "Triage in progress", cls: "bg-blue-100 text-blue-800 border-blue-200" },
                   more_info_needed: { label: "More info needed", cls: "bg-yellow-100 text-yellow-800 border-yellow-200" },
                   ineligible: { label: "Ineligible", cls: "bg-red-100 text-red-800 border-red-200" },

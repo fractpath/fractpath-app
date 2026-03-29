@@ -18,10 +18,22 @@ type LinkedDeal = {
   deal_title: string | null;
 } | null;
 
+export type PropertyWorkflowState = {
+  propertyStatus: string | null;
+  propertyReviewStatus: string | null;
+  escalationDepositStatus: string | null;
+  escalationAvmStatus: string | null;
+  latestVerifiedFmv: number | null;
+  fmvVerificationSource: string | null;
+  rentcastFmv: number | null;
+  rentcastProvider: string | null;
+};
+
 type Props = {
   property: HomeownerPropertyShape;
   linkedDeal: LinkedDeal;
   reviewRequest?: HomeownerReviewRequest | null;
+  workflowState?: PropertyWorkflowState | null;
 };
 
 // ── Status badge ─────────────────────────────────────────────────────────────
@@ -127,16 +139,143 @@ function Row({ fieldLabel, value }: { fieldLabel: string; value: string | null |
   );
 }
 
+// ── Property workflow widget ──────────────────────────────────────────────────
+
+function PropertyWorkflowWidget({ state }: { state: PropertyWorkflowState }) {
+  const {
+    propertyStatus,
+    propertyReviewStatus,
+    escalationDepositStatus,
+    escalationAvmStatus,
+    latestVerifiedFmv,
+    rentcastFmv,
+    rentcastProvider,
+  } = state;
+
+  function fmtUsd(n: number | null | undefined): string | null {
+    if (n == null) return null;
+    return `$${Math.round(n).toLocaleString("en-US")}`;
+  }
+
+  if (escalationAvmStatus === "completed") {
+    return (
+      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 space-y-1.5">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-semibold text-emerald-900">Property value verified</span>
+          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">
+            Enhanced review complete
+          </span>
+        </div>
+        <p className="text-xs text-emerald-800">
+          A detailed valuation of your property has been completed and your verified fair market value is on file.
+        </p>
+        {latestVerifiedFmv && (
+          <p className="text-sm font-semibold text-emerald-900">
+            Verified value: {fmtUsd(latestVerifiedFmv)}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  if (escalationAvmStatus === "ordered" || escalationDepositStatus === "paid") {
+    return (
+      <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 space-y-1.5">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-semibold text-blue-900">Enhanced property review in progress</span>
+          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
+            In progress
+          </span>
+        </div>
+        <p className="text-xs text-blue-800">
+          A detailed valuation of your property is being completed. The verified report will be available here once finalized.
+        </p>
+      </div>
+    );
+  }
+
+  if (escalationDepositStatus === "requested" || escalationDepositStatus === "failed") {
+    const failed = escalationDepositStatus === "failed";
+    return (
+      <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 space-y-1.5">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-semibold text-yellow-900">Payment required for detailed review</span>
+          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium border ${failed ? "bg-red-100 text-red-800 border-red-200" : "bg-yellow-100 text-yellow-800 border-yellow-200"}`}>
+            {failed ? "Payment failed" : "Awaiting payment"}
+          </span>
+        </div>
+        <p className="text-xs text-yellow-800">
+          Our initial market analysis suggests a more detailed property valuation is needed.
+          {rentcastFmv ? ` Our automated market estimate placed your property at approximately ${fmtUsd(rentcastFmv)}.` : ""}
+          {" "}Our team will be in touch with payment details for the enhanced review.
+        </p>
+      </div>
+    );
+  }
+
+  if (
+    propertyReviewStatus === "amv_complete" ||
+    propertyReviewStatus === "property_review_complete"
+  ) {
+    return (
+      <div className="rounded-lg border border-green-200 bg-green-50 p-4 space-y-1.5">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-semibold text-green-900">Market analysis complete</span>
+          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-green-100 text-green-800 border border-green-200">
+            Review in progress
+          </span>
+        </div>
+        <p className="text-xs text-green-800">
+          {rentcastProvider
+            ? `A ${rentcastProvider} market analysis has been completed for your property. `
+            : "A market analysis has been completed for your property. "}
+          Our team is reviewing the results and will notify you if anything further is needed.
+        </p>
+      </div>
+    );
+  }
+
+  if (propertyReviewStatus) {
+    return (
+      <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 space-y-1.5">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-semibold text-blue-900">Property under review</span>
+          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
+            In review
+          </span>
+        </div>
+        <p className="text-xs text-blue-800">
+          Your property is currently being reviewed by our team. We will contact you if additional information is needed.
+        </p>
+      </div>
+    );
+  }
+
+  if (propertyStatus === "verified") {
+    return (
+      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 space-y-1.5">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-semibold text-emerald-900">Property verified</span>
+          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">
+            Verified
+          </span>
+        </div>
+        <p className="text-xs text-emerald-800">
+          Your property has been verified. Our team is continuing to review your file.
+        </p>
+      </div>
+    );
+  }
+
+  return null;
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function PropertyDetailClient({ property, linkedDeal, reviewRequest }: Props) {
+export function PropertyDetailClient({ property, linkedDeal, reviewRequest, workflowState }: Props) {
   const [editOpen, setEditOpen] = useState(false);
 
   const badge = STATUS_BADGE[property.status] ?? STATUS_BADGE.unverified;
-
-  const isActiveReview =
-    linkedDeal?.thread_status === "accepted" ||
-    linkedDeal?.deal_status === "ACCEPTED";
 
   const hasAnyIntake =
     property.ownership_type ||
@@ -161,13 +300,8 @@ export function PropertyDetailClient({ property, linkedDeal, reviewRequest }: Pr
         </Link>
       </div>
 
-      {/* Active review banner */}
-      {isActiveReview && (
-        <div className="rounded-md border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-700 dark:bg-blue-950 dark:text-blue-200">
-          This property is currently part of an active review workflow. We may
-          contact you if more information is needed.
-        </div>
-      )}
+      {/* Canonical property workflow status */}
+      {workflowState && <PropertyWorkflowWidget state={workflowState} />}
 
       {/* Property summary */}
       <div className="rounded-lg border p-5 space-y-3">

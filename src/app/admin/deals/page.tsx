@@ -16,7 +16,7 @@ const TRIAGE_BADGE: Record<
   { label: string; className: string }
 > = {
   ready_for_deposit: {
-    label: "Ready for deposit request",
+    label: "Ready for signatures",
     className: "bg-green-100 text-green-800",
   },
   triage_in_progress: {
@@ -104,7 +104,7 @@ export default async function AdminDealsTriagePage({ searchParams }: PageProps) 
 
   const FILTERS = [
     { key: "accepted", label: "Accepted deals" },
-    { key: "ready", label: "Ready for deposit" },
+    { key: "ready", label: "Ready for signatures" },
     { key: "triaged", label: "All triaged" },
     { key: "more_info", label: "More info needed" },
     { key: "ineligible", label: "Ineligible" },
@@ -207,7 +207,7 @@ export default async function AdminDealsTriagePage({ searchParams }: PageProps) 
                         </span>
                       ) : (
                         <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500">
-                          Accepted – pending review
+                          Accepted — awaiting triage
                         </span>
                       )}
 
