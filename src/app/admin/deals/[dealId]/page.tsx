@@ -72,32 +72,16 @@ function extractDealTerms(snapshot: unknown): {
   };
 }
 
-// ─── Deal review state derivation ───────────────────────────────────────────
-
-type ReviewStateTone = "neutral" | "warning" | "blocking" | "success" | "error";
-
-interface DealReviewState {
-  label: string;
-  tone: ReviewStateTone;
-  explanation: string;
-  blocking_dependency: string | null;
-  next_step_hint: string;
-}
-
-const TONE_BADGE: Record<ReviewStateTone, string> = {
-  neutral: "bg-blue-100 text-blue-800",
-  warning: "bg-yellow-100 text-yellow-800",
-  blocking: "bg-orange-100 text-orange-800",
-  success: "bg-green-100 text-green-800",
-  error: "bg-red-100 text-red-800",
-};
-
-function deriveAdminDealReviewState(args: {
+// ─── Deal review state derivation ────────────────────────────────────────────
+// LEGACY: intentionally bypassed in favour of the canonical lifecycle section.
+// Preserved here only for reference; nothing in the JSX calls this function.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function _legacyDeriveAdminDealReviewState_UNUSED(args: {
   triage_status: string | null;
   has_open_review_request: boolean;
   property_review_status: string | null;
   has_max_cash: boolean;
-}): DealReviewState {
+}): { label: string; tone: string; explanation: string; blocking_dependency: string | null; next_step_hint: string } {
   const { triage_status, has_open_review_request, property_review_status, has_max_cash } = args;
 
   if (triage_status === "ineligible") {
@@ -584,12 +568,8 @@ export default async function AdminDealReviewPage({
   const propReviewMeta = propReviewStatus ? (PROPERTY_REVIEW_STATUS_META[propReviewStatus] ?? null) : null;
   const hasPropMaxCash = property?.max_accessible_cash_current != null;
 
-  const dealReviewState = deriveAdminDealReviewState({
-    triage_status: deal.triage_status ?? null,
-    has_open_review_request: hasOpenReviewRequest,
-    property_review_status: propReviewStatus,
-    has_max_cash: hasPropMaxCash,
-  });
+  // LEGACY: dealReviewState removed — "Deal workflow state" section replaced by the
+  // canonical "Overall process" section above which derives from resolveCanonicalLifecycle.
 
   // ── Economics extraction ─────────────────────────────────────────────────
   const proposedTerms = latestProposal
@@ -627,8 +607,8 @@ export default async function AdminDealReviewPage({
   // ── Triage badge ─────────────────────────────────────────────────────────
   const TRIAGE_BADGE: Record<string, { label: string; cls: string }> = {
     ready_for_signatures: { label: "Ready for signatures", cls: "bg-green-100 text-green-800" },
-    // "ready_for_deposit" kept for backward compatibility with rows written before this refactor.
-    ready_for_deposit: { label: "Ready for signatures (legacy)", cls: "bg-green-100 text-green-800" },
+    // "ready_for_deposit" is the pre-refactor canonical value; treat same as ready_for_signatures.
+    ready_for_deposit: { label: "Ready for signatures", cls: "bg-green-100 text-green-800" },
     triage_in_progress: { label: "Triage in progress", cls: "bg-blue-100 text-blue-800" },
     more_info_needed: { label: "Additional information required", cls: "bg-yellow-100 text-yellow-800" },
     ineligible: { label: "Ineligible", cls: "bg-red-100 text-red-800" },
@@ -774,34 +754,9 @@ export default async function AdminDealReviewPage({
         </div>
       </div>
 
-      {/* ── Deal workflow state ── */}
-      <div className={`rounded-lg border overflow-hidden`}>
-        <div className={`px-4 py-2 text-sm font-medium border-b flex items-center gap-2 flex-wrap ${
-          dealReviewState.tone === "error" ? "bg-red-50" :
-          dealReviewState.tone === "blocking" ? "bg-orange-50" :
-          dealReviewState.tone === "success" ? "bg-green-50" :
-          dealReviewState.tone === "warning" ? "bg-yellow-50" :
-          "bg-muted/40"
-        }`}>
-          <span>Deal workflow state</span>
-          <span className={`text-xs rounded-full px-2 py-0.5 font-normal ${TONE_BADGE[dealReviewState.tone]}`}>
-            {dealReviewState.label}
-          </span>
-        </div>
-        <div className="p-4 text-sm space-y-2">
-          <p>{dealReviewState.explanation}</p>
-          {dealReviewState.blocking_dependency && (
-            <div className="flex items-start gap-2">
-              <span className="text-muted-foreground shrink-0 text-xs pt-0.5">Blocking:</span>
-              <span className="text-xs">{dealReviewState.blocking_dependency}</span>
-            </div>
-          )}
-          <div className="flex items-start gap-2">
-            <span className="text-muted-foreground shrink-0 text-xs pt-0.5">Next step:</span>
-            <span className="text-xs">{dealReviewState.next_step_hint}</span>
-          </div>
-        </div>
-      </div>
+      {/* LEGACY: "Deal workflow state" section removed — replaced by the canonical
+          "Overall process" section which derives from resolveCanonicalLifecycle and
+          avoids stale "economics comparison" / AMV-placeholder copy. */}
 
       {/* Triage reason tags */}
       {deal.triage_reason_tags && deal.triage_reason_tags.length > 0 && (
