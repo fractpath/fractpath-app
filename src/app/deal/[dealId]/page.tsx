@@ -292,8 +292,22 @@ export default async function DealPage(ctx: PageProps) {
     const snapJson = (latestSnap as any)?.snapshot_json ?? null;
     const snapHeader = snapJson?.meta?.header ?? {};
     const headerTitle = headerPayload.title ?? snapHeader.title ?? null;
-    const resolvedPropertyId =
+    let resolvedPropertyId: string | null =
       headerPayload.property_id ?? snapHeader.property_id ?? null;
+
+    // Thread property_id fallback: if no property_id in the header event or snapshot
+    // (common for deals created before DEAL_HEADER_UPDATED was introduced), resolve
+    // property linkage directly from the most recent deal thread.
+    if (!resolvedPropertyId) {
+      const { data: threadProp } = await (svc.from("deal_threads") as any)
+        .select("property_id")
+        .eq("deal_id", dealId)
+        .not("property_id", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      resolvedPropertyId = (threadProp as any)?.property_id ?? null;
+    }
 
     let livePropertyStatus: string | null = null;
     let liveOwnershipStatus: string | null = null;
@@ -773,8 +787,10 @@ export default async function DealPage(ctx: PageProps) {
     const snapJson = (latestSnap as any)?.snapshot_json ?? null;
     const snapHeader = snapJson?.meta?.header ?? {};
     const headerTitle = headerPayload.title ?? snapHeader.title ?? null;
-    const resolvedPropertyId =
-      headerPayload.property_id ?? snapHeader.property_id ?? null;
+    // Thread property_id fallback: if no property_id in the header event or snapshot,
+    // use the already-resolved thread's property_id as the final fallback.
+    const resolvedPropertyId: string | null =
+      headerPayload.property_id ?? snapHeader.property_id ?? (thread as any)?.property_id ?? null;
 
     let livePropertyStatus: string | null = null;
     let liveOwnershipStatus: string | null = null;

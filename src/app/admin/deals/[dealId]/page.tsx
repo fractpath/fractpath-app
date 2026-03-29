@@ -233,7 +233,7 @@ function adminEventLabel(eventType: string): string {
     case "OFFER_ACCEPTED": return "Offer accepted";
     case "OFFER_REJECTED": return "Offer declined";
     case "DEAL_TRIAGE_EVALUATED": return "Initial triage evaluated";
-    case "DEAL_TRIAGE_READY_FOR_DEPOSIT": return "Marked ready for deposit (legacy)";
+    case "DEAL_TRIAGE_READY_FOR_DEPOSIT": return "Marked ready for signatures";
     case "DEAL_TRIAGE_READY_FOR_SIGNATURES": return "Marked ready for signatures";
     case "DEAL_TRIAGE_MORE_INFO_NEEDED": return "Flagged: additional information needed";
     case "DEAL_TRIAGE_INELIGIBLE": return "Marked ineligible";
@@ -699,8 +699,8 @@ export default async function AdminDealReviewPage({
                 {triageBadge.label}
               </span>
             ) : (
-              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500">
-                Accepted – pending review
+              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                {dealCanonical.meta.adminLabel}
               </span>
             )}
             {deal.fmv_plausibility_flag && (
