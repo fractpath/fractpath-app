@@ -434,12 +434,35 @@ export default async function DealPage(ctx: PageProps) {
             effectiveSnapshot={effectiveSnapshotRecord}
           />
 
-          {effectiveThread?.status === "accepted" &&
+          {canonicalResult.isExceptionState && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950">
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 text-amber-600 dark:text-amber-400 flex-shrink-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                    <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                  </svg>
+                </span>
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">
+                    {canonicalResult.exceptionLabel}
+                  </p>
+                  {canonicalResult.exceptionDescription && (
+                    <p className="text-xs text-amber-800 dark:text-amber-200">
+                      {canonicalResult.exceptionDescription}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {!canonicalResult.isExceptionState &&
+            effectiveThread?.status === "accepted" &&
             !canonicalResult.customerHeroLabel && (
               <AcceptedPendingReviewBanner />
             )}
 
-          {canonicalResult.customerHeroLabel && (
+          {!canonicalResult.isExceptionState && canonicalResult.customerHeroLabel && (
             <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950">
               <div className="flex items-start gap-3">
                 <span className="mt-0.5 text-blue-600 dark:text-blue-400 flex-shrink-0">
@@ -911,12 +934,35 @@ export default async function DealPage(ctx: PageProps) {
             effectiveSnapshot={effectiveSnapshotRecord}
           />
 
-          {effectiveThread?.status === "accepted" &&
+          {canonicalResult.isExceptionState && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950">
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 text-amber-600 dark:text-amber-400 flex-shrink-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                    <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                  </svg>
+                </span>
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">
+                    {canonicalResult.exceptionLabel}
+                  </p>
+                  {canonicalResult.exceptionDescription && (
+                    <p className="text-xs text-amber-800 dark:text-amber-200">
+                      {canonicalResult.exceptionDescription}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {!canonicalResult.isExceptionState &&
+            effectiveThread?.status === "accepted" &&
             !canonicalResult.customerHeroLabel && (
               <AcceptedPendingReviewBanner />
             )}
 
-          {canonicalResult.customerHeroLabel && (
+          {!canonicalResult.isExceptionState && canonicalResult.customerHeroLabel && (
             <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950">
               <div className="flex items-start gap-3">
                 <span className="mt-0.5 text-blue-600 dark:text-blue-400 flex-shrink-0">

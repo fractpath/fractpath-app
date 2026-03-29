@@ -9,6 +9,7 @@ export type WorkflowStage =
   | "closing_issue_found"
   | "ready_for_closing"
   | "deal_eligible"
+  | "deal_terms_ineligible"
   | "ready_for_signatures"
   | "agreement_out_for_signatures"
   | "agreement_signed"
@@ -98,10 +99,10 @@ const STAGE_META: Record<WorkflowStage, StageMeta> = {
   },
   closing_issue_found: {
     stage: "closing_issue_found",
-    stageNumber: 8,
+    stageNumber: 7,
     adminLabel: "Closing issue found",
-    customerLabel: "Issue found during closing review",
-    notificationLabel: "Issue found during closing review",
+    customerLabel: "Closing review in progress",
+    notificationLabel: null,
     propertyOwned: true,
   },
   ready_for_closing: {
@@ -116,6 +117,14 @@ const STAGE_META: Record<WorkflowStage, StageMeta> = {
     stage: "deal_eligible",
     stageNumber: 10,
     adminLabel: "Deal eligible",
+    customerLabel: null,
+    notificationLabel: null,
+    propertyOwned: false,
+  },
+  deal_terms_ineligible: {
+    stage: "deal_terms_ineligible",
+    stageNumber: 10,
+    adminLabel: "Deal terms ineligible — renegotiation required",
     customerLabel: null,
     notificationLabel: null,
     propertyOwned: false,
@@ -187,6 +196,8 @@ export function deriveWorkflowStage(state: WorkflowStateInput): WorkflowStage {
   if (state.servicingStatus === "active") return "servicing_active";
   if (state.threadStatus === "closed") return "deal_closed";
   if (state.packetStatus === "completed") return "agreement_signed";
+  // Ineligible overrides signing/closing deal-stage decisions; terminal states above take precedence.
+  if (state.triageStatus === "ineligible") return "deal_terms_ineligible";
   if (["sent", "delivered", "partially_signed"].includes(state.packetStatus ?? "")) {
     return "agreement_out_for_signatures";
   }
@@ -226,8 +237,7 @@ export const CUSTOMER_MILESTONES: CustomerMilestone[] = [
   { label: "Additional review required", stages: ["enhanced_review_required", "enhanced_review_payment_pending"], stageNumber: 3 },
   { label: "Enhanced property review in progress", stages: ["enhanced_review_in_progress"], stageNumber: 5 },
   { label: "Property value verified", stages: ["enhanced_review_complete"], stageNumber: 6 },
-  { label: "Closing review in progress", stages: ["closing_review_pending"], stageNumber: 7 },
-  { label: "Issue found during closing review", stages: ["closing_issue_found"], stageNumber: 8 },
+  { label: "Closing review in progress", stages: ["closing_review_pending", "closing_issue_found"], stageNumber: 7 },
   { label: "Ready for closing", stages: ["ready_for_closing"], stageNumber: 9 },
   { label: "Agreement out for signatures", stages: ["agreement_out_for_signatures"], stageNumber: 12 },
   { label: "Agreement signed", stages: ["agreement_signed"], stageNumber: 13 },
@@ -289,6 +299,11 @@ const STAGE_ADMIN_GUIDANCE: Record<WorkflowStage, StageAdminGuidance> = {
     nextAction: "Initiate closing review on the property review page",
     owningSurface: "property_review",
   },
+  deal_terms_ineligible: {
+    blocker: "Deal terms are ineligible under the verified FMV — renegotiation is required",
+    nextAction: "Work with the homeowner to revise terms within the eligible LTV band, then retriage. Verified FMV remains valid.",
+    owningSurface: "deal_review",
+  },
   closing_review_pending: {
     blocker: "Closing documentation review in progress",
     nextAction: "Complete closing review — set ready or flag issue in the closing review section",
@@ -347,8 +362,6 @@ const CUSTOMER_HERO_DESCRIPTIONS: Partial<Record<WorkflowStage, string>> = {
     "An enhanced property valuation has been completed. Your scenario is progressing.",
   closing_review_pending:
     "Our team is reviewing final closing documentation. We'll notify you of any next steps.",
-  closing_issue_found:
-    "Our team found an item that needs attention during the closing review. We'll reach out with details.",
   ready_for_closing:
     "Closing review is complete. Your agreement is being prepared for signatures.",
   agreement_out_for_signatures:
@@ -363,6 +376,20 @@ const CUSTOMER_HERO_DESCRIPTIONS: Partial<Record<WorkflowStage, string>> = {
     "Our team has flagged an item that needs attention. We'll reach out shortly.",
 };
 
+// Exception callouts — rendered as error/warning cards instead of the normal hero
+const EXCEPTION_CALLOUTS: Partial<Record<WorkflowStage, { label: string; description: string }>> = {
+  closing_issue_found: {
+    label: "Issue found during closing review",
+    description:
+      "Our team found an item that needs attention during the closing review. We'll reach out with details. This does not necessarily mean the transaction cannot proceed.",
+  },
+  deal_terms_ineligible: {
+    label: "Revised terms required",
+    description:
+      "The current deal terms are not eligible under the verified property value. Our team will work with you on what revised terms might look like. Your verified property value remains on file.",
+  },
+};
+
 export interface CanonicalLifecycleResult {
   stage: WorkflowStage;
   meta: StageMeta;
@@ -372,6 +399,12 @@ export interface CanonicalLifecycleResult {
   customerHeroLabel: string | null;
   customerHeroDescription: string | null;
   milestoneStatuses: CustomerMilestoneStatus[];
+  /** True when the stage is an exception/unhappy-path state (closing issue, ineligible). */
+  isExceptionState: boolean;
+  /** Short label for the exception callout card. Null when isExceptionState is false. */
+  exceptionLabel: string | null;
+  /** Longer description for the exception callout card. Null when isExceptionState is false. */
+  exceptionDescription: string | null;
 }
 
 export function resolveCanonicalLifecycle(
@@ -380,6 +413,7 @@ export function resolveCanonicalLifecycle(
   const stage = deriveWorkflowStage(state);
   const meta = STAGE_META[stage];
   const guidance = STAGE_ADMIN_GUIDANCE[stage];
+  const exceptionCallout = EXCEPTION_CALLOUTS[stage] ?? null;
 
   const milestoneStatuses: CustomerMilestoneStatus[] = CUSTOMER_MILESTONES.map(
     (m) => {
@@ -402,5 +436,8 @@ export function resolveCanonicalLifecycle(
       ? (CUSTOMER_HERO_DESCRIPTIONS[stage] ?? null)
       : null,
     milestoneStatuses,
+    isExceptionState: exceptionCallout !== null,
+    exceptionLabel: exceptionCallout?.label ?? null,
+    exceptionDescription: exceptionCallout?.description ?? null,
   };
 }

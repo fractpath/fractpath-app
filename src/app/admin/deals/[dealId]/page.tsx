@@ -746,9 +746,11 @@ export default async function AdminDealReviewPage({
           <div className="flex gap-2">
             <span className="text-muted-foreground min-w-[120px]">Owner sees:</span>
             <span className="italic">
-              {dealCanonical.customerHeroLabel
-                ? `"${dealCanonical.customerHeroLabel}"`
-                : "No milestone — accepted/pending review banner"}
+              {dealCanonical.isExceptionState
+                ? `Exception callout: "${dealCanonical.exceptionLabel}"`
+                : dealCanonical.customerHeroLabel
+                  ? `"${dealCanonical.customerHeroLabel}"`
+                  : "No milestone — accepted/pending review banner"}
             </span>
           </div>
         </div>
