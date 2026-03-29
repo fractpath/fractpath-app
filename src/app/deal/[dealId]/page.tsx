@@ -14,8 +14,7 @@ import { SignatureCard } from "@/components/deal/SignatureCard";
 import type { SignaturePacketView, SignatureRecipientView } from "@/components/deal/SignatureCard";
 import { DealMilestoneTracker } from "@/components/deal/DealMilestoneTracker";
 import {
-  deriveWorkflowStage,
-  getStageMeta,
+  resolveCanonicalLifecycle,
   type WorkflowStateInput,
 } from "@/lib/workflow/milestones";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
@@ -403,8 +402,9 @@ export default async function DealPage(ctx: PageProps) {
       packetStatus: sigData.packet?.status ?? null,
       servicingStatus: (deal as any).servicing_status ?? null,
     };
-    const currentStage = deriveWorkflowStage(workflowStateInput);
-    const currentStageMeta = getStageMeta(currentStage);
+    const canonicalResult = resolveCanonicalLifecycle(workflowStateInput);
+    const currentStage = canonicalResult.stage;
+    const currentStageMeta = canonicalResult.meta;
 
     return (
       <div className="min-h-screen">
@@ -420,8 +420,31 @@ export default async function DealPage(ctx: PageProps) {
             effectiveSnapshot={effectiveSnapshotRecord}
           />
 
-          {effectiveThread?.status === "accepted" && (
-            <AcceptedPendingReviewBanner />
+          {effectiveThread?.status === "accepted" &&
+            !canonicalResult.customerHeroLabel && (
+              <AcceptedPendingReviewBanner />
+            )}
+
+          {canonicalResult.customerHeroLabel && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950">
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 text-blue-600 dark:text-blue-400 flex-shrink-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clipRule="evenodd" />
+                  </svg>
+                </span>
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">
+                    {canonicalResult.customerHeroLabel}
+                  </p>
+                  {canonicalResult.customerHeroDescription && (
+                    <p className="text-xs text-blue-800 dark:text-blue-200">
+                      {canonicalResult.customerHeroDescription}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
           )}
 
           {showNegotiationUi && negState.isSender && effectiveThread && (
@@ -724,7 +747,7 @@ export default async function DealPage(ctx: PageProps) {
     let fallbackDeal: any = null;
 
     const { data: fallbackDealRow } = await (svc.from("deals") as any)
-      .select("id, owner_user_id, status, created_at, archived_at")
+      .select("id, owner_user_id, status, triage_status, servicing_status, created_at, archived_at")
       .eq("id", dealId)
       .maybeSingle();
 
@@ -844,6 +867,20 @@ export default async function DealPage(ctx: PageProps) {
     ]);
     const fallbackIsAdmin = fallbackAdminResult.ok;
 
+    const fallbackWorkflowInput: WorkflowStateInput = {
+      propertyStatus: livePropertyStatus,
+      propertyReviewStatus: livePropertyReviewStatus,
+      escalationDepositStatus: liveEscalationDepositStatus,
+      escalationAvmStatus: liveEscalationAvmStatus,
+      closingReviewStatus: liveClosingReviewStatus,
+      avmEligibilityResult: null,
+      triageStatus: fallbackDeal?.triage_status ?? null,
+      threadStatus: thread?.status ?? null,
+      packetStatus: fallbackSigData.packet?.status ?? null,
+      servicingStatus: fallbackDeal?.servicing_status ?? null,
+    };
+    const canonicalResult = resolveCanonicalLifecycle(fallbackWorkflowInput);
+
     return (
       <div className="min-h-screen">
         <AppHeader />
@@ -858,8 +895,31 @@ export default async function DealPage(ctx: PageProps) {
             effectiveSnapshot={effectiveSnapshotRecord}
           />
 
-          {effectiveThread?.status === "accepted" && (
-            <AcceptedPendingReviewBanner />
+          {effectiveThread?.status === "accepted" &&
+            !canonicalResult.customerHeroLabel && (
+              <AcceptedPendingReviewBanner />
+            )}
+
+          {canonicalResult.customerHeroLabel && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950">
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 text-blue-600 dark:text-blue-400 flex-shrink-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clipRule="evenodd" />
+                  </svg>
+                </span>
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">
+                    {canonicalResult.customerHeroLabel}
+                  </p>
+                  {canonicalResult.customerHeroDescription && (
+                    <p className="text-xs text-blue-800 dark:text-blue-200">
+                      {canonicalResult.customerHeroDescription}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
           )}
 
           {showNegotiationUi && negState.isSender && effectiveThread && (
@@ -894,6 +954,13 @@ export default async function DealPage(ctx: PageProps) {
               isAdmin={fallbackIsAdmin}
               execAgreementUrl={fallbackSigData.execAgreementUrl}
               certificateUrl={fallbackSigData.certificateUrl}
+            />
+          )}
+
+          {canonicalResult.meta.customerLabel && (
+            <DealMilestoneTracker
+              currentStage={canonicalResult.stage}
+              stageNote={null}
             />
           )}
 

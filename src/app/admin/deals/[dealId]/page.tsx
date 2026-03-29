@@ -9,6 +9,10 @@ import { SignatureCard } from "@/components/deal/SignatureCard";
 import type { SignaturePacketView, SignatureRecipientView } from "@/components/deal/SignatureCard";
 import { getArtifactSignedUrls } from "@/lib/signature/artifacts";
 import {
+  resolveCanonicalLifecycle,
+  type WorkflowStateInput,
+} from "@/lib/workflow/milestones";
+import {
   DEFAULT_LTV_RATIO,
   DEVIATION_ESCALATION_THRESHOLD_PCT,
   DEVIATION_REVIEW_THRESHOLD_PCT,
@@ -494,7 +498,7 @@ export default async function AdminDealReviewPage({
   // ── Fetch thread + property ─────────────────────────────────────────────
   const { data: thread } = await (svc.from("deal_threads") as any)
     .select(
-      "id, buyer_user_id, owner_user_id, property_id, status, created_at, properties(id, address_line1, address_line2, city, state, postal_code, property_review_status, property_review_status_updated_at, property_review_note, property_review_expires_at, property_review_completed_at, has_secured_property_debt, secured_property_debt_amount, latest_verified_fmv, fmv_verified_at, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, max_accessible_cash_current, ltv_policy_ratio)",
+      "id, buyer_user_id, owner_user_id, property_id, status, created_at, properties(id, status, address_line1, address_line2, city, state, postal_code, property_review_status, property_review_status_updated_at, property_review_note, property_review_expires_at, property_review_completed_at, has_secured_property_debt, secured_property_debt_amount, latest_verified_fmv, fmv_verified_at, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, max_accessible_cash_current, ltv_policy_ratio, escalation_deposit_status, escalation_avm_status, closing_review_status)",
     )
     .eq("deal_id", dealId)
     .maybeSingle();
@@ -632,6 +636,26 @@ export default async function AdminDealReviewPage({
 
   const triageBadge = deal.triage_status ? (TRIAGE_BADGE[deal.triage_status] ?? null) : null;
 
+  const dealCanonicalInput: WorkflowStateInput = {
+    propertyStatus: (property?.status as string | null) ?? null,
+    propertyReviewStatus: propReviewStatus,
+    escalationDepositStatus: (property?.escalation_deposit_status as string | null) ?? null,
+    escalationAvmStatus: (property?.escalation_avm_status as string | null) ?? null,
+    closingReviewStatus: (property?.closing_review_status as string | null) ?? null,
+    avmEligibilityResult: avmEligibility.result,
+    triageStatus: deal.triage_status ?? null,
+    threadStatus: effectiveThreadStatus,
+    packetStatus: sigData.packet?.status ?? null,
+    servicingStatus: (deal.servicing_status as string | null) ?? null,
+  };
+  const dealCanonical = resolveCanonicalLifecycle(dealCanonicalInput);
+
+  const OWNING_SURFACE_LABEL: Record<string, string> = {
+    property_review: "Property review page",
+    deal_review: "Deal review page",
+    external_partner: "External partner",
+  };
+
   return (
     <main className="mx-auto max-w-4xl p-6 space-y-6">
 
@@ -709,6 +733,44 @@ export default async function AdminDealReviewPage({
               View property review →
             </Link>
           )}
+        </div>
+      </div>
+
+      {/* ── Overall process ── */}
+      <div className="rounded-lg border overflow-hidden">
+        <div className="px-4 py-2 text-sm font-semibold border-b bg-muted/40 flex items-center gap-2 flex-wrap">
+          <span>Overall process</span>
+          <span className="text-xs font-normal rounded-full px-2 py-0.5 bg-blue-100 text-blue-800">
+            Stage {dealCanonical.meta.stageNumber} — {dealCanonical.meta.adminLabel}
+          </span>
+        </div>
+        <div className="px-4 py-3 space-y-2 text-sm">
+          {dealCanonical.adminBlocker && (
+            <div className="flex gap-2">
+              <span className="text-muted-foreground min-w-[120px]">Blocker:</span>
+              <span className="text-orange-700 dark:text-orange-400 font-medium">{dealCanonical.adminBlocker}</span>
+            </div>
+          )}
+          <div className="flex gap-2">
+            <span className="text-muted-foreground min-w-[120px]">Next action:</span>
+            <span>{dealCanonical.adminNextAction ?? "No action required"}</span>
+          </div>
+          {dealCanonical.adminOwningSurface && (
+            <div className="flex gap-2">
+              <span className="text-muted-foreground min-w-[120px]">Owns this stage:</span>
+              <span className="text-xs rounded-full px-2 py-0.5 bg-muted font-medium">
+                {OWNING_SURFACE_LABEL[dealCanonical.adminOwningSurface] ?? dealCanonical.adminOwningSurface}
+              </span>
+            </div>
+          )}
+          <div className="flex gap-2">
+            <span className="text-muted-foreground min-w-[120px]">Owner sees:</span>
+            <span className="italic">
+              {dealCanonical.customerHeroLabel
+                ? `"${dealCanonical.customerHeroLabel}"`
+                : "No milestone — accepted/pending review banner"}
+            </span>
+          </div>
         </div>
       </div>
 

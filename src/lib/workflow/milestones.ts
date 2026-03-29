@@ -234,3 +234,173 @@ export const CUSTOMER_MILESTONES: CustomerMilestone[] = [
   { label: "Deal closed", stages: ["deal_closed"], stageNumber: 14 },
   { label: "Payments active", stages: ["servicing_active", "servicing_issue"], stageNumber: 15 },
 ];
+
+export interface CustomerMilestoneStatus {
+  label: string;
+  state: "completed" | "current" | "upcoming";
+}
+
+export type AdminOwningSurface = "property_review" | "deal_review" | "external_partner";
+
+interface StageAdminGuidance {
+  blocker: string | null;
+  nextAction: string | null;
+  owningSurface: AdminOwningSurface | null;
+}
+
+const STAGE_ADMIN_GUIDANCE: Record<WorkflowStage, StageAdminGuidance> = {
+  unknown: {
+    blocker: "Property not yet verified",
+    nextAction: "Verify property details on the property review page",
+    owningSurface: "property_review",
+  },
+  property_verification_complete: {
+    blocker: "Valuation AVM not yet run",
+    nextAction: "Run RentCast AVM from the valuation section on the property review page",
+    owningSurface: "property_review",
+  },
+  rentcast_avm_complete: {
+    blocker: null,
+    nextAction: "Review AVM result and evaluate deal eligibility on the deal review page",
+    owningSurface: "deal_review",
+  },
+  enhanced_review_required: {
+    blocker: "Enhanced review deposit not yet requested from owner",
+    nextAction: "Request escalation deposit via the stronger valuation pathway below",
+    owningSurface: "property_review",
+  },
+  enhanced_review_payment_pending: {
+    blocker: "Waiting for owner to complete deposit payment",
+    nextAction: "Confirm deposit receipt and advance to the AVM step",
+    owningSurface: "property_review",
+  },
+  enhanced_review_in_progress: {
+    blocker: "Waiting for enhanced valuation result",
+    nextAction: "Monitor enhanced AVM status and advance when complete",
+    owningSurface: "property_review",
+  },
+  enhanced_review_complete: {
+    blocker: null,
+    nextAction: "Review verified FMV and update deal triage eligibility on the deal review page",
+    owningSurface: "deal_review",
+  },
+  deal_eligible: {
+    blocker: null,
+    nextAction: "Initiate closing review on the property review page",
+    owningSurface: "property_review",
+  },
+  closing_review_pending: {
+    blocker: "Closing documentation review in progress",
+    nextAction: "Complete closing review — set ready or flag issue in the closing review section",
+    owningSurface: "property_review",
+  },
+  closing_issue_found: {
+    blocker: "Closing issue must be resolved before proceeding",
+    nextAction: "Resolve closing blocker, then mark closing review ready",
+    owningSurface: "property_review",
+  },
+  ready_for_closing: {
+    blocker: null,
+    nextAction: "Initiate the DocuSign signature packet on the deal review page",
+    owningSurface: "deal_review",
+  },
+  ready_for_signatures: {
+    blocker: null,
+    nextAction: "Use 'Prepare' in the signature section to send the DocuSign envelope",
+    owningSurface: "deal_review",
+  },
+  agreement_out_for_signatures: {
+    blocker: "Waiting for all parties to sign",
+    nextAction: "Monitor DocuSign — reminders are sent automatically",
+    owningSurface: "external_partner",
+  },
+  agreement_signed: {
+    blocker: null,
+    nextAction: "Close the deal in the 'Deal close & servicing' section",
+    owningSurface: "deal_review",
+  },
+  deal_closed: {
+    blocker: null,
+    nextAction: "Set servicing to active when payments commence",
+    owningSurface: "deal_review",
+  },
+  servicing_active: {
+    blocker: null,
+    nextAction: "Monitor servicing — no immediate action required",
+    owningSurface: "external_partner",
+  },
+  servicing_issue: {
+    blocker: "Active servicing issue requires resolution",
+    nextAction: "Investigate and resolve servicing issue, then reset to active",
+    owningSurface: "deal_review",
+  },
+};
+
+const CUSTOMER_HERO_DESCRIPTIONS: Partial<Record<WorkflowStage, string>> = {
+  enhanced_review_required:
+    "Our team has determined that an additional property review is needed before we can continue. We'll be in touch with next steps.",
+  enhanced_review_payment_pending:
+    "Our team has determined that an additional property review is needed before we can continue. We'll be in touch with next steps.",
+  enhanced_review_in_progress:
+    "A more detailed property valuation is underway. We'll notify you when it's complete.",
+  enhanced_review_complete:
+    "An enhanced property valuation has been completed. Your scenario is progressing.",
+  closing_review_pending:
+    "Our team is reviewing final closing documentation. We'll notify you of any next steps.",
+  closing_issue_found:
+    "Our team found an item that needs attention during the closing review. We'll reach out with details.",
+  ready_for_closing:
+    "Closing review is complete. Your agreement is being prepared for signatures.",
+  agreement_out_for_signatures:
+    "Your agreement has been sent for electronic signatures. All parties will receive signing instructions by email.",
+  agreement_signed:
+    "All parties have signed the agreement. Your deal is being finalized.",
+  deal_closed:
+    "Your agreement is complete and the deal has been closed.",
+  servicing_active:
+    "Your agreement is active and payments are in progress.",
+  servicing_issue:
+    "Our team has flagged an item that needs attention. We'll reach out shortly.",
+};
+
+export interface CanonicalLifecycleResult {
+  stage: WorkflowStage;
+  meta: StageMeta;
+  adminBlocker: string | null;
+  adminNextAction: string | null;
+  adminOwningSurface: AdminOwningSurface | null;
+  customerHeroLabel: string | null;
+  customerHeroDescription: string | null;
+  milestoneStatuses: CustomerMilestoneStatus[];
+}
+
+export function resolveCanonicalLifecycle(
+  state: WorkflowStateInput,
+): CanonicalLifecycleResult {
+  const stage = deriveWorkflowStage(state);
+  const meta = STAGE_META[stage];
+  const guidance = STAGE_ADMIN_GUIDANCE[stage];
+
+  const milestoneStatuses: CustomerMilestoneStatus[] = CUSTOMER_MILESTONES.map(
+    (m) => {
+      const inMilestone = m.stages.includes(stage);
+      const isPast = !inMilestone && m.stageNumber < meta.stageNumber;
+      if (inMilestone) return { label: m.label, state: "current" };
+      if (isPast) return { label: m.label, state: "completed" };
+      return { label: m.label, state: "upcoming" };
+    },
+  );
+
+  return {
+    stage,
+    meta,
+    adminBlocker: guidance.blocker,
+    adminNextAction: guidance.nextAction,
+    adminOwningSurface: guidance.owningSurface,
+    customerHeroLabel: meta.customerLabel,
+    customerHeroDescription: meta.customerLabel
+      ? (CUSTOMER_HERO_DESCRIPTIONS[stage] ?? null)
+      : null,
+    milestoneStatuses,
+  };
+}

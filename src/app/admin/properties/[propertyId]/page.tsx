@@ -18,6 +18,10 @@ import { AdminVendorReviewPanel } from "@/components/admin/AdminVendorReviewPane
 import { AdminEscalationSimPanel } from "@/components/admin/AdminEscalationSimPanel";
 import { AdminPropertyClosingPanel } from "@/components/admin/AdminPropertyClosingPanel";
 import { AppHeader } from "@/components/layout/AppHeader";
+import {
+  resolveCanonicalLifecycle,
+  type WorkflowStateInput,
+} from "@/lib/workflow/milestones";
 import { computeLtvPolicy } from "@/lib/ltvPolicy";
 import type { NormalizedPropertyProfile } from "@/lib/property-review/providers/rentcast";
 import {
@@ -206,11 +210,12 @@ export default async function AdminPropertyAuditPage({
     triage_reason_tags: string[] | null;
     fmv_plausibility_flag: string | null;
     accepted_at: string | null;
+    servicing_status: string | null;
   } | null = null;
 
   if (linkedThreadRes.data?.deal_id) {
     const { data: dealRow } = await (supabase.from("deals") as any)
-      .select("id, triage_status, triage_reason_tags, fmv_plausibility_flag, accepted_at")
+      .select("id, triage_status, triage_reason_tags, fmv_plausibility_flag, accepted_at, servicing_status")
       .eq("id", linkedThreadRes.data.deal_id)
       .maybeSingle();
     linkedDeal = dealRow ?? null;
@@ -352,6 +357,26 @@ export default async function AdminPropertyAuditPage({
     ineligible: { label: "Ineligible", cls: "bg-red-100 text-red-800" },
   };
 
+  const propCanonicalInput: WorkflowStateInput = {
+    propertyStatus: p.status ?? null,
+    propertyReviewStatus: (p.property_review_status as string | null) ?? null,
+    escalationDepositStatus: (p.escalation_deposit_status as string | null) ?? null,
+    escalationAvmStatus: (p.escalation_avm_status as string | null) ?? null,
+    closingReviewStatus: (p.closing_review_status as string | null) ?? null,
+    avmEligibilityResult: linkedDealAvmEligibility?.result ?? null,
+    triageStatus: linkedDeal?.triage_status ?? null,
+    threadStatus: linkedThreadRes.data ? "accepted" : null,
+    packetStatus: null,
+    servicingStatus: linkedDeal?.servicing_status ?? null,
+  };
+  const propCanonical = resolveCanonicalLifecycle(propCanonicalInput);
+
+  const OWNING_SURFACE_LABEL: Record<string, string> = {
+    property_review: "Property review page",
+    deal_review: "Deal review page",
+    external_partner: "External partner",
+  };
+
   return (
     <main className="mx-auto max-w-4xl p-6 space-y-6">
 
@@ -436,6 +461,55 @@ export default async function AdminPropertyAuditPage({
             {p.review_notes}
           </div>
         )}
+      </div>
+
+      {/* ── Transaction status ── */}
+      <div className="rounded-lg border overflow-hidden">
+        <div className="px-4 py-2 text-sm font-semibold border-b bg-muted/40 flex items-center gap-2 flex-wrap">
+          <span>Transaction status</span>
+          <span className="text-xs font-normal rounded-full px-2 py-0.5 bg-blue-100 text-blue-800">
+            Stage {propCanonical.meta.stageNumber} — {propCanonical.meta.adminLabel}
+          </span>
+        </div>
+        <div className="px-4 py-3 space-y-2 text-sm">
+          {propCanonical.adminBlocker && (
+            <div className="flex gap-2">
+              <span className="text-muted-foreground min-w-[120px]">Blocker:</span>
+              <span className="text-orange-700 dark:text-orange-400 font-medium">{propCanonical.adminBlocker}</span>
+            </div>
+          )}
+          <div className="flex gap-2">
+            <span className="text-muted-foreground min-w-[120px]">Next action:</span>
+            <span>{propCanonical.adminNextAction ?? "No action required"}</span>
+          </div>
+          {propCanonical.adminOwningSurface && (
+            <div className="flex gap-2">
+              <span className="text-muted-foreground min-w-[120px]">Owns this stage:</span>
+              <span className="text-xs rounded-full px-2 py-0.5 bg-muted font-medium">
+                {OWNING_SURFACE_LABEL[propCanonical.adminOwningSurface] ?? propCanonical.adminOwningSurface}
+              </span>
+            </div>
+          )}
+          <div className="flex gap-2">
+            <span className="text-muted-foreground min-w-[120px]">Owner sees:</span>
+            <span className="italic">
+              {propCanonical.customerHeroLabel
+                ? `"${propCanonical.customerHeroLabel}"`
+                : "No milestone — accepted/pending review banner"}
+            </span>
+          </div>
+          {linkedDeal && (
+            <div className="flex gap-2">
+              <span className="text-muted-foreground min-w-[120px]">Linked deal:</span>
+              <a
+                href={`/admin/deals/${linkedDeal.id}`}
+                className="underline text-muted-foreground hover:text-foreground text-xs"
+              >
+                View deal review →
+              </a>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── Homeowner intake ── */}
