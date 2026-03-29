@@ -119,8 +119,8 @@ const STAGE_META: Record<WorkflowStage, StageMeta> = {
     stage: "deal_eligible",
     stageNumber: 10,
     adminLabel: "Deal eligible",
-    customerLabel: null,
-    notificationLabel: null,
+    customerLabel: "Under review",
+    notificationLabel: "Under review",
     propertyOwned: false,
   },
   deal_terms_ineligible: {
@@ -135,8 +135,8 @@ const STAGE_META: Record<WorkflowStage, StageMeta> = {
     stage: "ready_for_signatures",
     stageNumber: 11,
     adminLabel: "Ready for signatures",
-    customerLabel: null,
-    notificationLabel: null,
+    customerLabel: "Agreement being prepared",
+    notificationLabel: "Agreement being prepared",
     propertyOwned: false,
   },
   agreement_out_for_signatures: {
@@ -247,6 +247,8 @@ export const CUSTOMER_MILESTONES: CustomerMilestone[] = [
   { label: "Property value verified", stages: ["enhanced_review_complete"], stageNumber: 6 },
   { label: "Closing review in progress", stages: ["closing_review_pending", "closing_issue_found"], stageNumber: 7 },
   { label: "Ready for closing", stages: ["ready_for_closing"], stageNumber: 9 },
+  { label: "Under review", stages: ["deal_eligible"], stageNumber: 10 },
+  { label: "Agreement being prepared", stages: ["ready_for_signatures"], stageNumber: 11 },
   { label: "Agreement out for signatures", stages: ["agreement_out_for_signatures"], stageNumber: 12 },
   { label: "Agreement signed", stages: ["agreement_signed"], stageNumber: 13 },
   { label: "Deal closed", stages: ["deal_closed"], stageNumber: 14 },
@@ -360,6 +362,10 @@ const STAGE_ADMIN_GUIDANCE: Record<WorkflowStage, StageAdminGuidance> = {
 };
 
 const CUSTOMER_HERO_DESCRIPTIONS: Partial<Record<WorkflowStage, string>> = {
+  deal_eligible:
+    "Our team is reviewing your deal. We'll be in touch when the next steps are ready.",
+  ready_for_signatures:
+    "Your deal has been approved. Our team is preparing the final agreement for signing.",
   enhanced_review_required:
     "Our team has determined that an additional property review is needed before we can continue. We'll be in touch with next steps.",
   enhanced_review_payment_pending:

@@ -465,8 +465,8 @@ export function PropertyValuationSections(props: ValuationSectionsProps) {
         />
       )}
 
-      {/* 3. Manual appraisal — show when deal is ineligible or appraisal has been initiated */}
-      {(isDealIneligible || manualStarted) && (
+      {/* 3. Manual appraisal — show when deal is ineligible, ATTOM is complete, or appraisal has been initiated */}
+      {(isDealIneligible || attomComplete || manualStarted) && (
         <ManualAppraisalSection
           status={manualAppraisalStatus}
           fmv={manualAppraisalFmv}

@@ -168,6 +168,8 @@ function PropertyWorkflowWidget({ state }: { state: PropertyWorkflowState }) {
     propertyReviewStatus,
     rentcastFmv,
     rentcastProvider,
+    escalationAvmStatus,
+    manualAppraisalStatus,
   } = state;
 
   function fmtUsd(n: number | null | undefined): string | null {
@@ -175,9 +177,15 @@ function PropertyWorkflowWidget({ state }: { state: PropertyWorkflowState }) {
     return `$${Math.round(n).toLocaleString("en-US")}`;
   }
 
+  // Once ATTOM or manual appraisal has reached a resolved state, the rentcast-level
+  // "Review in progress" card is superseded. PropertyValuationSections handles those states.
+  const escalationResolved =
+    escalationAvmStatus === "completed" || manualAppraisalStatus === "complete";
+
   if (
-    propertyReviewStatus === "amv_complete" ||
-    propertyReviewStatus === "property_review_complete"
+    !escalationResolved &&
+    (propertyReviewStatus === "amv_complete" ||
+      propertyReviewStatus === "property_review_complete")
   ) {
     return (
       <div className="rounded-lg border border-green-200 bg-green-50 p-4 space-y-1.5">
@@ -197,7 +205,7 @@ function PropertyWorkflowWidget({ state }: { state: PropertyWorkflowState }) {
     );
   }
 
-  if (propertyReviewStatus) {
+  if (!escalationResolved && propertyReviewStatus) {
     return (
       <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 space-y-1.5">
         <div className="flex items-center gap-2 flex-wrap">

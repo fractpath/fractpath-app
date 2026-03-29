@@ -532,7 +532,8 @@ export default async function DealPage(ctx: PageProps) {
 
           {!canonicalResult.isExceptionState &&
             effectiveThread?.status === "accepted" &&
-            !canonicalResult.customerHeroLabel && (
+            !canonicalResult.customerHeroLabel &&
+            canonicalResult.meta.stageNumber <= 2 && (
               <AcceptedPendingReviewBanner />
             )}
 
@@ -1107,7 +1108,8 @@ export default async function DealPage(ctx: PageProps) {
 
           {!canonicalResult.isExceptionState &&
             effectiveThread?.status === "accepted" &&
-            !canonicalResult.customerHeroLabel && (
+            !canonicalResult.customerHeroLabel &&
+            canonicalResult.meta.stageNumber <= 2 && (
               <AcceptedPendingReviewBanner />
             )}
 
