@@ -70,6 +70,36 @@ export function extractAvmDealTerms(snapshot: unknown): {
   };
 }
 
+// ─── Controlling FMV basis resolution ────────────────────────────────────────
+
+/**
+ * Determines the controlling FMV basis for eligibility computation.
+ * Priority: manual appraisal (if complete and present) > latest_verified_fmv > null.
+ * Manual appraisal supersedes ATTOM/enhanced-review as the strongest available basis.
+ * Used by the deal page to recompute live eligibility after the basis changes, so that
+ * stale triage_status does not persist as the sole gate for ineligible-deal messaging.
+ */
+export function resolveControllingFmv(args: {
+  latestVerifiedFmv: number | null;
+  fmvVerificationSource: string | null;
+  manualAppraisalFmv: number | null;
+  manualAppraisalStatus: string | null;
+}): { fmv: number | null; source: string | null } {
+  const {
+    latestVerifiedFmv,
+    fmvVerificationSource,
+    manualAppraisalFmv,
+    manualAppraisalStatus,
+  } = args;
+  if (manualAppraisalStatus === "complete" && manualAppraisalFmv != null) {
+    return { fmv: manualAppraisalFmv, source: "manual_appraisal_sim" };
+  }
+  if (latestVerifiedFmv != null) {
+    return { fmv: latestVerifiedFmv, source: fmvVerificationSource };
+  }
+  return { fmv: null, source: null };
+}
+
 // ─── Core computation ────────────────────────────────────────────────────────
 
 export function computeAvmEligibility(args: {

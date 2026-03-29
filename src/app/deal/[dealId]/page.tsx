@@ -23,6 +23,13 @@ import {
   IneligibleDealOwnerBlock,
   IneligibleDealBuyerBlock,
 } from "@/components/deal/IneligibleDealBlock";
+import {
+  resolveControllingFmv,
+  computeAvmEligibility,
+  extractAvmDealTerms,
+  DEFAULT_LTV_RATIO,
+  type AvmEligibilityResult,
+} from "@/lib/avmEligibility";
 
 type PageProps = {
   params: Promise<{ dealId: string }>;
@@ -320,10 +327,15 @@ export default async function DealPage(ctx: PageProps) {
     let liveEscalationAvmStatus: string | null = null;
     let livePropertyReviewStatus: string | null = null;
     let liveManualAppraisalStatus: string | null = null;
+    // Controlling-FMV basis fields (needed for live eligibility recomputation)
+    let liveManualAppraisalFmv: number | null = null;
+    let liveLatestVerifiedFmv: number | null = null;
+    let liveFmvVerificationSource: string | null = null;
+    let liveSecuredDebt: number | null = null;
 
     if (resolvedPropertyId) {
       const { data: liveProp } = await (svc.from("properties") as any)
-        .select("status, ownership_status, closing_review_status, escalation_deposit_status, escalation_avm_status, property_review_status, manual_appraisal_status")
+        .select("status, ownership_status, closing_review_status, escalation_deposit_status, escalation_avm_status, property_review_status, manual_appraisal_status, manual_appraisal_fmv, latest_verified_fmv, fmv_verification_source, secured_property_debt_amount")
         .eq("id", resolvedPropertyId)
         .maybeSingle();
 
@@ -335,6 +347,10 @@ export default async function DealPage(ctx: PageProps) {
         liveEscalationAvmStatus = liveProp.escalation_avm_status ?? null;
         livePropertyReviewStatus = liveProp.property_review_status ?? null;
         liveManualAppraisalStatus = liveProp.manual_appraisal_status ?? null;
+        liveManualAppraisalFmv = liveProp.manual_appraisal_fmv ?? null;
+        liveLatestVerifiedFmv = liveProp.latest_verified_fmv ?? null;
+        liveFmvVerificationSource = liveProp.fmv_verification_source ?? null;
+        liveSecuredDebt = liveProp.secured_property_debt_amount ?? null;
       }
     }
 
@@ -398,6 +414,53 @@ export default async function DealPage(ctx: PageProps) {
     const inputs = safeRecord((effectiveSnapshotRecord as any)?.inputs);
     const results = safeRecord((effectiveOutputs as any)?.results);
 
+    // ── Live eligibility recomputation from controlling FMV basis ─────────────
+    // Prevents stale triage_status from persisting as the sole gate for the
+    // ineligible owner/buyer deal blocks after the controlling FMV basis changes
+    // (e.g. manual appraisal completes and its FMV supersedes the ATTOM result).
+    const rawTriageIneligible = (deal as any).triage_status === "ineligible";
+    let liveEligibilityResult: AvmEligibilityResult | null = null;
+    let controllingFmvValue: number | null = null;
+    let controllingFmvSource: string | null = null;
+    if (rawTriageIneligible) {
+      const { fmv: cFmv, source: cSrc } = resolveControllingFmv({
+        latestVerifiedFmv: liveLatestVerifiedFmv,
+        fmvVerificationSource: liveFmvVerificationSource,
+        manualAppraisalFmv: liveManualAppraisalFmv,
+        manualAppraisalStatus: liveManualAppraisalStatus,
+      });
+      controllingFmvValue = cFmv;
+      controllingFmvSource = cSrc;
+      if (cFmv != null) {
+        const { upfront_payment, property_value } = extractAvmDealTerms(effectiveSnapshotRecord);
+        const card = computeAvmEligibility({
+          verifiedFmv: cFmv,
+          fmvProvider: cSrc,
+          fmvFetchedAt: null,
+          fmvExpiresAt: null,
+          proposedFmv: property_value,
+          securedDebt: liveSecuredDebt ?? 0,
+          ltvRatio: DEFAULT_LTV_RATIO,
+          requestedCash: upfront_payment,
+        });
+        liveEligibilityResult = card.result;
+      }
+    }
+    // Show ineligible block only when the deal is historically ineligible AND the
+    // fresh check under the current controlling basis also shows not-eligible.
+    // If controlling FMV is unavailable (cFmv=null), fall back to raw triage alone.
+    const showIneligibleBlock =
+      rawTriageIneligible &&
+      (liveEligibilityResult === null || liveEligibilityResult !== "eligible");
+    // Contextual description prefilled where we can; fallback to canonicalResult
+    // exceptionDescription is applied below after canonicalResult is declared.
+    let ineligibleDescription: string | null =
+      showIneligibleBlock &&
+      controllingFmvSource === "manual_appraisal_sim" &&
+      controllingFmvValue != null
+        ? `Based on the licensed appraisal value ($${Math.round(controllingFmvValue).toLocaleString("en-US")}), the current deal terms still exceed the eligible threshold. You can propose revised terms or contact our team.`
+        : null;
+
     const { data: events } = await (svc.from("deal_events") as any)
       .select("id, deal_id, event_type, payload, created_by, created_at")
       .eq("deal_id", dealId)
@@ -426,6 +489,10 @@ export default async function DealPage(ctx: PageProps) {
     const canonicalResult = resolveCanonicalLifecycle(workflowStateInput);
     const currentStage = canonicalResult.stage;
     const currentStageMeta = canonicalResult.meta;
+    // Fallback description: use canonical exception copy when not manual-appraisal basis.
+    if (showIneligibleBlock && ineligibleDescription === null) {
+      ineligibleDescription = canonicalResult.exceptionDescription ?? null;
+    }
 
     return (
       <div className="min-h-screen">
@@ -491,16 +558,19 @@ export default async function DealPage(ctx: PageProps) {
             </div>
           )}
 
-          {/* Ineligible deal action block — primary path */}
-          {(deal as any).triage_status === "ineligible" && isOwner && (
+          {/* Ineligible deal action block — primary path.
+              Gated on showIneligibleBlock (live FMV recomputation), NOT raw triage_status.
+              Disappears automatically when the current controlling FMV basis (e.g. manual
+              appraisal) makes the deal eligible, without requiring a DB re-triage write. */}
+          {showIneligibleBlock && isOwner && (
             <IneligibleDealOwnerBlock
               dealId={dealId}
               propertyId={resolvedPropertyId}
               manualAppraisalStatus={liveManualAppraisalStatus}
-              exceptionDescription={canonicalResult.exceptionDescription ?? null}
+              exceptionDescription={ineligibleDescription}
             />
           )}
-          {(deal as any).triage_status === "ineligible" && !isOwner && (
+          {showIneligibleBlock && !isOwner && (
             <IneligibleDealBuyerBlock
               manualAppraisalStatus={liveManualAppraisalStatus}
             />
@@ -844,10 +914,15 @@ export default async function DealPage(ctx: PageProps) {
     let liveEscalationAvmStatus: string | null = null;
     let livePropertyReviewStatus: string | null = null;
     let liveManualAppraisalStatus: string | null = null;
+    // Controlling-FMV basis fields (needed for live eligibility recomputation)
+    let liveManualAppraisalFmv: number | null = null;
+    let liveLatestVerifiedFmv: number | null = null;
+    let liveFmvVerificationSource: string | null = null;
+    let liveSecuredDebt: number | null = null;
 
     if (resolvedPropertyId) {
       const { data: liveProp } = await (svc.from("properties") as any)
-        .select("status, ownership_status, closing_review_status, escalation_deposit_status, escalation_avm_status, property_review_status, manual_appraisal_status")
+        .select("status, ownership_status, closing_review_status, escalation_deposit_status, escalation_avm_status, property_review_status, manual_appraisal_status, manual_appraisal_fmv, latest_verified_fmv, fmv_verification_source, secured_property_debt_amount")
         .eq("id", resolvedPropertyId)
         .maybeSingle();
 
@@ -859,6 +934,10 @@ export default async function DealPage(ctx: PageProps) {
         liveEscalationAvmStatus = liveProp.escalation_avm_status ?? null;
         livePropertyReviewStatus = liveProp.property_review_status ?? null;
         liveManualAppraisalStatus = liveProp.manual_appraisal_status ?? null;
+        liveManualAppraisalFmv = liveProp.manual_appraisal_fmv ?? null;
+        liveLatestVerifiedFmv = liveProp.latest_verified_fmv ?? null;
+        liveFmvVerificationSource = liveProp.fmv_verification_source ?? null;
+        liveSecuredDebt = liveProp.secured_property_debt_amount ?? null;
       }
     }
 
@@ -911,6 +990,47 @@ export default async function DealPage(ctx: PageProps) {
     const inputs = safeRecord((effectiveSnapshotRecord as any)?.inputs);
     const results = safeRecord((effectiveOutputs as any)?.results);
 
+    // ── Live eligibility recomputation from controlling FMV basis (fallback path) ─
+    const fallbackRawTriageIneligible = fallbackDeal?.triage_status === "ineligible";
+    let fallbackLiveEligibilityResult: AvmEligibilityResult | null = null;
+    let fallbackControllingFmvValue: number | null = null;
+    let fallbackControllingFmvSource: string | null = null;
+    if (fallbackRawTriageIneligible) {
+      const { fmv: cFmv, source: cSrc } = resolveControllingFmv({
+        latestVerifiedFmv: liveLatestVerifiedFmv,
+        fmvVerificationSource: liveFmvVerificationSource,
+        manualAppraisalFmv: liveManualAppraisalFmv,
+        manualAppraisalStatus: liveManualAppraisalStatus,
+      });
+      fallbackControllingFmvValue = cFmv;
+      fallbackControllingFmvSource = cSrc;
+      if (cFmv != null) {
+        const { upfront_payment, property_value } = extractAvmDealTerms(effectiveSnapshotRecord);
+        const card = computeAvmEligibility({
+          verifiedFmv: cFmv,
+          fmvProvider: cSrc,
+          fmvFetchedAt: null,
+          fmvExpiresAt: null,
+          proposedFmv: property_value,
+          securedDebt: liveSecuredDebt ?? 0,
+          ltvRatio: DEFAULT_LTV_RATIO,
+          requestedCash: upfront_payment,
+        });
+        fallbackLiveEligibilityResult = card.result;
+      }
+    }
+    const fallbackShowIneligibleBlock =
+      fallbackRawTriageIneligible &&
+      (fallbackLiveEligibilityResult === null || fallbackLiveEligibilityResult !== "eligible");
+    // Contextual description prefilled where we can; fallback to canonicalResult
+    // exceptionDescription is applied below after canonicalResult is declared.
+    let fallbackIneligibleDescription: string | null =
+      fallbackShowIneligibleBlock &&
+      fallbackControllingFmvSource === "manual_appraisal_sim" &&
+      fallbackControllingFmvValue != null
+        ? `Based on the licensed appraisal value ($${Math.round(fallbackControllingFmvValue).toLocaleString("en-US")}), the current deal terms still exceed the eligible threshold. You can propose revised terms or contact our team.`
+        : null;
+
     const { data: events } = await (svc.from("deal_events") as any)
       .select("id, deal_id, event_type, payload, created_by, created_at")
       .eq("deal_id", dealId)
@@ -944,6 +1064,10 @@ export default async function DealPage(ctx: PageProps) {
       manualAppraisalStatus: liveManualAppraisalStatus,
     };
     const canonicalResult = resolveCanonicalLifecycle(fallbackWorkflowInput);
+    // Fallback description: use canonical exception copy when not manual-appraisal basis.
+    if (fallbackShowIneligibleBlock && fallbackIneligibleDescription === null) {
+      fallbackIneligibleDescription = canonicalResult.exceptionDescription ?? null;
+    }
 
     return (
       <div className="min-h-screen">
@@ -1009,16 +1133,17 @@ export default async function DealPage(ctx: PageProps) {
             </div>
           )}
 
-          {/* Ineligible deal action block — fallback path */}
-          {fallbackDeal?.triage_status === "ineligible" && fallbackIsOwner && (
+          {/* Ineligible deal action block — fallback path.
+              Gated on fallbackShowIneligibleBlock (live FMV recomputation), NOT raw triage_status. */}
+          {fallbackShowIneligibleBlock && fallbackIsOwner && (
             <IneligibleDealOwnerBlock
               dealId={dealId}
               propertyId={resolvedPropertyId}
               manualAppraisalStatus={liveManualAppraisalStatus}
-              exceptionDescription={canonicalResult.exceptionDescription ?? null}
+              exceptionDescription={fallbackIneligibleDescription}
             />
           )}
-          {fallbackDeal?.triage_status === "ineligible" && !fallbackIsOwner && (
+          {fallbackShowIneligibleBlock && !fallbackIsOwner && (
             <IneligibleDealBuyerBlock
               manualAppraisalStatus={liveManualAppraisalStatus}
             />
