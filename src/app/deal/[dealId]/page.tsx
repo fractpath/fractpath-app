@@ -19,6 +19,10 @@ import {
 } from "@/lib/workflow/milestones";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { getArtifactSignedUrls } from "@/lib/signature/artifacts";
+import {
+  IneligibleDealOwnerBlock,
+  IneligibleDealBuyerBlock,
+} from "@/components/deal/IneligibleDealBlock";
 
 type PageProps = {
   params: Promise<{ dealId: string }>;
@@ -485,6 +489,21 @@ export default async function DealPage(ctx: PageProps) {
                 </div>
               </div>
             </div>
+          )}
+
+          {/* Ineligible deal action block — primary path */}
+          {(deal as any).triage_status === "ineligible" && isOwner && (
+            <IneligibleDealOwnerBlock
+              dealId={dealId}
+              propertyId={resolvedPropertyId}
+              manualAppraisalStatus={liveManualAppraisalStatus}
+              exceptionDescription={canonicalResult.exceptionDescription ?? null}
+            />
+          )}
+          {(deal as any).triage_status === "ineligible" && !isOwner && (
+            <IneligibleDealBuyerBlock
+              manualAppraisalStatus={liveManualAppraisalStatus}
+            />
           )}
 
           {showNegotiationUi && negState.isSender && effectiveThread && (
@@ -988,6 +1007,21 @@ export default async function DealPage(ctx: PageProps) {
                 </div>
               </div>
             </div>
+          )}
+
+          {/* Ineligible deal action block — fallback path */}
+          {fallbackDeal?.triage_status === "ineligible" && fallbackIsOwner && (
+            <IneligibleDealOwnerBlock
+              dealId={dealId}
+              propertyId={resolvedPropertyId}
+              manualAppraisalStatus={liveManualAppraisalStatus}
+              exceptionDescription={canonicalResult.exceptionDescription ?? null}
+            />
+          )}
+          {fallbackDeal?.triage_status === "ineligible" && !fallbackIsOwner && (
+            <IneligibleDealBuyerBlock
+              manualAppraisalStatus={liveManualAppraisalStatus}
+            />
           )}
 
           {showNegotiationUi && negState.isSender && effectiveThread && (

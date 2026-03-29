@@ -199,7 +199,13 @@ export function deriveWorkflowStage(state: WorkflowStateInput): WorkflowStage {
   if (state.threadStatus === "closed") return "deal_closed";
   if (state.packetStatus === "completed") return "agreement_signed";
   // Ineligible overrides signing/closing deal-stage decisions; terminal states above take precedence.
-  if (state.triageStatus === "ineligible") return "deal_terms_ineligible";
+  // Exception: when manual appraisal is complete, the stale ineligible status is superseded —
+  // the controlling FMV basis has changed and the deal is awaiting admin re-triage. Surface as
+  // enhanced_review_complete so the UI clears the "ineligible" copy and shows re-evaluation state.
+  if (state.triageStatus === "ineligible") {
+    if (state.manualAppraisalStatus === "complete") return "enhanced_review_complete";
+    return "deal_terms_ineligible";
+  }
   if (["sent", "delivered", "partially_signed"].includes(state.packetStatus ?? "")) {
     return "agreement_out_for_signatures";
   }

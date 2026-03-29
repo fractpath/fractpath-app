@@ -6,6 +6,7 @@ import { PropertyDetailClient } from "@/components/properties/PropertyDetailClie
 import { toHomeownerProperty } from "@/lib/property/projections";
 import type { HomeownerReviewRequest } from "@/components/properties/ReviewRequestPanel";
 import type { PropertyWorkflowState } from "@/components/properties/PropertyDetailClient";
+import type { PropertyAuditEntry } from "@/components/properties/PropertyActivityTimeline";
 
 export const runtime = "nodejs";
 
@@ -122,6 +123,35 @@ export default async function PropertyDetailPage({ params }: PageProps) {
     // non-fatal — proceed without linked deal
   }
 
+  // Fetch property activity audit entries + ownerAttemptedAttom flag (non-fatal)
+  let activityEntries: PropertyAuditEntry[] = [];
+  let ownerAttemptedAttom = false;
+  try {
+    const { data: auditRows } = await (svc.from("property_status_audit") as any)
+      .select("id, notes, actor_type, from_status, to_status, created_at")
+      .eq("property_id", propertyId)
+      .order("created_at", { ascending: false })
+      .limit(50);
+
+    if (auditRows) {
+      activityEntries = (auditRows as any[]).map((r) => ({
+        id: r.id,
+        notes: r.notes ?? null,
+        actor_type: r.actor_type ?? null,
+        from_status: r.from_status ?? null,
+        to_status: r.to_status ?? null,
+        created_at: r.created_at,
+      }));
+      ownerAttemptedAttom = activityEntries.some(
+        (e) =>
+          typeof e.notes === "string" &&
+          /ATTOM enhanced valuation requested by owner/i.test(e.notes),
+      );
+    }
+  } catch {
+    // non-fatal — proceed without activity
+  }
+
   const workflowState: PropertyWorkflowState = {
     propertyStatus: row.status ?? null,
     propertyReviewStatus: row.property_review_status ?? null,
@@ -134,6 +164,7 @@ export default async function PropertyDetailPage({ params }: PageProps) {
     linkedDealTriageStatus: linkedDeal?.deal_triage_status ?? null,
     manualAppraisalStatus: row.manual_appraisal_status ?? null,
     manualAppraisalFmv: row.manual_appraisal_fmv ?? null,
+    ownerAttemptedAttom,
   };
 
   // Fetch open/submitted review request for the linked deal + this property
@@ -171,6 +202,7 @@ export default async function PropertyDetailPage({ params }: PageProps) {
           linkedDeal={linkedDeal}
           reviewRequest={reviewRequest}
           workflowState={workflowState}
+          activityEntries={activityEntries}
         />
       </main>
     </div>
