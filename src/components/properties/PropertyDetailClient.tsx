@@ -8,7 +8,10 @@ import {
   ReviewRequestPanel,
   type HomeownerReviewRequest,
 } from "@/components/properties/ReviewRequestPanel";
-import { PropertyValuationSections } from "@/components/properties/PropertyValuationSections";
+import {
+  PropertyValuationSections,
+  type LiveIneligiblePhase,
+} from "@/components/properties/PropertyValuationSections";
 import {
   PropertyActivityTimeline,
   type PropertyAuditEntry,
@@ -33,8 +36,13 @@ export type PropertyWorkflowState = {
   fmvVerificationSource: string | null;
   rentcastFmv: number | null;
   rentcastProvider: string | null;
-  /** Triage status of the linked deal — used to detect ineligible deal path. */
-  linkedDealTriageStatus: string | null;
+  /**
+   * ATTOM-first ineligible deal phase for the linked deal.
+   * - 'attom_required'    — ineligible under RentCast; ATTOM not yet complete; renegotiation blocked.
+   * - 'void_renegotiable' — ATTOM complete; deal still ineligible; renegotiation + appraisal available.
+   * - null               — no live ineligible deal or deal is eligible.
+   */
+  liveIneligiblePhase: LiveIneligiblePhase;
   /** Manual appraisal challenge status (exception branch, not happy-path). */
   manualAppraisalStatus: string | null;
   /** FMV result from completed manual appraisal (null until complete). */
@@ -285,7 +293,8 @@ export function PropertyDetailClient({
           workflowState.escalationDepositStatus ||
           workflowState.escalationAvmStatus ||
           workflowState.ownerAttemptedAttom ||
-          workflowState.manualAppraisalStatus) && (
+          workflowState.manualAppraisalStatus ||
+          workflowState.liveIneligiblePhase !== null) && (
           <PropertyValuationSections
             propertyId={property.id}
             rentcastFmv={workflowState.rentcastFmv}
@@ -297,7 +306,7 @@ export function PropertyDetailClient({
             manualAppraisalFmv={workflowState.manualAppraisalFmv}
             latestVerifiedFmv={workflowState.latestVerifiedFmv}
             fmvVerificationSource={workflowState.fmvVerificationSource}
-            isDealIneligible={workflowState.linkedDealTriageStatus === "ineligible"}
+            liveIneligiblePhase={workflowState.liveIneligiblePhase}
             linkedDealId={linkedDeal?.deal_id ?? null}
           />
         )}

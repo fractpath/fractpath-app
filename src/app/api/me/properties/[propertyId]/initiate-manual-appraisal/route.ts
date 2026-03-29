@@ -22,21 +22,13 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
 
   // Verify user owns this property
   const { data: property } = await (svc.from("properties") as any)
-    .select("id, owner_user_id, escalation_avm_status, manual_appraisal_status")
+    .select("id, owner_user_id, manual_appraisal_status")
     .eq("id", propertyId)
     .maybeSingle();
 
   if (!property) return jsonError("Property not found", 404);
   if (property.owner_user_id !== user.id) {
     return jsonError("You do not own this property", 403);
-  }
-
-  // Only allow initiation when ATTOM AVM is complete
-  if (property.escalation_avm_status !== "completed") {
-    return jsonError(
-      "Manual appraisal can only be initiated after the enhanced valuation (ATTOM) is complete",
-      422,
-    );
   }
 
   // Idempotency — already initiated
@@ -49,7 +41,11 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
     });
   }
 
-  // Set manual_appraisal_status to 'available' (signals owner intent to admin)
+  // Set manual_appraisal_status to 'available' (signals owner intent to admin).
+  // Proactive ordering is allowed at any time, even before ATTOM completes.
+  // For a live accepted deal that failed RentCast, ATTOM must still complete before
+  // the manual appraisal can count as a deal escalation — but the owner may proactively
+  // commission it from the property page at any point.
   const { error: updateErr } = await (svc.from("properties") as any)
     .update({ manual_appraisal_status: "available" })
     .eq("id", propertyId);

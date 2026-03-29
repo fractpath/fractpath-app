@@ -9,6 +9,7 @@ export type WorkflowStage =
   | "closing_issue_found"
   | "ready_for_closing"
   | "deal_eligible"
+  | "attom_required"
   | "deal_terms_ineligible"
   | "renegotiation_requested"
   | "ready_for_signatures"
@@ -41,7 +42,7 @@ export interface WorkflowStateInput {
   /**
    * Current DB value of deals.renegotiation_status.
    * When 'requested', the canonical stage surfaces as renegotiation_requested
-   * (a sub-state of the ineligible branch).
+   * (a sub-state of the ineligible branch, only reachable after ATTOM completes).
    */
   renegotiationStatus?: string | null;
 }
@@ -136,10 +137,29 @@ const STAGE_META: Record<WorkflowStage, StageMeta> = {
     notificationLabel: "Under review",
     propertyOwned: false,
   },
+  /**
+   * ATTOM-first policy: deal is ineligible under the RentCast basis, but ATTOM has not
+   * yet completed. Renegotiation and manual appraisal challenge are NOT available yet —
+   * ATTOM must complete first. Owners are directed to the property page to request ATTOM.
+   */
+  attom_required: {
+    stage: "attom_required",
+    stageNumber: 10,
+    adminLabel: "ATTOM enhanced valuation required — renegotiation blocked",
+    // null so DealMilestoneTracker doesn't render a progress ladder for this exception state.
+    // customerHeroLabel is injected in resolveCanonicalLifecycle via EXCEPTION_CALLOUTS.
+    customerLabel: null,
+    notificationLabel: null,
+    propertyOwned: false,
+  },
+  /**
+   * ATTOM complete and deal is still ineligible — void/non-executable.
+   * Owner may renegotiate terms or commission a manual appraisal.
+   */
   deal_terms_ineligible: {
     stage: "deal_terms_ineligible",
     stageNumber: 10,
-    adminLabel: "Deal terms ineligible — renegotiation required",
+    adminLabel: "Deal void — terms ineligible under ATTOM-verified FMV",
     customerLabel: null,
     notificationLabel: null,
     propertyOwned: false,
@@ -231,6 +251,16 @@ export function deriveWorkflowStage(state: WorkflowStateInput): WorkflowStage {
   const isIneligibleDb = state.triageStatus === "ineligible";
 
   if (isIneligibleLive || isIneligibleDb) {
+    // ── ATTOM-first policy ────────────────────────────────────────────────────
+    // ATTOM must complete before renegotiation or manual appraisal can be unlocked.
+    // When ATTOM has not yet completed, return attom_required — this blocks renegotiation
+    // CTAs and directs the owner to the property page for the enhanced valuation step.
+    const attomComplete = state.escalationAvmStatus === "completed";
+    if (!attomComplete) {
+      return "attom_required";
+    }
+
+    // ATTOM complete and deal is still ineligible:
     // Exception: manual appraisal is complete AND live recomputation now says eligible →
     // the stale DB ineligible is superseded. Surface enhanced_review_complete so the UI
     // clears "ineligible" copy and signals admin re-triage is pending.
@@ -346,9 +376,14 @@ const STAGE_ADMIN_GUIDANCE: Record<WorkflowStage, StageAdminGuidance> = {
     nextAction: "Initiate closing review on the property review page",
     owningSurface: "property_review",
   },
+  attom_required: {
+    blocker: "Deal is ineligible under RentCast basis — ATTOM enhanced valuation must complete before renegotiation is unlocked",
+    nextAction: "Trigger ATTOM enhanced valuation via the escalation simulation panel on the property review page. Renegotiation and manual appraisal become available once ATTOM confirms the deal is still ineligible.",
+    owningSurface: "property_review",
+  },
   deal_terms_ineligible: {
-    blocker: "Deal terms are ineligible under the verified FMV — renegotiation is required",
-    nextAction: "Work with the homeowner to revise terms within the eligible LTV band, then retriage. Verified FMV remains valid.",
+    blocker: "Deal is void under the ATTOM-verified FMV — owner must renegotiate terms or commission a manual appraisal",
+    nextAction: "Work with the homeowner to revise terms within the eligible LTV band, then retriage. ATTOM-verified FMV remains valid.",
     owningSurface: "deal_review",
   },
   renegotiation_requested: {
@@ -439,10 +474,15 @@ const EXCEPTION_CALLOUTS: Partial<Record<WorkflowStage, { label: string; descrip
     description:
       "Our team found an item that needs attention during the closing review. We'll reach out with details. This does not necessarily mean the transaction cannot proceed.",
   },
+  attom_required: {
+    label: "Enhanced valuation required",
+    description:
+      "The current deal terms could not be confirmed under the automated estimate alone. A data-enhanced property valuation is required before you can revise terms or continue. Please visit your property page to request this — no action is needed on this page until the enhanced review is complete.",
+  },
   deal_terms_ineligible: {
     label: "Revised terms required",
     description:
-      "The current deal terms are not eligible under the verified property value. Our team will work with you on what revised terms might look like. Your verified property value remains on file.",
+      "Based on the enhanced valuation, the current deal terms are not eligible under the verified property value. You can propose revised terms or commission a licensed manual appraisal. Our team will work with you on next steps.",
   },
 };
 

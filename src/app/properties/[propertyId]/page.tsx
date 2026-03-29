@@ -6,6 +6,7 @@ import { PropertyDetailClient } from "@/components/properties/PropertyDetailClie
 import { toHomeownerProperty } from "@/lib/property/projections";
 import type { HomeownerReviewRequest } from "@/components/properties/ReviewRequestPanel";
 import type { PropertyWorkflowState } from "@/components/properties/PropertyDetailClient";
+import type { LiveIneligiblePhase } from "@/components/properties/PropertyValuationSections";
 import type { PropertyAuditEntry } from "@/components/properties/PropertyActivityTimeline";
 
 export const runtime = "nodejs";
@@ -161,7 +162,12 @@ export default async function PropertyDetailPage({ params }: PageProps) {
     fmvVerificationSource: row.fmv_verification_source ?? null,
     rentcastFmv,
     rentcastProvider,
-    linkedDealTriageStatus: linkedDeal?.deal_triage_status ?? null,
+    liveIneligiblePhase: (() => {
+      const triageStatus = linkedDeal?.deal_triage_status ?? null;
+      const avmStatus = row.escalation_avm_status ?? null;
+      if (triageStatus !== "ineligible") return null;
+      return avmStatus === "completed" ? "void_renegotiable" : "attom_required";
+    })() satisfies LiveIneligiblePhase,
     manualAppraisalStatus: row.manual_appraisal_status ?? null,
     manualAppraisalFmv: row.manual_appraisal_fmv ?? null,
     ownerAttemptedAttom,

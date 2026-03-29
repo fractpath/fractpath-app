@@ -22,6 +22,8 @@ import { getArtifactSignedUrls } from "@/lib/signature/artifacts";
 import {
   IneligibleDealOwnerBlock,
   IneligibleDealBuyerBlock,
+  AttomRequiredDealOwnerBlock,
+  AttomRequiredDealBuyerBlock,
 } from "@/components/deal/IneligibleDealBlock";
 import {
   resolveControllingFmv,
@@ -563,9 +565,13 @@ export default async function DealPage(ctx: PageProps) {
 
           {/* Ineligible deal action block — primary path.
               Gated on showIneligibleBlock (live FMV recomputation), NOT raw triage_status.
-              Disappears automatically when the current controlling FMV basis (e.g. manual
-              appraisal) makes the deal eligible, without requiring a DB re-triage write. */}
-          {showIneligibleBlock && isOwner && (
+              Block type is dispatched on canonicalResult.stage:
+                attom_required → ATTOM-first blocks (renegotiation not yet available)
+                else            → Standard ineligible blocks (ATTOM complete; renegotiate/challenge) */}
+          {showIneligibleBlock && isOwner && currentStage === "attom_required" && (
+            <AttomRequiredDealOwnerBlock propertyId={resolvedPropertyId} />
+          )}
+          {showIneligibleBlock && isOwner && currentStage !== "attom_required" && (
             <IneligibleDealOwnerBlock
               dealId={dealId}
               propertyId={resolvedPropertyId}
@@ -574,7 +580,10 @@ export default async function DealPage(ctx: PageProps) {
               renegotiationAlreadyRequested={currentStage === "renegotiation_requested"}
             />
           )}
-          {showIneligibleBlock && !isOwner && currentStage !== "renegotiation_requested" && (
+          {showIneligibleBlock && !isOwner && currentStage === "attom_required" && (
+            <AttomRequiredDealBuyerBlock />
+          )}
+          {showIneligibleBlock && !isOwner && currentStage !== "attom_required" && currentStage !== "renegotiation_requested" && (
             <IneligibleDealBuyerBlock
               manualAppraisalStatus={liveManualAppraisalStatus}
               renegotiationRequested={false}
@@ -1142,8 +1151,14 @@ export default async function DealPage(ctx: PageProps) {
           )}
 
           {/* Ineligible deal action block — fallback path.
-              Gated on fallbackShowIneligibleBlock (live FMV recomputation), NOT raw triage_status. */}
-          {fallbackShowIneligibleBlock && fallbackIsOwner && (
+              Gated on fallbackShowIneligibleBlock (live FMV recomputation), NOT raw triage_status.
+              Block type is dispatched on canonicalResult.stage:
+                attom_required → ATTOM-first blocks (renegotiation not yet available)
+                else            → Standard ineligible blocks (ATTOM complete; renegotiate/challenge) */}
+          {fallbackShowIneligibleBlock && fallbackIsOwner && canonicalResult.stage === "attom_required" && (
+            <AttomRequiredDealOwnerBlock propertyId={resolvedPropertyId} />
+          )}
+          {fallbackShowIneligibleBlock && fallbackIsOwner && canonicalResult.stage !== "attom_required" && (
             <IneligibleDealOwnerBlock
               dealId={dealId}
               propertyId={resolvedPropertyId}
@@ -1152,7 +1167,10 @@ export default async function DealPage(ctx: PageProps) {
               renegotiationAlreadyRequested={canonicalResult.stage === "renegotiation_requested"}
             />
           )}
-          {fallbackShowIneligibleBlock && !fallbackIsOwner && canonicalResult.stage !== "renegotiation_requested" && (
+          {fallbackShowIneligibleBlock && !fallbackIsOwner && canonicalResult.stage === "attom_required" && (
+            <AttomRequiredDealBuyerBlock />
+          )}
+          {fallbackShowIneligibleBlock && !fallbackIsOwner && canonicalResult.stage !== "attom_required" && canonicalResult.stage !== "renegotiation_requested" && (
             <IneligibleDealBuyerBlock
               manualAppraisalStatus={liveManualAppraisalStatus}
               renegotiationRequested={false}

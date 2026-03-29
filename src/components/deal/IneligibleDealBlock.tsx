@@ -4,7 +4,58 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-// ─── Owner-side block ─────────────────────────────────────────────────────────
+// ─── ATTOM-required blocks (Case 2) ───────────────────────────────────────────
+// Shown when the deal is ineligible under RentCast alone and ATTOM has not yet
+// completed. Renegotiation and manual appraisal are NOT available yet.
+
+type AttomRequiredOwnerProps = {
+  propertyId: string | null;
+};
+
+export function AttomRequiredDealOwnerBlock({ propertyId }: AttomRequiredOwnerProps) {
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-3">
+      <div className="space-y-1.5">
+        <p className="text-sm font-semibold text-amber-900">
+          Enhanced valuation required before this deal can continue
+        </p>
+        <p className="text-xs text-amber-800">
+          The deal terms could not be confirmed under the automated property estimate alone.
+          A data-enhanced valuation (ATTOM) is the required next step — it uses public record,
+          permit history, and comparable sale data to establish a stronger verified value.
+        </p>
+        <p className="text-xs text-amber-800">
+          Once the enhanced valuation is complete, you will be able to revise the deal terms
+          or commission a licensed manual appraisal if needed. No action is required on this
+          page until that review is finished.
+        </p>
+      </div>
+      {propertyId && (
+        <Link
+          href={`/properties/${propertyId}`}
+          className="inline-block text-xs rounded border border-amber-300 px-2.5 py-1.5 bg-white hover:bg-muted cursor-pointer"
+        >
+          Go to property page to request enhanced valuation →
+        </Link>
+      )}
+    </div>
+  );
+}
+
+export function AttomRequiredDealBuyerBlock() {
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-1.5">
+      <p className="text-sm font-semibold text-amber-900">Enhanced valuation in progress</p>
+      <p className="text-xs text-amber-800">
+        An enhanced property valuation is required before this deal can proceed. This review is
+        currently being arranged. You will be notified when it is complete and the deal can
+        continue.
+      </p>
+    </div>
+  );
+}
+
+// ─── Owner-side block (Case 4: ATTOM complete, still ineligible) ───────────────
 
 type OwnerProps = {
   dealId: string;
@@ -57,11 +108,11 @@ export function IneligibleDealOwnerBlock({
     <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-4">
       <div className="space-y-1.5">
         <p className="text-sm font-semibold text-amber-900">
-          Action required — revised terms or valuation challenge needed
+          Revised terms required — deal is not executable under current terms
         </p>
         <p className="text-xs text-amber-800">
           {exceptionDescription ??
-            "The current deal terms are not eligible under the verified property value. " +
+            "Based on the enhanced valuation, the current deal terms are not eligible under the verified property value. " +
             "Our team will work with you on what revised terms might look like."}
         </p>
       </div>
@@ -98,7 +149,7 @@ export function IneligibleDealOwnerBlock({
         <div className="rounded-md bg-white border border-amber-200 px-3 py-2.5 space-y-1.5">
           <p className="text-xs font-medium text-foreground">B — Challenge the property valuation</p>
           <p className="text-xs text-muted-foreground">
-            If you believe the verified value understates your property&apos;s fair market value,
+            If you believe the enhanced valuation understates your property&apos;s fair market value,
             you can commission a licensed manual appraisal. If the result is higher, deal
             eligibility is re-evaluated.
           </p>
@@ -127,7 +178,7 @@ export function IneligibleDealOwnerBlock({
   );
 }
 
-// ─── Buyer / shared-deal block ────────────────────────────────────────────────
+// ─── Buyer / shared-deal block (Case 4: ATTOM complete, still ineligible) ─────
 
 type BuyerProps = {
   manualAppraisalStatus: string | null;
@@ -156,7 +207,7 @@ export function IneligibleDealBuyerBlock({ manualAppraisalStatus, renegotiationR
     <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-1.5">
       <p className="text-sm font-semibold text-amber-900">Revised terms required</p>
       <p className="text-xs text-amber-800">
-        The current deal terms require revision based on the property valuation review. The
+        The current deal terms require revision based on the enhanced property valuation. The
         homeowner is working to resolve this — either by proposing revised terms or through an
         additional valuation review.
       </p>

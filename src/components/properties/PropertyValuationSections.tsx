@@ -6,12 +6,23 @@ import Link from "next/link";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+/**
+ * liveIneligiblePhase describes the current unhappy-path state for the linked deal:
+ *
+ * - 'attom_required'   — deal is ineligible under RentCast alone; ATTOM has not yet completed;
+ *                        renegotiation and manual appraisal challenge are NOT available yet.
+ * - 'void_renegotiable' — ATTOM has completed and the deal is still ineligible; the deal is
+ *                          void/non-executable; owner may renegotiate or commission manual appraisal.
+ * - null               — no live ineligible deal (proactive-only context or deal is eligible).
+ */
+export type LiveIneligiblePhase = "attom_required" | "void_renegotiable" | null;
+
 export type ValuationSectionsProps = {
   propertyId: string;
   /** RentCast AVM */
   rentcastFmv: number | null;
   rentcastProvider: string | null;
-  /** ATTOM enhanced valuation fields (map from escalation_deposit_status / escalation_avm_status) */
+  /** ATTOM enhanced valuation fields */
   escalationDepositStatus: string | null;
   escalationAvmStatus: string | null;
   /** Whether the owner has already submitted an ATTOM request (logged in audit trail) */
@@ -22,8 +33,11 @@ export type ValuationSectionsProps = {
   /** The currently controlling verified FMV and its source */
   latestVerifiedFmv: number | null;
   fmvVerificationSource: string | null;
-  /** Linked deal context — used for ineligible-deal branch */
-  isDealIneligible: boolean;
+  /**
+   * Live ineligible deal phase — drives guidance block content and manual appraisal copy.
+   * Replaces the old isDealIneligible boolean.
+   */
+  liveIneligiblePhase: LiveIneligiblePhase;
   linkedDealId: string | null;
 };
 
@@ -119,6 +133,7 @@ function AttomSection({
   fmvVerificationSource,
   ownerAttemptedAttom: initialOwnerAttempted,
   isControlling,
+  liveIneligiblePhase,
 }: {
   propertyId: string;
   escalationDepositStatus: string | null;
@@ -127,6 +142,7 @@ function AttomSection({
   fmvVerificationSource: string | null;
   ownerAttemptedAttom: boolean;
   isControlling: boolean;
+  liveIneligiblePhase: LiveIneligiblePhase;
 }) {
   const router = useRouter();
   const [requested, setRequested] = useState(initialOwnerAttempted);
@@ -180,6 +196,18 @@ function AttomSection({
         [Simulation] ATTOM integration is not yet connected. This section mirrors
         the owner-side experience for the enhanced valuation workflow.
       </p>
+
+      {/* ATTOM-first policy banner — shown when a live accepted deal requires ATTOM */}
+      {liveIneligiblePhase === "attom_required" && !avmComplete && (
+        <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2 space-y-1">
+          <p className="font-semibold">Required next step for your active deal</p>
+          <p>
+            Your deal could not be confirmed under the automated estimate alone. The enhanced
+            valuation must complete before the deal can continue, or before you can revise terms
+            or commission a manual appraisal.
+          </p>
+        </div>
+      )}
 
       <p className="text-xs text-muted-foreground">
         ATTOM provides a data-enhanced property valuation using public record, permit history,
@@ -271,12 +299,14 @@ function ManualAppraisalSection({
   isControlling,
   propertyId,
   attomComplete,
+  liveIneligiblePhase,
 }: {
   status: string | null;
   fmv: number | null;
   isControlling: boolean;
   propertyId: string;
   attomComplete: boolean;
+  liveIneligiblePhase: LiveIneligiblePhase;
 }) {
   const router = useRouter();
   const [initiating, setInitiating] = useState(false);
@@ -316,9 +346,21 @@ function ManualAppraisalSection({
 
       <p className="text-xs text-muted-foreground">
         A licensed manual appraisal provides the strongest available FMV basis. If the
-        appraised value exceeds the current ATTOM result, it becomes the new controlling
+        appraised value exceeds the current verified result, it becomes the new controlling
         value and deal eligibility is re-evaluated.
       </p>
+
+      {/* ATTOM-first policy note — shown when there's a live deal requiring ATTOM first */}
+      {!status && liveIneligiblePhase === "attom_required" && (
+        <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2 space-y-1">
+          <p className="font-semibold">Deal escalation note</p>
+          <p>
+            For your active deal, the enhanced valuation (ATTOM) must complete before a manual
+            appraisal can count as an official deal escalation. You may still proactively order
+            an appraisal below — it will be on file and applied once ATTOM is complete.
+          </p>
+        </div>
+      )}
 
       {status === "available" && (
         <p className="text-xs text-yellow-800">
@@ -357,12 +399,22 @@ function ManualAppraisalSection({
           )}
         </>
       )}
-      {!status && attomComplete && (
+
+      {/* Initiate button — available proactively at any time when no appraisal started */}
+      {!status && (
         <div className="space-y-1.5">
-          <p className="text-xs text-muted-foreground">
-            The enhanced valuation is complete. You may initiate a licensed manual appraisal
-            to challenge the result. A fee applies — our team will be in touch with details.
-          </p>
+          {attomComplete ? (
+            <p className="text-xs text-muted-foreground">
+              The enhanced valuation is complete. You may initiate a licensed manual appraisal
+              to challenge the result. A fee applies — our team will be in touch with details.
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              You may proactively commission a licensed manual appraisal at any time. A fee
+              applies — our team will be in touch with details. For active deals, the manual
+              appraisal result is applied once the enhanced valuation is also complete.
+            </p>
+          )}
           <button
             disabled={initiating}
             onClick={handleInitiate}
@@ -373,12 +425,6 @@ function ManualAppraisalSection({
           {initiateErr && <p className="text-xs text-red-700">{initiateErr}</p>}
         </div>
       )}
-      {!status && !attomComplete && (
-        <p className="text-xs text-muted-foreground">
-          To commission a licensed manual appraisal, contact our team and we will guide you
-          through the process. A fee applies.
-        </p>
-      )}
     </SectionCard>
   );
 }
@@ -388,10 +434,47 @@ function ManualAppraisalSection({
 function IneligibleGuidanceBlock({
   linkedDealId,
   manualAppraisalStatus,
+  liveIneligiblePhase,
 }: {
   linkedDealId: string | null;
   manualAppraisalStatus: string | null;
+  liveIneligiblePhase: LiveIneligiblePhase;
 }) {
+  if (liveIneligiblePhase === "attom_required") {
+    // ATTOM has not completed yet — renegotiation and manual challenge are not available.
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-2">
+        <p className="text-sm font-semibold text-amber-900">Enhanced valuation required</p>
+        <p className="text-xs text-amber-800">
+          Your deal terms could not be confirmed under the automated property estimate alone.
+          The ATTOM enhanced valuation must complete before you can revise the deal terms or
+          commission a manual appraisal.
+        </p>
+        <ul className="text-xs text-amber-800 space-y-1 list-disc list-inside pl-1">
+          <li>
+            Request the enhanced valuation below using the ATTOM section. Our team will send
+            payment details.
+          </li>
+          <li>
+            Once the enhanced valuation completes, you will be able to renegotiate terms or
+            challenge the valuation.
+          </li>
+        </ul>
+        {linkedDealId && (
+          <div className="border-t border-amber-200 pt-2">
+            <Link
+              href={`/deal/${linkedDealId}`}
+              className="text-xs underline text-amber-900 hover:text-amber-700"
+            >
+              View deal status →
+            </Link>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // void_renegotiable: ATTOM complete, deal still ineligible
   const appraisalInProgress =
     manualAppraisalStatus === "payment_pending" ||
     manualAppraisalStatus === "in_progress";
@@ -457,7 +540,7 @@ export function PropertyValuationSections(props: ValuationSectionsProps) {
     manualAppraisalFmv,
     latestVerifiedFmv,
     fmvVerificationSource,
-    isDealIneligible,
+    liveIneligiblePhase,
     linkedDealId,
   } = props;
 
@@ -488,8 +571,8 @@ export function PropertyValuationSections(props: ValuationSectionsProps) {
         />
       )}
 
-      {/* 2. ATTOM — show when AVM journey has started or after rentcast is done */}
-      {(attomStarted || rentcastFmv != null) && (
+      {/* 2. ATTOM — show when AVM journey has started, rentcast is done, or deal requires ATTOM */}
+      {(attomStarted || rentcastFmv != null || liveIneligiblePhase !== null) && (
         <AttomSection
           propertyId={propertyId}
           escalationDepositStatus={escalationDepositStatus}
@@ -498,25 +581,28 @@ export function PropertyValuationSections(props: ValuationSectionsProps) {
           fmvVerificationSource={fmvVerificationSource}
           ownerAttemptedAttom={ownerAttemptedAttom}
           isControlling={attomIsControlling}
+          liveIneligiblePhase={liveIneligiblePhase}
         />
       )}
 
-      {/* Ineligible deal guidance — shown when deal is ineligible and ATTOM is complete */}
-      {isDealIneligible && attomComplete && (
+      {/* Ineligible deal guidance — shown for either attom_required or void_renegotiable phase */}
+      {liveIneligiblePhase !== null && (
         <IneligibleGuidanceBlock
           linkedDealId={linkedDealId}
           manualAppraisalStatus={manualAppraisalStatus}
+          liveIneligiblePhase={liveIneligiblePhase}
         />
       )}
 
-      {/* 3. Manual appraisal — show when deal is ineligible, ATTOM is complete, or appraisal has been initiated */}
-      {(isDealIneligible || attomComplete || manualStarted) && (
+      {/* 3. Manual appraisal — show when deal is ineligible (either phase), ATTOM is complete, or appraisal started */}
+      {(liveIneligiblePhase !== null || attomComplete || manualStarted) && (
         <ManualAppraisalSection
           status={manualAppraisalStatus}
           fmv={manualAppraisalFmv}
           isControlling={manualIsControlling}
           propertyId={propertyId}
           attomComplete={attomComplete}
+          liveIneligiblePhase={liveIneligiblePhase}
         />
       )}
     </div>
