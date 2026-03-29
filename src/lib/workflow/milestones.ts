@@ -10,6 +10,7 @@ export type WorkflowStage =
   | "ready_for_closing"
   | "deal_eligible"
   | "deal_terms_ineligible"
+  | "renegotiation_requested"
   | "ready_for_signatures"
   | "agreement_out_for_signatures"
   | "agreement_signed"
@@ -31,6 +32,18 @@ export interface WorkflowStateInput {
   servicingStatus: string | null;
   /** Optional: manual appraisal challenge status (exception branch, not happy-path). */
   manualAppraisalStatus?: string | null;
+  /**
+   * Live ineligibility signal — true when the fresh controlling-FMV recomputation
+   * confirms the deal is still ineligible. Overrides all happy-path stages (closing,
+   * signatures, etc.) except terminal states (servicing, closed, signed).
+   */
+  liveIneligible?: boolean;
+  /**
+   * Current DB value of deals.renegotiation_status.
+   * When 'requested', the canonical stage surfaces as renegotiation_requested
+   * (a sub-state of the ineligible branch).
+   */
+  renegotiationStatus?: string | null;
 }
 
 export interface StageMeta {
@@ -131,6 +144,16 @@ const STAGE_META: Record<WorkflowStage, StageMeta> = {
     notificationLabel: null,
     propertyOwned: false,
   },
+  renegotiation_requested: {
+    stage: "renegotiation_requested",
+    stageNumber: 10,
+    adminLabel: "Renegotiation requested by owner",
+    // null so DealMilestoneTracker doesn't render for this exception state.
+    // customerHeroLabel is overridden in resolveCanonicalLifecycle.
+    customerLabel: null,
+    notificationLabel: null,
+    propertyOwned: false,
+  },
   ready_for_signatures: {
     stage: "ready_for_signatures",
     stageNumber: 11,
@@ -194,18 +217,32 @@ export function getStageMeta(stage: WorkflowStage): StageMeta {
 }
 
 export function deriveWorkflowStage(state: WorkflowStateInput): WorkflowStage {
+  // ── Terminal states (highest priority) ─────────────────────────────────────
   if (state.servicingStatus === "issue") return "servicing_issue";
   if (state.servicingStatus === "active") return "servicing_active";
   if (state.threadStatus === "closed") return "deal_closed";
   if (state.packetStatus === "completed") return "agreement_signed";
-  // Ineligible overrides signing/closing deal-stage decisions; terminal states above take precedence.
-  // Exception: when manual appraisal is complete, the stale ineligible status is superseded —
-  // the controlling FMV basis has changed and the deal is awaiting admin re-triage. Surface as
-  // enhanced_review_complete so the UI clears the "ineligible" copy and shows re-evaluation state.
-  if (state.triageStatus === "ineligible") {
-    if (state.manualAppraisalStatus === "complete") return "enhanced_review_complete";
+
+  // ── Ineligible branch — overrides all happy-path stages ───────────────────
+  // liveIneligible: fresh controlling-FMV recomputation confirms deal is not eligible.
+  // triageStatus:   DB-persisted ineligible determination.
+  // Both are checked; either being true enters the ineligible branch.
+  const isIneligibleLive = state.liveIneligible === true;
+  const isIneligibleDb = state.triageStatus === "ineligible";
+
+  if (isIneligibleLive || isIneligibleDb) {
+    // Exception: manual appraisal is complete AND live recomputation now says eligible →
+    // the stale DB ineligible is superseded. Surface enhanced_review_complete so the UI
+    // clears "ineligible" copy and signals admin re-triage is pending.
+    if (!isIneligibleLive && isIneligibleDb && state.manualAppraisalStatus === "complete") {
+      return "enhanced_review_complete";
+    }
+    // When the owner has formally requested renegotiation, surface that sub-state.
+    if (state.renegotiationStatus === "requested") return "renegotiation_requested";
     return "deal_terms_ineligible";
   }
+
+  // ── Happy path ─────────────────────────────────────────────────────────────
   if (["sent", "delivered", "partially_signed"].includes(state.packetStatus ?? "")) {
     return "agreement_out_for_signatures";
   }
@@ -312,6 +349,11 @@ const STAGE_ADMIN_GUIDANCE: Record<WorkflowStage, StageAdminGuidance> = {
   deal_terms_ineligible: {
     blocker: "Deal terms are ineligible under the verified FMV — renegotiation is required",
     nextAction: "Work with the homeowner to revise terms within the eligible LTV band, then retriage. Verified FMV remains valid.",
+    owningSurface: "deal_review",
+  },
+  renegotiation_requested: {
+    blocker: "Owner has requested renegotiation — action required",
+    nextAction: "Review owner request in deal events, then reopen negotiation or work with both parties to propose revised terms.",
     owningSurface: "deal_review",
   },
   closing_review_pending: {
@@ -458,16 +500,29 @@ export function resolveCanonicalLifecycle(
     }
   }
 
+  // renegotiation_requested: not an exception callout (no amber card) but does have a
+  // customer-visible hero label so the deal page shows a status card. The hero label is
+  // injected here rather than via meta.customerLabel to avoid the DealMilestoneTracker
+  // rendering a progress ladder for this exception sub-state.
+  let customerHeroLabel: string | null = meta.customerLabel;
+  let customerHeroDescription: string | null = meta.customerLabel
+    ? (CUSTOMER_HERO_DESCRIPTIONS[stage] ?? null)
+    : null;
+
+  if (stage === "renegotiation_requested") {
+    customerHeroLabel = "Revised terms being prepared";
+    customerHeroDescription =
+      "Your request for revised terms has been received. Our team will be in touch to discuss next steps.";
+  }
+
   return {
     stage,
     meta,
     adminBlocker: guidance.blocker,
     adminNextAction: guidance.nextAction,
     adminOwningSurface: guidance.owningSurface,
-    customerHeroLabel: meta.customerLabel,
-    customerHeroDescription: meta.customerLabel
-      ? (CUSTOMER_HERO_DESCRIPTIONS[stage] ?? null)
-      : null,
+    customerHeroLabel,
+    customerHeroDescription,
     milestoneStatuses,
     isExceptionState: exceptionCallout !== null,
     exceptionLabel: exceptionCallout?.label ?? null,

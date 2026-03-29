@@ -239,7 +239,7 @@ export default async function DealPage(ctx: PageProps) {
   const { data: deal } = await supabase
     .from("deals")
     .select(
-      "id, owner_user_id, created_by_user_id, user_id, status, created_at, archived_at, triage_status, servicing_status",
+      "id, owner_user_id, created_by_user_id, user_id, status, created_at, archived_at, triage_status, servicing_status, renegotiation_status",
     )
     .eq("id", dealId)
     .maybeSingle();
@@ -485,6 +485,8 @@ export default async function DealPage(ctx: PageProps) {
       packetStatus: sigData.packet?.status ?? null,
       servicingStatus: (deal as any).servicing_status ?? null,
       manualAppraisalStatus: liveManualAppraisalStatus,
+      liveIneligible: showIneligibleBlock,
+      renegotiationStatus: (deal as any).renegotiation_status ?? null,
     };
     const canonicalResult = resolveCanonicalLifecycle(workflowStateInput);
     const currentStage = canonicalResult.stage;
@@ -569,11 +571,13 @@ export default async function DealPage(ctx: PageProps) {
               propertyId={resolvedPropertyId}
               manualAppraisalStatus={liveManualAppraisalStatus}
               exceptionDescription={ineligibleDescription}
+              renegotiationAlreadyRequested={currentStage === "renegotiation_requested"}
             />
           )}
-          {showIneligibleBlock && !isOwner && (
+          {showIneligibleBlock && !isOwner && currentStage !== "renegotiation_requested" && (
             <IneligibleDealBuyerBlock
               manualAppraisalStatus={liveManualAppraisalStatus}
+              renegotiationRequested={false}
             />
           )}
 
@@ -877,7 +881,7 @@ export default async function DealPage(ctx: PageProps) {
     let fallbackDeal: any = null;
 
     const { data: fallbackDealRow } = await (svc.from("deals") as any)
-      .select("id, owner_user_id, status, triage_status, servicing_status, created_at, archived_at")
+      .select("id, owner_user_id, status, triage_status, servicing_status, renegotiation_status, created_at, archived_at")
       .eq("id", dealId)
       .maybeSingle();
 
@@ -1063,6 +1067,8 @@ export default async function DealPage(ctx: PageProps) {
       packetStatus: fallbackSigData.packet?.status ?? null,
       servicingStatus: fallbackDeal?.servicing_status ?? null,
       manualAppraisalStatus: liveManualAppraisalStatus,
+      liveIneligible: fallbackShowIneligibleBlock,
+      renegotiationStatus: fallbackDeal?.renegotiation_status ?? null,
     };
     const canonicalResult = resolveCanonicalLifecycle(fallbackWorkflowInput);
     // Fallback description: use canonical exception copy when not manual-appraisal basis.
@@ -1143,11 +1149,13 @@ export default async function DealPage(ctx: PageProps) {
               propertyId={resolvedPropertyId}
               manualAppraisalStatus={liveManualAppraisalStatus}
               exceptionDescription={fallbackIneligibleDescription}
+              renegotiationAlreadyRequested={canonicalResult.stage === "renegotiation_requested"}
             />
           )}
-          {fallbackShowIneligibleBlock && !fallbackIsOwner && (
+          {fallbackShowIneligibleBlock && !fallbackIsOwner && canonicalResult.stage !== "renegotiation_requested" && (
             <IneligibleDealBuyerBlock
               manualAppraisalStatus={liveManualAppraisalStatus}
+              renegotiationRequested={false}
             />
           )}
 

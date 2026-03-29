@@ -2,11 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 
-// TODO(renegotiation): Replace this simulation endpoint with a real renegotiation
-// initiation flow — e.g. creating a new counter-offer proposal on the existing thread,
-// or forking the deal with a revised term set. Currently only logs the intent to
-// deal_events so the admin can see the request and work with both parties.
-
 type Ctx = { params: Promise<{ dealId: string }> };
 
 function jsonError(message: string, status = 400) {
@@ -27,7 +22,7 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
 
   // Confirm the user owns this deal via thread (owner_user_id) or direct
   const { data: deal } = await (svc.from("deals") as any)
-    .select("id, owner_user_id, triage_status")
+    .select("id, owner_user_id, triage_status, renegotiation_status")
     .eq("id", dealId)
     .maybeSingle();
 
@@ -52,6 +47,16 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
     );
   }
 
+  // Idempotency — if already requested in DB, return early
+  if (deal?.renegotiation_status === "requested") {
+    return NextResponse.json({
+      ok: true,
+      dealId,
+      alreadyLogged: true,
+      loggedAt: null,
+    });
+  }
+
   // Idempotency — check if already logged within last 24 hours
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const { data: existing } = await (svc.from("deal_events") as any)
@@ -64,6 +69,10 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
     .maybeSingle();
 
   if (existing) {
+    // Backfill renegotiation_status if not yet set
+    await (svc.from("deals") as any)
+      .update({ renegotiation_status: "requested" })
+      .eq("id", dealId);
     return NextResponse.json({
       ok: true,
       dealId,
@@ -80,13 +89,23 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
     payload: {
       reason: "owner_requested_renegotiation_after_ineligible",
       triage_status_at_request: deal?.triage_status ?? null,
-      note: "[sim] Owner has requested renegotiation due to deal term ineligibility. Admin should work with both parties to revise terms within the eligible LTV band.",
+      note: "Owner has requested renegotiation due to deal term ineligibility. Admin should work with both parties to revise terms within the eligible LTV band.",
     },
   });
 
   if (evErr) {
     console.error("LOG_RENEGOTIATION_EVENT_FAILED", { dealId, evErr });
     return jsonError("Failed to log renegotiation request", 500);
+  }
+
+  // Persist renegotiation_status on the deal row for canonical stage derivation
+  const { error: updateErr } = await (svc.from("deals") as any)
+    .update({ renegotiation_status: "requested" })
+    .eq("id", dealId);
+
+  if (updateErr) {
+    console.error("LOG_RENEGOTIATION_STATUS_UPDATE_FAILED", { dealId, updateErr });
+    // Non-fatal — event is already logged; status will be corrected on next load
   }
 
   return NextResponse.json({

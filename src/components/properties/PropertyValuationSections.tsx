@@ -269,12 +269,40 @@ function ManualAppraisalSection({
   status,
   fmv,
   isControlling,
+  propertyId,
+  attomComplete,
 }: {
   status: string | null;
   fmv: number | null;
   isControlling: boolean;
+  propertyId: string;
+  attomComplete: boolean;
 }) {
+  const router = useRouter();
+  const [initiating, setInitiating] = useState(false);
+  const [initiateErr, setInitiateErr] = useState<string | null>(null);
   const badge = status ? MANUAL_BADGE[status] : null;
+
+  async function handleInitiate() {
+    setInitiating(true);
+    setInitiateErr(null);
+    try {
+      const res = await fetch(`/api/me/properties/${propertyId}/initiate-manual-appraisal`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) {
+        setInitiateErr(json.error ?? "Request failed");
+      } else {
+        router.refresh();
+      }
+    } catch (e: unknown) {
+      setInitiateErr(e instanceof Error ? e.message : "Network error");
+    } finally {
+      setInitiating(false);
+    }
+  }
 
   return (
     <SectionCard
@@ -329,7 +357,23 @@ function ManualAppraisalSection({
           )}
         </>
       )}
-      {!status && (
+      {!status && attomComplete && (
+        <div className="space-y-1.5">
+          <p className="text-xs text-muted-foreground">
+            The enhanced valuation is complete. You may initiate a licensed manual appraisal
+            to challenge the result. A fee applies — our team will be in touch with details.
+          </p>
+          <button
+            disabled={initiating}
+            onClick={handleInitiate}
+            className="text-xs rounded border px-2.5 py-1.5 bg-white hover:bg-muted disabled:opacity-50 cursor-pointer"
+          >
+            {initiating ? "Submitting…" : "Initiate appraisal challenge"}
+          </button>
+          {initiateErr && <p className="text-xs text-red-700">{initiateErr}</p>}
+        </div>
+      )}
+      {!status && !attomComplete && (
         <p className="text-xs text-muted-foreground">
           To commission a licensed manual appraisal, contact our team and we will guide you
           through the process. A fee applies.
@@ -471,6 +515,8 @@ export function PropertyValuationSections(props: ValuationSectionsProps) {
           status={manualAppraisalStatus}
           fmv={manualAppraisalFmv}
           isControlling={manualIsControlling}
+          propertyId={propertyId}
+          attomComplete={attomComplete}
         />
       )}
     </div>

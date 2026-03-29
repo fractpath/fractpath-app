@@ -28,6 +28,7 @@ import type { NormalizedPropertyProfile } from "@/lib/property-review/providers/
 import {
   computeAvmEligibility,
   extractAvmDealTerms,
+  resolveControllingFmv,
   DEFAULT_LTV_RATIO,
   DEVIATION_ESCALATION_THRESHOLD_PCT,
   type AvmEligibilityCard,
@@ -212,11 +213,12 @@ export default async function AdminPropertyAuditPage({
     fmv_plausibility_flag: string | null;
     accepted_at: string | null;
     servicing_status: string | null;
+    renegotiation_status: string | null;
   } | null = null;
 
   if (linkedThreadRes.data?.deal_id) {
     const { data: dealRow } = await (supabase.from("deals") as any)
-      .select("id, triage_status, triage_reason_tags, fmv_plausibility_flag, accepted_at, servicing_status")
+      .select("id, triage_status, triage_reason_tags, fmv_plausibility_flag, accepted_at, servicing_status, renegotiation_status")
       .eq("id", linkedThreadRes.data.deal_id)
       .maybeSingle();
     linkedDeal = dealRow ?? null;
@@ -358,6 +360,36 @@ export default async function AdminPropertyAuditPage({
     ineligible: { label: "Ineligible", cls: "bg-red-100 text-red-800" },
   };
 
+  // ── Admin property live-ineligible recomputation ─────────────────────────────
+  // Uses the controlling FMV basis (manual appraisal when complete, otherwise
+  // latest_verified_fmv) against the linked deal proposal to determine live eligibility.
+  let adminPropLiveIneligible = false;
+  if (linkedDeal?.triage_status === "ineligible") {
+    const { fmv: propControllingFmv } = resolveControllingFmv({
+      latestVerifiedFmv: (p.latest_verified_fmv as number | null) ?? null,
+      fmvVerificationSource: (p.fmv_verification_source as string | null) ?? null,
+      manualAppraisalFmv: (p.manual_appraisal_fmv as number | null) ?? null,
+      manualAppraisalStatus: (p.manual_appraisal_status as string | null) ?? null,
+    });
+    if (propControllingFmv != null && linkedDealProposalSnapshot) {
+      const propTerms = extractAvmDealTerms(linkedDealProposalSnapshot);
+      const securedDebt = p.has_secured_property_debt === true ? (p.secured_property_debt_amount ?? 0) : 0;
+      const propLiveCheck = computeAvmEligibility({
+        verifiedFmv: propControllingFmv,
+        fmvProvider: null,
+        fmvFetchedAt: null,
+        fmvExpiresAt: null,
+        proposedFmv: propTerms.property_value,
+        securedDebt,
+        ltvRatio: (p.ltv_policy_ratio as number | null) ?? DEFAULT_LTV_RATIO,
+        requestedCash: propTerms.upfront_payment,
+      });
+      adminPropLiveIneligible = propLiveCheck.result !== "eligible";
+    } else {
+      adminPropLiveIneligible = true;
+    }
+  }
+
   const propCanonicalInput: WorkflowStateInput = {
     propertyStatus: p.status ?? null,
     propertyReviewStatus: (p.property_review_status as string | null) ?? null,
@@ -370,6 +402,8 @@ export default async function AdminPropertyAuditPage({
     packetStatus: null,
     servicingStatus: linkedDeal?.servicing_status ?? null,
     manualAppraisalStatus: (p.manual_appraisal_status as string | null) ?? null,
+    liveIneligible: adminPropLiveIneligible,
+    renegotiationStatus: linkedDeal?.renegotiation_status ?? null,
   };
   const propCanonical = resolveCanonicalLifecycle(propCanonicalInput);
 

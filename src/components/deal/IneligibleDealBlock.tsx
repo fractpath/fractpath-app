@@ -11,6 +11,8 @@ type OwnerProps = {
   propertyId: string | null;
   manualAppraisalStatus: string | null;
   exceptionDescription: string | null;
+  /** Pre-seeds the renegotiation "already logged" state when DB confirms it was requested. */
+  renegotiationAlreadyRequested?: boolean;
 };
 
 export function IneligibleDealOwnerBlock({
@@ -18,9 +20,10 @@ export function IneligibleDealOwnerBlock({
   propertyId,
   manualAppraisalStatus,
   exceptionDescription,
+  renegotiationAlreadyRequested = false,
 }: OwnerProps) {
   const router = useRouter();
-  const [logged, setLogged] = useState(false);
+  const [logged, setLogged] = useState(renegotiationAlreadyRequested);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -128,12 +131,26 @@ export function IneligibleDealOwnerBlock({
 
 type BuyerProps = {
   manualAppraisalStatus: string | null;
+  /** When true, renegotiation has been formally requested — show pending copy instead of action copy. */
+  renegotiationRequested?: boolean;
 };
 
-export function IneligibleDealBuyerBlock({ manualAppraisalStatus }: BuyerProps) {
+export function IneligibleDealBuyerBlock({ manualAppraisalStatus, renegotiationRequested = false }: BuyerProps) {
   const appraisalInProgress =
     manualAppraisalStatus === "payment_pending" || manualAppraisalStatus === "in_progress";
   const appraisalComplete = manualAppraisalStatus === "complete";
+
+  if (renegotiationRequested) {
+    return (
+      <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 space-y-1.5">
+        <p className="text-sm font-semibold text-blue-900">Revised terms being prepared</p>
+        <p className="text-xs text-blue-800">
+          The homeowner has requested revised terms. Our team is working with both parties to
+          explore options. You will be notified when updated terms are ready to review.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-1.5">

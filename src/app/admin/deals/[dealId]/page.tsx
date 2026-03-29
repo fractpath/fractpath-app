@@ -5,6 +5,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { getDealEvents } from "@/lib/dealTimeline";
 import { AdminDealActions } from "@/components/admin/AdminDealActions";
 import { AdminDealServicingPanel } from "@/components/admin/AdminDealServicingPanel";
+import { AdminReopenNegotiationButton } from "@/components/admin/AdminReopenNegotiationButton";
 import { SignatureCard } from "@/components/deal/SignatureCard";
 import type { SignaturePacketView, SignatureRecipientView } from "@/components/deal/SignatureCard";
 import { getArtifactSignedUrls } from "@/lib/signature/artifacts";
@@ -17,6 +18,8 @@ import {
   DEVIATION_ESCALATION_THRESHOLD_PCT,
   DEVIATION_REVIEW_THRESHOLD_PCT,
   computeAvmEligibility,
+  resolveControllingFmv,
+  extractAvmDealTerms,
   type AvmEligibilityCard,
 } from "@/lib/avmEligibility";
 
@@ -462,7 +465,7 @@ export default async function AdminDealReviewPage({
 
   // ── Fetch deal ──────────────────────────────────────────────────────────
   const { data: deal, error: dealErr } = await (svc.from("deals") as any)
-    .select("id, status, triage_status, triage_reason_tags, fmv_plausibility_flag, accepted_at, created_at, servicing_status, servicing_note")
+    .select("id, status, triage_status, triage_reason_tags, fmv_plausibility_flag, accepted_at, created_at, servicing_status, servicing_note, renegotiation_status")
     .eq("id", dealId)
     .maybeSingle();
 
@@ -482,7 +485,7 @@ export default async function AdminDealReviewPage({
   // ── Fetch thread + property ─────────────────────────────────────────────
   const { data: thread } = await (svc.from("deal_threads") as any)
     .select(
-      "id, buyer_user_id, owner_user_id, property_id, status, created_at, properties(id, status, address_line1, address_line2, city, state, postal_code, property_review_status, property_review_status_updated_at, property_review_note, property_review_expires_at, property_review_completed_at, has_secured_property_debt, secured_property_debt_amount, latest_verified_fmv, fmv_verified_at, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, max_accessible_cash_current, ltv_policy_ratio, escalation_deposit_status, escalation_avm_status, closing_review_status)",
+      "id, buyer_user_id, owner_user_id, property_id, status, created_at, properties(id, status, address_line1, address_line2, city, state, postal_code, property_review_status, property_review_status_updated_at, property_review_note, property_review_expires_at, property_review_completed_at, has_secured_property_debt, secured_property_debt_amount, latest_verified_fmv, fmv_verified_at, fmv_verification_source, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, max_accessible_cash_current, ltv_policy_ratio, escalation_deposit_status, escalation_avm_status, closing_review_status, manual_appraisal_status, manual_appraisal_fmv)",
     )
     .eq("deal_id", dealId)
     .maybeSingle();
@@ -616,6 +619,37 @@ export default async function AdminDealReviewPage({
 
   const triageBadge = deal.triage_status ? (TRIAGE_BADGE[deal.triage_status] ?? null) : null;
 
+  // ── Admin live-ineligible recomputation ──────────────────────────────────────
+  // Uses the controlling FMV basis (manual appraisal FMV when available and
+  // complete, otherwise latest_verified_fmv) to determine if the deal is still
+  // live-ineligible. Passed to deriveWorkflowStage so the canonical stage reflects
+  // the current FMV basis even before admin re-triages the deal in the DB.
+  let adminLiveIneligible = false;
+  if (deal.triage_status === "ineligible") {
+    const { fmv: adminControllingFmv } = resolveControllingFmv({
+      latestVerifiedFmv: (property?.latest_verified_fmv as number | null) ?? null,
+      fmvVerificationSource: (property?.fmv_verification_source as string | null) ?? null,
+      manualAppraisalFmv: (property?.manual_appraisal_fmv as number | null) ?? null,
+      manualAppraisalStatus: (property?.manual_appraisal_status as string | null) ?? null,
+    });
+    if (adminControllingFmv != null && latestProposal) {
+      const adminProposalTerms = extractAvmDealTerms(latestProposal.terms_snapshot);
+      const adminLiveCheck = computeAvmEligibility({
+        verifiedFmv: adminControllingFmv,
+        fmvProvider: null,
+        fmvFetchedAt: null,
+        fmvExpiresAt: null,
+        proposedFmv: adminProposalTerms.property_value,
+        securedDebt: debtBasis,
+        ltvRatio: (property?.ltv_policy_ratio as number | null) ?? DEFAULT_LTV_RATIO,
+        requestedCash: adminProposalTerms.upfront_payment,
+      });
+      adminLiveIneligible = adminLiveCheck.result !== "eligible";
+    } else {
+      adminLiveIneligible = true;
+    }
+  }
+
   const dealCanonicalInput: WorkflowStateInput = {
     propertyStatus: (property?.status as string | null) ?? null,
     propertyReviewStatus: propReviewStatus,
@@ -627,6 +661,9 @@ export default async function AdminDealReviewPage({
     threadStatus: effectiveThreadStatus,
     packetStatus: sigData.packet?.status ?? null,
     servicingStatus: (deal.servicing_status as string | null) ?? null,
+    manualAppraisalStatus: (property?.manual_appraisal_status as string | null) ?? null,
+    liveIneligible: adminLiveIneligible,
+    renegotiationStatus: (deal.renegotiation_status as string | null) ?? null,
   };
   const dealCanonical = resolveCanonicalLifecycle(dealCanonicalInput);
 
@@ -753,6 +790,18 @@ export default async function AdminDealReviewPage({
                   : "No milestone — accepted/pending review banner"}
             </span>
           </div>
+          {deal.renegotiation_status === "requested" && (
+            <div className="border-t pt-3 mt-1 flex items-start gap-3">
+              <div className="flex-1 space-y-0.5">
+                <p className="text-xs font-semibold text-amber-900">Renegotiation requested</p>
+                <p className="text-xs text-muted-foreground">
+                  The owner has formally requested renegotiation. Use the button below to clear
+                  this request and allow the revised-terms flow to proceed.
+                </p>
+              </div>
+              <AdminReopenNegotiationButton dealId={dealId} />
+            </div>
+          )}
         </div>
       </div>
 
