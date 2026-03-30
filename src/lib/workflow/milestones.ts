@@ -17,7 +17,6 @@ export type WorkflowStage =
   | "agreement_signed"
   | "deal_closed"
   | "servicing_active"
-  | "servicing_issue"
   | "unknown";
 
 export interface WorkflowStateInput {
@@ -209,17 +208,11 @@ const STAGE_META: Record<WorkflowStage, StageMeta> = {
   servicing_active: {
     stage: "servicing_active",
     stageNumber: 15,
-    adminLabel: "Servicing active",
-    customerLabel: "Payments active",
-    notificationLabel: "Payments active",
-    propertyOwned: false,
-  },
-  servicing_issue: {
-    stage: "servicing_issue",
-    stageNumber: 16,
-    adminLabel: "Servicing issue",
-    customerLabel: "Servicing issue",
-    notificationLabel: "Servicing issue",
+    adminLabel: "Deal active",
+    // null: the tracker does not render for the terminal active state.
+    // A compact "Deal active" card is shown on the deal page instead.
+    customerLabel: null,
+    notificationLabel: "Deal active",
     propertyOwned: false,
   },
   unknown: {
@@ -238,7 +231,6 @@ export function getStageMeta(stage: WorkflowStage): StageMeta {
 
 export function deriveWorkflowStage(state: WorkflowStateInput): WorkflowStage {
   // ── Terminal states (highest priority) ─────────────────────────────────────
-  if (state.servicingStatus === "issue") return "servicing_issue";
   if (state.servicingStatus === "active") return "servicing_active";
   if (state.threadStatus === "closed") return "deal_closed";
   if (state.packetStatus === "completed") return "agreement_signed";
@@ -319,7 +311,7 @@ export const CUSTOMER_MILESTONES: CustomerMilestone[] = [
   { label: "Agreement out for signatures", stages: ["agreement_out_for_signatures"], stageNumber: 12 },
   { label: "Agreement signed", stages: ["agreement_signed"], stageNumber: 13 },
   { label: "Deal closed", stages: ["deal_closed"], stageNumber: 14 },
-  { label: "Payments active", stages: ["servicing_active", "servicing_issue"], stageNumber: 15 },
+  { label: "Deal active", stages: ["servicing_active"], stageNumber: 15 },
 ];
 
 export interface CustomerMilestoneStatus {
@@ -418,23 +410,18 @@ const STAGE_ADMIN_GUIDANCE: Record<WorkflowStage, StageAdminGuidance> = {
   },
   agreement_signed: {
     blocker: null,
-    nextAction: "Close the deal in the 'Deal close & servicing' section",
+    nextAction: "Close the deal in the 'Deal close' section on the admin deal page",
     owningSurface: "deal_review",
   },
   deal_closed: {
     blocker: null,
-    nextAction: "Set servicing to active when payments commence",
+    nextAction: "Mark the deal active once the agreement is confirmed in place",
     owningSurface: "deal_review",
   },
   servicing_active: {
     blocker: null,
-    nextAction: "Monitor servicing — no immediate action required",
-    owningSurface: "external_partner",
-  },
-  servicing_issue: {
-    blocker: "Active servicing issue requires resolution",
-    nextAction: "Investigate and resolve servicing issue, then reset to active",
-    owningSurface: "deal_review",
+    nextAction: "Deal is active — no further action required",
+    owningSurface: null,
   },
 };
 
@@ -462,9 +449,7 @@ const CUSTOMER_HERO_DESCRIPTIONS: Partial<Record<WorkflowStage, string>> = {
   deal_closed:
     "Your agreement is complete and the deal has been closed.",
   servicing_active:
-    "Your agreement is active and payments are in progress.",
-  servicing_issue:
-    "Our team has flagged an item that needs attention. We'll reach out shortly.",
+    "Your agreement is complete and active. Signed documents are available for reference in the section below.",
 };
 
 // Exception callouts — rendered as error/warning cards instead of the normal hero
@@ -521,7 +506,6 @@ export const TERMINAL_WORKFLOW_STAGES: readonly WorkflowStage[] = [
   "agreement_signed",
   "deal_closed",
   "servicing_active",
-  "servicing_issue",
 ] as const;
 
 export function isTerminalWorkflowStage(stage: WorkflowStage): boolean {

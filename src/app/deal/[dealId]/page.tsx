@@ -669,12 +669,22 @@ export default async function DealPage(ctx: PageProps) {
             />
           )}
 
-          {currentStageMeta.customerLabel && (
+          {currentStage === "servicing_active" ? (
+            <div className="rounded-lg border bg-emerald-50/50 p-4">
+              <div className="flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
+                <span className="text-sm font-semibold text-emerald-800">Deal active</span>
+              </div>
+              <p className="mt-2 text-sm text-emerald-700">
+                Your agreement is complete and active. Signed documents are available for reference in the section above.
+              </p>
+            </div>
+          ) : currentStageMeta.customerLabel ? (
             <DealMilestoneTracker
               currentStage={currentStage}
               stageNote={null}
             />
-          )}
+          ) : null}
 
           {/*
            * TODO(fmv-badge): Shared FMV badge for homeowner/investor visibility.
@@ -1286,12 +1296,22 @@ export default async function DealPage(ctx: PageProps) {
             />
           )}
 
-          {canonicalResult.meta.customerLabel && (
+          {canonicalResult.stage === "servicing_active" ? (
+            <div className="rounded-lg border bg-emerald-50/50 p-4">
+              <div className="flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
+                <span className="text-sm font-semibold text-emerald-800">Deal active</span>
+              </div>
+              <p className="mt-2 text-sm text-emerald-700">
+                Your agreement is complete and active. Signed documents are available for reference in the section above.
+              </p>
+            </div>
+          ) : canonicalResult.meta.customerLabel ? (
             <DealMilestoneTracker
               currentStage={canonicalResult.stage}
               stageNote={null}
             />
-          )}
+          ) : null}
 
           <DealDetailWidgetPanel
             dealId={dealId}

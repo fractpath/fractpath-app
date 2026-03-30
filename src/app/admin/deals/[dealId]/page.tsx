@@ -1342,25 +1342,19 @@ export default async function AdminDealReviewPage({
         </div>
       </div>
 
-      {/* ── Deal close + servicing ── */}
+      {/* ── Deal close ── */}
       {/*
-        Post-signature workflow for deal close and servicing tracking.
-        Owns deal stages 14 (closed), 15 (servicing active), 16 (servicing issue).
+        Post-signature workflow: close the deal and mark it active.
+        Owns deal stages 14 (closed) and 15 (deal active).
         Property artifacts (title docs, review notes) remain on the property page.
-        Deal artifacts (signed docs, servicing notes) remain here.
-
-        TODO(servicing-partner): Replace simulation with real servicing partner status ingestion.
+        Deal artifacts (signed docs) remain in the signature section above.
       */}
       <div className="rounded-lg border overflow-hidden">
         <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b flex items-center gap-2">
-          <span>Deal close &amp; servicing</span>
+          <span>Deal close</span>
           {deal.servicing_status === "active" ? (
             <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-emerald-100 text-emerald-800">
-              Servicing active
-            </span>
-          ) : deal.servicing_status === "issue" ? (
-            <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-red-100 text-red-800">
-              Servicing issue
+              Deal active
             </span>
           ) : effectiveThreadStatus === "closed" ? (
             <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-gray-800 text-white">
@@ -1371,16 +1365,13 @@ export default async function AdminDealReviewPage({
               Not closed
             </span>
           )}
-          <span className="ml-auto text-xs text-muted-foreground font-normal italic">
-            [SIMULATION]
-          </span>
         </div>
         <div className="p-4">
           <AdminDealServicingPanel
             dealId={dealId}
             threadStatus={effectiveThreadStatus}
             packetStatus={sigData.packet?.status ?? null}
-            servicingStatus={(deal.servicing_status as "active" | "issue" | null) ?? null}
+            servicingStatus={(deal.servicing_status as "active" | null) ?? null}
             servicingNote={(deal.servicing_note as string | null) ?? null}
           />
         </div>

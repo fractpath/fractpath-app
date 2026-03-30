@@ -3,17 +3,15 @@ import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { createServiceClient } from "@/lib/supabase/service";
 import { notifyMilestoneForDeal } from "@/lib/workflow/notifyMilestone";
 
-const ALLOWED_ACTIONS = new Set(["active", "issue", "reset"]);
+const ALLOWED_ACTIONS = new Set(["active", "reset"]);
 
 const ACTION_TO_STATUS: Record<string, string | null> = {
   active: "active",
-  issue: "issue",
   reset: null,
 };
 
 const ACTION_TO_NOTIFICATION: Record<string, string | null> = {
-  active: "Payments active",
-  issue: "Servicing issue",
+  active: "Deal active",
   reset: null,
 };
 
@@ -57,7 +55,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   if (updateErr) {
     console.error("ADMIN_SERVICING_UPDATE_FAILED", { dealId, action, error: updateErr });
-    return jsonError("Failed to update servicing status", 500);
+    return jsonError("Failed to update deal status", 500);
   }
 
   await (svc.from("deal_events") as any).insert({
@@ -65,7 +63,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     event_type: "DEAL_WORKFLOW_STAGE_CHANGED",
     payload: {
       stage: newStatus ? `servicing_${newStatus}` : "servicing_reset",
-      stage_label: ACTION_TO_NOTIFICATION[action] ?? "Servicing updated",
+      stage_label: ACTION_TO_NOTIFICATION[action] ?? "Deal status updated",
       note: note?.trim() || null,
     },
     created_by: admin.user.id,
