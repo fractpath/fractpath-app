@@ -102,14 +102,21 @@ export async function POST(
     return json(404, { ok: false, error: "Proposal not found" });
   }
 
-  if (proposal.status !== "submitted") {
+  // Allow countering an accepted proposal when the deal is live-ineligible (void).
+  // Standard path: proposal.status === "submitted". Void path: proposal.status === "accepted".
+  const isVoidIneligibleCounter = proposal.status === "accepted";
+
+  if (proposal.status !== "submitted" && !isVoidIneligibleCounter) {
     return json(409, {
       ok: false,
       error: `Cannot counter a proposal with status: ${proposal.status}`,
     });
   }
 
-  if (proposal.created_by_user_id === user.id) {
+  // For void counters only: skip the "can't counter your own proposal" guard.
+  // In the void/ineligible case the deal is non-executable regardless of who originally
+  // sent the accepted proposal, and the owner must be able to restart the negotiation.
+  if (!isVoidIneligibleCounter && proposal.created_by_user_id === user.id) {
     return json(403, {
       ok: false,
       error:
@@ -128,11 +135,30 @@ export async function POST(
     return json(404, { ok: false, error: "Thread not found" });
   }
 
-  if (!["pending_owner", "negotiating"].includes(thread.status)) {
+  const isVoidAcceptedThread = thread.status === "accepted";
+
+  if (!["pending_owner", "negotiating"].includes(thread.status) && !isVoidAcceptedThread) {
     return json(409, {
       ok: false,
       error: `Cannot counter in thread status: ${thread.status}`,
     });
+  }
+
+  // Void-ineligible guard: verify the deal is actually ineligible before allowing
+  // either bypass. This prevents the accepted-proposal path from being abused on
+  // healthy deals where the thread happened to reach accepted status normally.
+  if (isVoidIneligibleCounter || isVoidAcceptedThread) {
+    const { data: voidCheckDeal } = await (svc.from("deals") as any)
+      .select("triage_status")
+      .eq("id", thread.deal_id)
+      .maybeSingle();
+
+    if (voidCheckDeal?.triage_status !== "ineligible") {
+      return json(409, {
+        ok: false,
+        error: `Cannot counter a proposal with status: ${proposal.status} — deal is not ineligible`,
+      });
+    }
   }
 
   const isBuyer = thread.buyer_user_id === user.id;
@@ -235,7 +261,7 @@ export async function POST(
   const { error: oldUpdErr } = await (svc.from("deal_proposals") as any)
     .update({ status: "withdrawn" })
     .eq("id", proposalId)
-    .eq("status", "submitted");
+    .in("status", ["submitted", "accepted"]);
 
   if (oldUpdErr) {
     console.error("counter_old_proposal_update_error", oldUpdErr);

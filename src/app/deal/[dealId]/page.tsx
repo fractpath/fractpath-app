@@ -25,6 +25,7 @@ import {
   AttomRequiredDealOwnerBlock,
   AttomRequiredDealBuyerBlock,
 } from "@/components/deal/IneligibleDealBlock";
+import { VoidOwnerCounterSection } from "@/components/deal/VoidOwnerCounterSection";
 import {
   resolveControllingFmv,
   computeAvmEligibility,
@@ -451,9 +452,12 @@ export default async function DealPage(ctx: PageProps) {
     // Show ineligible block only when the deal is historically ineligible AND the
     // fresh check under the current controlling basis also shows not-eligible.
     // If controlling FMV is unavailable (cFmv=null), fall back to raw triage alone.
+    // Suppress when thread is already negotiating: revised terms have been submitted,
+    // so the void/ineligible informational copy is stale — the negotiation flow takes over.
     const showIneligibleBlock =
       rawTriageIneligible &&
-      (liveEligibilityResult === null || liveEligibilityResult !== "eligible");
+      (liveEligibilityResult === null || liveEligibilityResult !== "eligible") &&
+      effectiveThread?.status !== "negotiating";
     // When the deal is live-ineligible, it is void/non-executable.
     // Unlock editing so the owner can counter or revise terms — no admin reopen needed.
     if (showIneligibleBlock) editingLocked = false;
@@ -500,6 +504,20 @@ export default async function DealPage(ctx: PageProps) {
     if (showIneligibleBlock && ineligibleDescription === null) {
       ineligibleDescription = canonicalResult.exceptionDescription ?? null;
     }
+
+    // Formal void counter UI: owner sees a "Propose revised terms" flow (not just
+    // informational copy or an intent-log button) when:
+    //   • the deal is live-ineligible and thread not yet in renegotiation (showIneligibleBlock)
+    //   • ATTOM has completed — attom_required is resolved (currentStage !== "attom_required")
+    //   • the viewer is the owner
+    //   • there is a current proposal to counter against
+    //   • normal negotiation flow is not already active (avoids double-rendering)
+    const showVoidOwnerCounterUi =
+      showIneligibleBlock &&
+      isOwner &&
+      currentStage !== "attom_required" &&
+      !!negState.currentProposal &&
+      !showNegotiationUi;
 
     return (
       <div className="min-h-screen">
@@ -583,6 +601,17 @@ export default async function DealPage(ctx: PageProps) {
               renegotiationAlreadyRequested={currentStage === "renegotiation_requested"}
             />
           )}
+
+          {/* Formal void counter flow — owner only, ATTOM complete, prior proposal exists.
+              Rendered alongside IneligibleDealOwnerBlock so the owner can both log intent
+              and formally submit revised terms through the thread in a single page view. */}
+          {showVoidOwnerCounterUi && (
+            <VoidOwnerCounterSection
+              proposalId={negState.currentProposal!.id}
+              currentTerms={negState.currentProposal!.terms_snapshot ?? null}
+            />
+          )}
+
           {showIneligibleBlock && !isOwner && currentStage === "attom_required" && (
             <AttomRequiredDealBuyerBlock />
           )}
@@ -1036,9 +1065,12 @@ export default async function DealPage(ctx: PageProps) {
         fallbackLiveEligibilityResult = card.result;
       }
     }
+    // Suppress ineligible block when thread is already negotiating: revised terms have been
+    // submitted, so the void/ineligible informational copy is stale.
     const fallbackShowIneligibleBlock =
       fallbackRawTriageIneligible &&
-      (fallbackLiveEligibilityResult === null || fallbackLiveEligibilityResult !== "eligible");
+      (fallbackLiveEligibilityResult === null || fallbackLiveEligibilityResult !== "eligible") &&
+      effectiveThread?.status !== "negotiating";
     // When the deal is live-ineligible, it is void/non-executable.
     // Unlock editing so the owner can counter or revise terms — no admin reopen needed.
     if (fallbackShowIneligibleBlock) editingLocked = false;
@@ -1090,6 +1122,14 @@ export default async function DealPage(ctx: PageProps) {
     if (fallbackShowIneligibleBlock && fallbackIneligibleDescription === null) {
       fallbackIneligibleDescription = canonicalResult.exceptionDescription ?? null;
     }
+
+    // Formal void counter UI (fallback path) — mirrors primary path logic.
+    const fallbackShowVoidOwnerCounterUi =
+      fallbackShowIneligibleBlock &&
+      fallbackIsOwner &&
+      canonicalResult.stage !== "attom_required" &&
+      !!negState.currentProposal &&
+      !showNegotiationUi;
 
     return (
       <div className="min-h-screen">
@@ -1173,6 +1213,15 @@ export default async function DealPage(ctx: PageProps) {
               renegotiationAlreadyRequested={canonicalResult.stage === "renegotiation_requested"}
             />
           )}
+
+          {/* Formal void counter flow — fallback path, owner only. */}
+          {fallbackShowVoidOwnerCounterUi && (
+            <VoidOwnerCounterSection
+              proposalId={negState.currentProposal!.id}
+              currentTerms={negState.currentProposal!.terms_snapshot ?? null}
+            />
+          )}
+
           {fallbackShowIneligibleBlock && !fallbackIsOwner && canonicalResult.stage === "attom_required" && (
             <AttomRequiredDealBuyerBlock />
           )}
