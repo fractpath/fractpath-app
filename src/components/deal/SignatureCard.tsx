@@ -103,7 +103,6 @@ const STATE_CARD_CLASSES: Record<CardState, string> = {
   prepared: "border-amber-200 bg-amber-50",
   sent: "border-blue-200 bg-blue-50",
   partially_signed: "border-blue-200 bg-blue-50",
-  // Neutral/record tone for completed — not a banner, not a success alert
   completed: "border-gray-200 bg-white",
   declined: "border-red-200 bg-red-50",
   voided: "border-gray-200 bg-gray-50",
@@ -119,221 +118,165 @@ const BADGE_CLASSES: Record<BadgeTone, string> = {
 };
 
 // ============================================================
-// Tracker
+// Signer detail — flat recipient list (not a workflow ladder)
 // ============================================================
 
-type TrackerStageState = "complete" | "active" | "pending";
-
-type TrackerStage = {
-  label: string;
-  sublabel?: string;
-  timestamp?: string;
-};
-
-function buildTrackerStages(
-  state: CardState,
-  packet: SignaturePacketView | null,
-  recipients: SignatureRecipientView[],
-): Array<TrackerStage & { stageState: TrackerStageState }> {
-  const buyer = recipients.find((r) => r.role === "Buyer") ?? null;
-  const owner = recipients.find((r) => r.role === "Owner") ?? null;
-
-  const buyerSigned = buyer?.provider_status?.toLowerCase() === "completed";
-  const ownerSigned = owner?.provider_status?.toLowerCase() === "completed";
-
-  function fmt(ts: string | null | undefined): string | undefined {
-    if (!ts) return undefined;
-    return new Date(ts).toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-  }
-
-  const buyerLabel = buyer?.display_name
-    ? buyer.display_name
-    : buyer?.email
-      ? buyer.email
-      : "Buyer";
-
-  const ownerLabel = owner?.display_name
-    ? owner.display_name
-    : owner?.email
-      ? owner.email
-      : "Owner";
-
-  type RawStage = TrackerStage & { stageState: TrackerStageState };
-
-  const dealAcceptedState: TrackerStageState =
-    state === "pre_acceptance" ? "pending" : "complete";
-
-  const agreementPreparedState: TrackerStageState =
-    state === "pre_acceptance" || state === "ready" ? "pending" : "complete";
-
-  const sentForSignatureState: TrackerStageState =
-    state === "sent" || state === "partially_signed" || state === "completed"
-      ? "complete"
-      : "pending";
-
-  const buyerStageState: TrackerStageState = buyerSigned
-    ? "complete"
-    : state === "sent" || state === "partially_signed"
-      ? "active"
-      : "pending";
-
-  const ownerStageState: TrackerStageState = ownerSigned
-    ? "complete"
-    : state === "sent" || state === "partially_signed"
-      ? "active"
-      : "pending";
-
-  const stages: RawStage[] = [
-    {
-      label: "Deal accepted",
-      stageState: dealAcceptedState,
-    },
-    {
-      label: "Agreement prepared",
-      stageState: agreementPreparedState,
-    },
-    {
-      label: "Sent for signature",
-      timestamp:
-        state === "sent" ||
-        state === "partially_signed" ||
-        state === "completed"
-          ? fmt(packet?.sent_at)
-          : undefined,
-      stageState: sentForSignatureState,
-    },
-    {
-      label: buyerSigned ? "Buyer signed" : "Waiting on Buyer",
-      sublabel:
-        state === "sent" || state === "partially_signed" || buyerSigned
-          ? buyerLabel
-          : undefined,
-      timestamp: buyerSigned ? fmt(buyer?.signed_at) : undefined,
-      stageState: buyerStageState,
-    },
-    {
-      label: ownerSigned ? "Owner signed" : "Waiting on Owner",
-      sublabel:
-        state === "sent" || state === "partially_signed" || ownerSigned
-          ? ownerLabel
-          : undefined,
-      timestamp: ownerSigned ? fmt(owner?.signed_at) : undefined,
-      stageState: ownerStageState,
-    },
-    {
-      label: "Executed documents available",
-      timestamp: state === "completed" ? fmt(packet?.completed_at) : undefined,
-      stageState: state === "completed" ? "complete" : "pending",
-    },
-  ];
-
-  if (state === "declined" || state === "voided" || state === "error") {
-    return [
-      { label: "Deal accepted", stageState: "complete" },
-      {
-        label: STATE_LABEL[state],
-        sublabel:
-          state === "declined"
-            ? "One or more parties declined to sign."
-            : state === "voided"
-              ? "The signature request was voided."
-              : "An error occurred. Contact support.",
-        timestamp:
-          state === "declined"
-            ? fmt(packet?.declined_at)
-            : state === "voided"
-              ? fmt(packet?.voided_at)
-              : undefined,
-        stageState: "active",
-      },
-    ];
-  }
-
-  return stages;
-}
-
-// ============================================================
-// Tracker sub-component
-// ============================================================
-
-function StageIndicator({ stageState }: { stageState: TrackerStageState }) {
-  if (stageState === "complete") {
-    return (
-      <div className="relative z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 border-green-500 bg-green-500">
-        <svg
-          className="h-3 w-3 text-white"
-          viewBox="0 0 12 12"
-          fill="none"
-          aria-hidden="true"
-        >
-          <path
-            d="M2 6l3 3 5-5"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </div>
-    );
-  }
-  if (stageState === "active") {
-    return (
-      <div className="relative z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 border-blue-500 bg-blue-500">
-        <div className="h-2 w-2 rounded-full bg-white" />
-      </div>
-    );
-  }
+function CheckIcon() {
   return (
-    <div className="relative z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 border-gray-300 bg-white" />
+    <svg
+      className="h-2.5 w-2.5 text-white"
+      viewBox="0 0 12 12"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d="M2 6l3 3 5-5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 
-function SignatureTracker({
-  stages,
-}: {
-  stages: Array<TrackerStage & { stageState: TrackerStageState }>;
-}) {
+function fmtDate(ts: string | null | undefined): string | null {
+  if (!ts) return null;
+  return new Date(ts).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function SignerList({ recipients }: { recipients: SignatureRecipientView[] }) {
+  if (!recipients.length) return null;
   return (
-    <div>
-      {stages.map((stage, idx) => {
-        const isLast = idx === stages.length - 1;
+    <ul className="space-y-1.5" data-testid="signer-list">
+      {recipients.map((r, idx) => {
+        const signed = r.provider_status?.toLowerCase() === "completed";
+        const name = r.display_name ?? r.email ?? r.role;
+        const signedDate = signed ? fmtDate(r.signed_at) : null;
         return (
-          <div key={idx} className="relative flex gap-3">
-            {!isLast && (
-              <div className="absolute left-3 top-6 bottom-0 w-px bg-gray-200" />
-            )}
-            <div className="pt-0.5 pb-0">
-              <StageIndicator stageState={stage.stageState} />
-            </div>
-            <div className={`flex-1 ${isLast ? "pb-0" : "pb-4"}`}>
-              <p
-                className={`text-sm font-medium leading-tight ${
-                  stage.stageState === "pending"
-                    ? "text-muted-foreground"
-                    : "text-foreground"
-                }`}
-              >
-                {stage.label}
-              </p>
-              {stage.sublabel && (
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  {stage.sublabel}
-                </p>
+          <li key={idx} className="flex items-center gap-2 text-xs">
+            <span
+              className={`h-4 w-4 shrink-0 rounded-full flex items-center justify-center ${
+                signed
+                  ? "bg-green-500"
+                  : "border-2 border-gray-300 bg-white"
+              }`}
+            >
+              {signed && <CheckIcon />}
+            </span>
+            <span
+              className={signed ? "text-foreground" : "text-muted-foreground"}
+            >
+              {name}
+              <span className="ml-1 text-muted-foreground">({r.role})</span>
+              {signedDate && (
+                <span className="ml-1 text-muted-foreground">
+                  · {signedDate}
+                </span>
               )}
-              {stage.timestamp && (
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  {stage.timestamp}
-                </p>
-              )}
-            </div>
-          </div>
+            </span>
+          </li>
         );
       })}
+    </ul>
+  );
+}
+
+// ============================================================
+// Executed documents block (completed state only)
+// ============================================================
+
+function DocIcon() {
+  return (
+    <svg
+      className="h-3.5 w-3.5 shrink-0"
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d="M3 2h7l3 3v9H3V2z"
+        stroke="currentColor"
+        strokeWidth="1.25"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M10 2v3h3"
+        stroke="currentColor"
+        strokeWidth="1.25"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function ExecutedDocumentsBlock({
+  packet,
+  execAgreementUrl,
+  certificateUrl,
+}: {
+  packet: SignaturePacketView | null;
+  execAgreementUrl: string | null;
+  certificateUrl: string | null;
+}) {
+  const hasDocuments = !!(execAgreementUrl || certificateUrl);
+  const completedDate = fmtDate(packet?.completed_at);
+
+  return (
+    <div
+      className="rounded-md border border-gray-200 bg-gray-50 p-4 space-y-3"
+      data-testid="executed-documents-section"
+    >
+      <div>
+        <p className="text-sm font-semibold text-foreground">
+          Executed Documents
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {hasDocuments
+            ? "Your agreement has been fully executed and stored for reference."
+            : "Documents are being finalized. Check back shortly or contact FractPath support."}
+        </p>
+      </div>
+
+      {hasDocuments && (
+        <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
+          {execAgreementUrl && (
+            <a
+              href={execAgreementUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-foreground hover:bg-gray-100"
+              data-testid="exec-agreement-btn"
+            >
+              <DocIcon />
+              View executed agreement
+            </a>
+          )}
+          {certificateUrl && (
+            <a
+              href={certificateUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-gray-100"
+              data-testid="certificate-btn"
+            >
+              <DocIcon />
+              View certificate of completion
+            </a>
+          )}
+        </div>
+      )}
+
+      {completedDate && (
+        <p className="text-[11px] text-muted-foreground">
+          Executed on {completedDate}
+          {packet?.provider ? ` via ${packet.provider}` : ""}
+        </p>
+      )}
     </div>
   );
 }
@@ -428,177 +371,6 @@ function AdminActionButton({
 }
 
 // ============================================================
-// Completed-state body: Executed Documents + Processing Status
-// ============================================================
-
-function DocIcon() {
-  return (
-    <svg
-      className="h-3.5 w-3.5 shrink-0"
-      viewBox="0 0 16 16"
-      fill="none"
-      aria-hidden="true"
-    >
-      <path
-        d="M3 2h7l3 3v9H3V2z"
-        stroke="currentColor"
-        strokeWidth="1.25"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M10 2v3h3"
-        stroke="currentColor"
-        strokeWidth="1.25"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-type ProcessingStep = {
-  label: string;
-  done: boolean;
-};
-
-const PROCESSING_STEPS: ProcessingStep[] = [
-  { label: "Agreement executed", done: true },
-  { label: "Documents under review", done: false },
-  { label: "Partner processing", done: false },
-  { label: "Activation complete", done: false },
-];
-
-function ProcessingStepRow({ label, done }: ProcessingStep) {
-  return (
-    <div className="flex items-center gap-2.5">
-      {done ? (
-        <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green-500">
-          <svg
-            className="h-2.5 w-2.5 text-white"
-            viewBox="0 0 12 12"
-            fill="none"
-            aria-hidden="true"
-          >
-            <path
-              d="M2 6l3 3 5-5"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </div>
-      ) : (
-        <div className="h-5 w-5 shrink-0 rounded-full border-2 border-gray-200 bg-white" />
-      )}
-      <span
-        className={`text-xs ${done ? "text-foreground font-medium" : "text-muted-foreground"}`}
-      >
-        {label}
-      </span>
-    </div>
-  );
-}
-
-function CompletedStateBody({
-  packet,
-  execAgreementUrl,
-  certificateUrl,
-}: {
-  packet: SignaturePacketView | null;
-  execAgreementUrl: string | null;
-  certificateUrl: string | null;
-}) {
-  const hasDocuments = !!(execAgreementUrl || certificateUrl);
-
-  const completedDate = packet?.completed_at
-    ? new Date(packet.completed_at).toLocaleDateString(undefined, {
-        month: "long",
-        day: "numeric",
-        year: "numeric",
-      })
-    : null;
-
-  return (
-    <div className="space-y-3" data-testid="completed-state-body">
-      {/* Section 1: Executed Documents */}
-      <div
-        className="rounded-md border border-gray-200 bg-gray-50 p-4 space-y-3"
-        data-testid="executed-documents-section"
-      >
-        <div>
-          <p className="text-sm font-semibold text-foreground">
-            Executed Documents
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {hasDocuments
-              ? "Your agreement has been fully executed and stored for future reference."
-              : "Documents are being finalized. Check back shortly or contact FractPath support."}
-          </p>
-        </div>
-
-        {hasDocuments ? (
-          <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
-            {execAgreementUrl ? (
-              <a
-                href={execAgreementUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-foreground hover:bg-gray-100"
-                data-testid="exec-agreement-btn"
-              >
-                <DocIcon />
-                View executed agreement
-              </a>
-            ) : null}
-            {certificateUrl ? (
-              <a
-                href={certificateUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-gray-100"
-                data-testid="certificate-btn"
-              >
-                <DocIcon />
-                View certificate of completion
-              </a>
-            ) : null}
-          </div>
-        ) : null}
-
-        {completedDate && (
-          <p className="text-[11px] text-muted-foreground">
-            Executed on {completedDate}
-            {packet?.provider ? ` via ${packet.provider}` : ""}
-          </p>
-        )}
-      </div>
-
-      {/* Section 2: Processing Status */}
-      <div
-        className="rounded-md border border-gray-200 bg-gray-50 p-4 space-y-3"
-        data-testid="processing-status-section"
-      >
-        <div>
-          <p className="text-sm font-semibold text-foreground">
-            Processing Status
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            FractPath is completing the next steps required to activate this
-            agreement.
-          </p>
-        </div>
-
-        <div className="space-y-2">
-          {PROCESSING_STEPS.map((step) => (
-            <ProcessingStepRow key={step.label} {...step} />
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ============================================================
 // Main card
 // ============================================================
 
@@ -637,11 +409,10 @@ export function SignatureCard({
 
   const copy = explainerCopy[state];
 
-  // For non-completed states, build the tracker as before
-  const stages =
-    state !== "completed"
-      ? buildTrackerStages(state, packet, recipients)
-      : [];
+  // Show signer detail when the packet is in an active-signing or completed state.
+  const showSignerDetail =
+    recipients.length > 0 &&
+    ["sent", "partially_signed", "completed"].includes(state);
 
   return (
     <div
@@ -674,14 +445,14 @@ export function SignatureCard({
         )}
       </div>
 
-      {/* Non-completed body: explainer + tracker + legacy doc links + admin actions */}
+      {/* Non-completed body: explainer + signer detail + admin actions */}
       {state !== "completed" && (
         <>
           {copy && <p className="text-xs text-muted-foreground">{copy}</p>}
 
-          {stages.length > 0 && (
+          {showSignerDetail && (
             <div className="pt-1">
-              <SignatureTracker stages={stages} />
+              <SignerList recipients={recipients} />
             </div>
           )}
 
@@ -699,13 +470,20 @@ export function SignatureCard({
         </>
       )}
 
-      {/* Completed body: Executed Documents + Processing Status */}
+      {/* Completed body: executed documents + signer detail */}
       {state === "completed" && (
-        <CompletedStateBody
-          packet={packet}
-          execAgreementUrl={execAgreementUrl}
-          certificateUrl={certificateUrl}
-        />
+        <div className="space-y-3" data-testid="completed-state-body">
+          <ExecutedDocumentsBlock
+            packet={packet}
+            execAgreementUrl={execAgreementUrl}
+            certificateUrl={certificateUrl}
+          />
+          {showSignerDetail && (
+            <div className="pt-1">
+              <SignerList recipients={recipients} />
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
