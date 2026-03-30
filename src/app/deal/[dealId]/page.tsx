@@ -512,12 +512,36 @@ export default async function DealPage(ctx: PageProps) {
     //   • the viewer is the owner
     //   • there is a current proposal to counter against
     //   • normal negotiation flow is not already active (avoids double-rendering)
+    // Gate on canonicalResult.isExceptionState — the same condition that fires the
+    // exception banner — NOT showIneligibleBlock.  showIneligibleBlock is suppressed
+    // when live FMV recomputation clears the ineligibility, but the canonical stage
+    // may still be deal_terms_ineligible because the DB triage_status hasn't been
+    // updated yet.  Tying the counter UI to the banner condition makes them consistent:
+    // if the owner sees an exception banner, they must also see a way to act on it.
     const showVoidOwnerCounterUi =
-      showIneligibleBlock &&
-      isOwner &&
+      canonicalResult.isExceptionState &&
       currentStage !== "attom_required" &&
+      isOwner &&
       !!negState.currentProposal &&
       !showNegotiationUi;
+
+    console.log("[DEAL_PAGE_DIAG][PRIMARY]", {
+      dealId,
+      path: "primary",
+      userId: user.id,
+      isOwner,
+      triageStatus: (deal as any).triage_status,
+      rawTriageIneligible,
+      liveEligibilityResult,
+      effectiveThreadStatus: effectiveThread?.status ?? null,
+      showIneligibleBlock,
+      isExceptionState: canonicalResult.isExceptionState,
+      currentStage,
+      showNegotiationUi,
+      currentProposalId: negState.currentProposal?.id ?? null,
+      currentProposalStatus: negState.currentProposal?.status ?? null,
+      showVoidOwnerCounterUi,
+    });
 
     return (
       <div className="min-h-screen">
@@ -1123,13 +1147,35 @@ export default async function DealPage(ctx: PageProps) {
       fallbackIneligibleDescription = canonicalResult.exceptionDescription ?? null;
     }
 
-    // Formal void counter UI (fallback path) — mirrors primary path logic.
+    // Formal void counter UI (fallback path).
+    // Gated on canonicalResult.isExceptionState (not fallbackShowIneligibleBlock) — same
+    // reason as primary path: live FMV recomputation may clear the ineligible block while
+    // the canonical stage is still deal_terms_ineligible, leaving the owner with an
+    // exception banner but no action.
     const fallbackShowVoidOwnerCounterUi =
-      fallbackShowIneligibleBlock &&
-      fallbackIsOwner &&
+      canonicalResult.isExceptionState &&
       canonicalResult.stage !== "attom_required" &&
+      fallbackIsOwner &&
       !!negState.currentProposal &&
       !showNegotiationUi;
+
+    console.log("[DEAL_PAGE_DIAG][FALLBACK]", {
+      dealId,
+      path: "fallback",
+      userId: user.id,
+      fallbackIsOwner,
+      triageStatus: fallbackDeal?.triage_status,
+      fallbackRawTriageIneligible,
+      fallbackLiveEligibilityResult,
+      effectiveThreadStatus: effectiveThread?.status ?? null,
+      fallbackShowIneligibleBlock,
+      isExceptionState: canonicalResult.isExceptionState,
+      canonicalStage: canonicalResult.stage,
+      showNegotiationUi,
+      currentProposalId: negState.currentProposal?.id ?? null,
+      currentProposalStatus: negState.currentProposal?.status ?? null,
+      fallbackShowVoidOwnerCounterUi,
+    });
 
     return (
       <div className="min-h-screen">
