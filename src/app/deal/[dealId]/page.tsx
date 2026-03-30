@@ -525,24 +525,6 @@ export default async function DealPage(ctx: PageProps) {
       !!negState.currentProposal &&
       !showNegotiationUi;
 
-    console.log("[DEAL_PAGE_DIAG][PRIMARY]", {
-      dealId,
-      path: "primary",
-      userId: user.id,
-      isOwner,
-      triageStatus: (deal as any).triage_status,
-      rawTriageIneligible,
-      liveEligibilityResult,
-      effectiveThreadStatus: effectiveThread?.status ?? null,
-      showIneligibleBlock,
-      isExceptionState: canonicalResult.isExceptionState,
-      currentStage,
-      showNegotiationUi,
-      currentProposalId: negState.currentProposal?.id ?? null,
-      currentProposalStatus: negState.currentProposal?.status ?? null,
-      showVoidOwnerCounterUi,
-    });
-
     return (
       <div className="min-h-screen">
         <AppHeader />
@@ -1158,24 +1140,6 @@ export default async function DealPage(ctx: PageProps) {
       fallbackIsOwner &&
       !!negState.currentProposal &&
       !showNegotiationUi;
-
-    console.log("[DEAL_PAGE_DIAG][FALLBACK]", {
-      dealId,
-      path: "fallback",
-      userId: user.id,
-      fallbackIsOwner,
-      triageStatus: fallbackDeal?.triage_status,
-      fallbackRawTriageIneligible,
-      fallbackLiveEligibilityResult,
-      effectiveThreadStatus: effectiveThread?.status ?? null,
-      fallbackShowIneligibleBlock,
-      isExceptionState: canonicalResult.isExceptionState,
-      canonicalStage: canonicalResult.stage,
-      showNegotiationUi,
-      currentProposalId: negState.currentProposal?.id ?? null,
-      currentProposalStatus: negState.currentProposal?.status ?? null,
-      fallbackShowVoidOwnerCounterUi,
-    });
 
     return (
       <div className="min-h-screen">
