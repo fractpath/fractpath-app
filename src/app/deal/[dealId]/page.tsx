@@ -15,6 +15,7 @@ import type { SignaturePacketView, SignatureRecipientView } from "@/components/d
 import { DealMilestoneTracker } from "@/components/deal/DealMilestoneTracker";
 import {
   resolveCanonicalLifecycle,
+  isTerminalWorkflowStage,
   type WorkflowStateInput,
 } from "@/lib/workflow/milestones";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
@@ -500,6 +501,11 @@ export default async function DealPage(ctx: PageProps) {
     const canonicalResult = resolveCanonicalLifecycle(workflowStateInput);
     const currentStage = canonicalResult.stage;
     const currentStageMeta = canonicalResult.meta;
+    // Terminal stages (agreement_signed, deal_closed, servicing_active, servicing_issue)
+    // occur after the thread is closed, so thread.status is no longer "accepted" and the
+    // earlier editingLocked check misses them.  Apply the terminal lock here where the
+    // canonical stage is known — this is the single authoritative terminal-read-only rule.
+    if (isTerminalWorkflowStage(currentStage)) editingLocked = true;
     // Fallback description: use canonical exception copy when not manual-appraisal basis.
     if (showIneligibleBlock && ineligibleDescription === null) {
       ineligibleDescription = canonicalResult.exceptionDescription ?? null;
@@ -1095,10 +1101,6 @@ export default async function DealPage(ctx: PageProps) {
       .order("created_at", { ascending: false })
       .limit(50);
 
-    const fallbackCanEdit =
-      (directOwnerMatches || threadOwnerMatches || grantMatches) &&
-      !editingLocked;
-
     const fallbackIsOwner =
       directOwnerMatches || threadOwnerMatches || grantMatches;
 
@@ -1124,6 +1126,13 @@ export default async function DealPage(ctx: PageProps) {
       renegotiationStatus: fallbackDeal?.renegotiation_status ?? null,
     };
     const canonicalResult = resolveCanonicalLifecycle(fallbackWorkflowInput);
+    // Terminal lock — same rule as primary path.  Must come after canonicalResult
+    // because fallbackCanEdit also depends on editingLocked and is declared below.
+    if (isTerminalWorkflowStage(canonicalResult.stage)) editingLocked = true;
+    // fallbackCanEdit is declared here (after canonicalResult) so the terminal lock above
+    // is reflected.  It was previously computed before canonicalResult, which meant the
+    // terminal lock could not reach it.
+    const fallbackCanEdit = fallbackIsOwner && !editingLocked;
     // Fallback description: use canonical exception copy when not manual-appraisal basis.
     if (fallbackShowIneligibleBlock && fallbackIneligibleDescription === null) {
       fallbackIneligibleDescription = canonicalResult.exceptionDescription ?? null;

@@ -509,6 +509,25 @@ export interface CanonicalLifecycleResult {
   manualAppraisalStatus: string | null;
 }
 
+/**
+ * Terminal workflow stages — a deal in one of these stages is fully executed
+ * and must be treated as read-only on the detail page.
+ *
+ * Note: `ready_for_signatures` and `agreement_out_for_signatures` are already
+ * locked by the existing thread-status check (`thread.status === "accepted"`)
+ * so they do not need to appear here.
+ */
+export const TERMINAL_WORKFLOW_STAGES: readonly WorkflowStage[] = [
+  "agreement_signed",
+  "deal_closed",
+  "servicing_active",
+  "servicing_issue",
+] as const;
+
+export function isTerminalWorkflowStage(stage: WorkflowStage): boolean {
+  return (TERMINAL_WORKFLOW_STAGES as readonly string[]).includes(stage);
+}
+
 export function resolveCanonicalLifecycle(
   state: WorkflowStateInput,
 ): CanonicalLifecycleResult {
