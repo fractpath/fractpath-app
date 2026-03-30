@@ -944,7 +944,7 @@ export default async function AdminPropertyAuditPage({
 
         TODO(manual-appraisal): Replace simulation with real licensed appraiser ordering + result ingestion.
       */}
-      {p.escalation_avm_status === "completed" && linkedDeal?.triage_status === "ineligible" && (
+      {(!!p.manual_appraisal_status || (p.escalation_avm_status === "completed" && linkedDeal?.triage_status === "ineligible")) && (
         <div className="rounded-lg border overflow-hidden">
           <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b flex items-center gap-2">
             <span>Manual appraisal challenge</span>

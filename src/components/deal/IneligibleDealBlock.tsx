@@ -205,11 +205,11 @@ export function IneligibleDealBuyerBlock({ manualAppraisalStatus, renegotiationR
 
   return (
     <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-1.5">
-      <p className="text-sm font-semibold text-amber-900">Revised terms required</p>
+      <p className="text-sm font-semibold text-amber-900">Accepted terms no longer valid — revised terms required</p>
       <p className="text-xs text-amber-800">
-        The current deal terms require revision based on the enhanced property valuation. The
-        homeowner is working to resolve this — either by proposing revised terms or through an
-        additional valuation review.
+        The previously accepted deal terms could not be confirmed under the enhanced property
+        valuation. Those terms are no longer executable. The homeowner is working to resolve
+        this — either by proposing revised terms or through an additional valuation review.
       </p>
       {appraisalInProgress && (
         <p className="text-xs text-blue-800">

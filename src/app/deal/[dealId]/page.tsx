@@ -393,7 +393,7 @@ export default async function DealPage(ctx: PageProps) {
 
     const negState = await loadNegotiationState(svc, effectiveThread, user.id);
 
-    const editingLocked =
+    let editingLocked =
       !!effectiveThread &&
       ["pending_owner", "negotiating", "accepted"].includes(
         effectiveThread.status,
@@ -454,6 +454,9 @@ export default async function DealPage(ctx: PageProps) {
     const showIneligibleBlock =
       rawTriageIneligible &&
       (liveEligibilityResult === null || liveEligibilityResult !== "eligible");
+    // When the deal is live-ineligible, it is void/non-executable.
+    // Unlock editing so the owner can counter or revise terms — no admin reopen needed.
+    if (showIneligibleBlock) editingLocked = false;
     // Contextual description prefilled where we can; fallback to canonicalResult
     // exceptionDescription is applied below after canonicalResult is declared.
     let ineligibleDescription: string | null =
@@ -981,7 +984,7 @@ export default async function DealPage(ctx: PageProps) {
 
     const negState = await loadNegotiationState(svc, effectiveThread, user.id);
 
-    const editingLocked =
+    let editingLocked =
       !!effectiveThread &&
       ["pending_owner", "negotiating", "accepted"].includes(
         effectiveThread.status,
@@ -1036,6 +1039,9 @@ export default async function DealPage(ctx: PageProps) {
     const fallbackShowIneligibleBlock =
       fallbackRawTriageIneligible &&
       (fallbackLiveEligibilityResult === null || fallbackLiveEligibilityResult !== "eligible");
+    // When the deal is live-ineligible, it is void/non-executable.
+    // Unlock editing so the owner can counter or revise terms — no admin reopen needed.
+    if (fallbackShowIneligibleBlock) editingLocked = false;
     // Contextual description prefilled where we can; fallback to canonicalResult
     // exceptionDescription is applied below after canonicalResult is declared.
     let fallbackIneligibleDescription: string | null =
