@@ -200,7 +200,7 @@ export default async function AdminPropertyAuditPage({
       .eq("property_id", propertyId)
       .maybeSingle(),
     (supabase.from("property_review_runs") as any)
-      .select("artifact_type, status, error_message, requested_at, normalized_payload, is_current")
+      .select("artifact_type, status, error_message, requested_at, normalized_payload, raw_payload, is_current")
       .eq("property_id", propertyId)
       .order("requested_at", { ascending: false })
       .limit(10),
@@ -302,6 +302,7 @@ export default async function AdminPropertyAuditPage({
     error_message: string | null;
     requested_at: string;
     normalized_payload: unknown;
+    raw_payload: unknown;
     is_current: boolean;
   }[];
   const latestProfileRun = recentRuns.find((r) => r.artifact_type === "property_profile") ?? null;
@@ -919,6 +920,7 @@ export default async function AdminPropertyAuditPage({
                 status: latestAttomRun.status,
                 requested_at: latestAttomRun.requested_at,
                 normalized_payload: latestAttomRun.normalized_payload as any,
+                raw_payload: latestAttomRun.raw_payload as any,
               }
             : null
         }

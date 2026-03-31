@@ -156,6 +156,15 @@ function fmtMoney(n: number | null | undefined): string | null {
   return `$${Math.round(n).toLocaleString("en-US")}`;
 }
 
+function fmtDateShort(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  try {
+    return new Date(iso).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  } catch {
+    return null;
+  }
+}
+
 function canEdit(status: string): boolean {
   return status === "unverified";
 }
@@ -384,6 +393,15 @@ export function PropertyDetailClient({
               Appraisal expired
             </span>
           )}
+
+          {/* Valid-until hint — only when badge is active (not under review, not expired) */}
+          {showVerifiedAppraisalBadge && !appraisalUnderReview && !appraisalExpired &&
+            property.property_review_expires_at &&
+            fmtDateShort(property.property_review_expires_at) && (
+            <span className="text-xs text-muted-foreground">
+              Valid until {fmtDateShort(property.property_review_expires_at)}
+            </span>
+          )}
         </div>
 
         {property.ownership_status && (
@@ -392,6 +410,28 @@ export function PropertyDetailClient({
           </div>
         )}
       </div>
+
+      {/* Valuation confirmed card — plain-language trust signal when appraisal badge is active */}
+      {showVerifiedAppraisalBadge && !appraisalUnderReview && !appraisalExpired && (
+        <div className="rounded-lg border border-violet-200 bg-violet-50 p-4 space-y-1.5">
+          <div className="flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4 text-violet-700 shrink-0">
+              <path fillRule="evenodd" d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1Zm3.844 4.574a.75.75 0 0 1 .082 1.058l-3.5 4a.75.75 0 0 1-1.09.058L5.086 8.44a.75.75 0 0 1 1.08-1.043l1.696 1.753 2.96-3.385a.75.75 0 0 1 1.022-.19Z" clipRule="evenodd" />
+            </svg>
+            <span className="text-sm font-semibold text-violet-900">Valuation confirmed</span>
+          </div>
+          <p className="text-xs text-violet-800">
+            Your property&apos;s value has been independently verified through our review process.
+            This verified basis is active and on file for your deal.
+          </p>
+          {property.property_review_expires_at && fmtDateShort(property.property_review_expires_at) && (
+            <p className="text-xs text-violet-700">
+              This verification is valid through{" "}
+              <span className="font-medium">{fmtDateShort(property.property_review_expires_at)}</span>.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Submitted property details */}
       {hasAnyIntake ? (

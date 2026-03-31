@@ -83,6 +83,13 @@ export type HomeownerPropertyShape = {
   verified_appraisal_value_status: string | null;
   owner_verification_removed_at: string | null;
   verified_appraisal_value_context_owner_id: string | null;
+  /**
+   * ISO timestamp when the current verified appraisal value expires.
+   * Safe to show to owners — this is a non-sensitive "valid until" date,
+   * not an underwriting metric.  Null until a clean ATTOM screening run has
+   * been materialised onto the property.
+   */
+  property_review_expires_at: string | null;
   // Routing extras (set by the fetcher, not always present)
   visibility?: string;
   claim_thread_id?: string | null;
@@ -141,6 +148,7 @@ export function toHomeownerProperty(
     verified_appraisal_value_status: row.verified_appraisal_value_status ?? null,
     owner_verification_removed_at: row.owner_verification_removed_at ?? null,
     verified_appraisal_value_context_owner_id: row.verified_appraisal_value_context_owner_id ?? null,
+    property_review_expires_at: row.property_review_expires_at ?? null,
     visibility: extras?.visibility,
     claim_thread_id: extras?.claim_thread_id ?? null,
     claim_deal_id: extras?.claim_deal_id ?? null,
