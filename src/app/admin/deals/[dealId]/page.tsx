@@ -11,6 +11,7 @@ import type { SignaturePacketView, SignatureRecipientView } from "@/components/d
 import { getArtifactSignedUrls } from "@/lib/signature/artifacts";
 import {
   resolveCanonicalLifecycle,
+  isTerminalWorkflowStage,
   type WorkflowStateInput,
 } from "@/lib/workflow/milestones";
 import {
@@ -498,9 +499,13 @@ export default async function AdminDealReviewPage({
     : null;
 
   // ── Early derived values (needed before parallel block) ──────────────────
-  // "ready_for_deposit" is the persisted DB value for the signature-ready state.
-  // (The CHECK constraint predates the rename to "ready_for_signatures".)
-  const isSignatureReady = deal.triage_status === "ready_for_deposit";
+  // "ready_for_deposit" is the original persisted DB value; "ready_for_signatures" is the
+  // canonical post-rename value written by AdminDealActions. Both must be handled.
+  // NOTE: terminal-state suppression of the active signer preflight is applied later
+  // using isTerminalStage (derived from dealCanonical after the resolver runs).
+  const isSignatureReady =
+    deal.triage_status === "ready_for_deposit" ||
+    deal.triage_status === "ready_for_signatures";
 
   // Thread status passed to SignatureCard so it can derive its internal CardState.
   const effectiveThreadStatus: string | null = (thread as any)?.status ?? null;
@@ -667,6 +672,10 @@ export default async function AdminDealReviewPage({
   };
   const dealCanonical = resolveCanonicalLifecycle(dealCanonicalInput);
 
+  // Terminal lock — applied to active controls (triage actions, signer preflight).
+  // Mirrors the same guard used on the owner deal page (isTerminalWorkflowStage).
+  const isTerminalStage = isTerminalWorkflowStage(dealCanonical.stage);
+
   const OWNING_SURFACE_LABEL: Record<string, string> = {
     property_review: "Property review page",
     deal_review: "Deal review page",
@@ -711,13 +720,14 @@ export default async function AdminDealReviewPage({
             </p>
           </div>
           <div className="flex flex-wrap gap-1.5 items-center mt-1">
-            {triageBadge ? (
-              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${triageBadge.cls}`}>
-                {triageBadge.label}
-              </span>
-            ) : (
-              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                {dealCanonical.meta.adminLabel}
+            {/* Canonical stage is the authoritative current-state label. */}
+            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+              {dealCanonical.meta.adminLabel}
+            </span>
+            {/* triage_status retained as secondary internal annotation for ops reference. */}
+            {triageBadge && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500">
+                triage: {triageBadge.label}
               </span>
             )}
             {deal.fmv_plausibility_flag && (
@@ -787,7 +797,13 @@ export default async function AdminDealReviewPage({
                 ? `Exception callout: "${dealCanonical.exceptionLabel}"`
                 : dealCanonical.customerHeroLabel
                   ? `"${dealCanonical.customerHeroLabel}"`
-                  : "No milestone — accepted/pending review banner"}
+                  : dealCanonical.stage === "servicing_active"
+                    ? "Deal active card (terminal — agreement complete, deal live)"
+                    : dealCanonical.stage === "agreement_signed"
+                      ? "Agreement signed card (terminal — pending deal activation)"
+                      : dealCanonical.stage === "deal_closed"
+                        ? "Deal closed card (terminal — no further action)"
+                        : "No milestone — accepted/pending review banner"}
             </span>
           </div>
           {deal.renegotiation_status === "requested" && (
@@ -1222,16 +1238,20 @@ export default async function AdminDealReviewPage({
       </div>
 
       {/* ── Signature ── */}
-      {/* Shown when the deal is in the signature-ready state (triage = ready_for_deposit).
-          Pre-flight section runs before any packet is created to surface signer identity blockers.
-          Once a packet exists the preflight is hidden — the send already succeeded. */}
-      {isSignatureReady && (
+      {/* Shown when the deal is in the signature-ready state (either "ready_for_deposit" or
+          "ready_for_signatures") OR when a packet already exists (read-only history for terminal deals).
+          Active signer preflight is suppressed once the deal reaches a terminal workflow stage. */}
+      {(isSignatureReady || sigData.packet != null) && (
         <div className="rounded-lg border overflow-hidden">
           <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b flex items-center gap-2">
             <span>Signature &amp; Documents</span>
             {sigData.packet ? (
               <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-blue-100 text-blue-800 capitalize">
                 {sigData.packet.status.replace(/_/g, " ")}
+              </span>
+            ) : isTerminalStage ? (
+              <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-gray-100 text-gray-500">
+                Terminal — no packet
               </span>
             ) : signersPreflight.allReady ? (
               <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-green-100 text-green-800">
@@ -1244,8 +1264,8 @@ export default async function AdminDealReviewPage({
             )}
           </div>
 
-          {/* Signer-readiness preflight — only shown before packet is created */}
-          {!sigData.packet && (
+          {/* Signer-readiness preflight — only shown before packet is created and not in a terminal state */}
+          {!sigData.packet && !isTerminalStage && (
             <div className="border-b px-4 py-3 space-y-2">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 Signer readiness
@@ -1306,9 +1326,10 @@ export default async function AdminDealReviewPage({
           )}
 
           <div className="p-4">
-            {/* SignatureCard — shown when packet exists, OR when all signers are ready (no packet yet).
+            {/* SignatureCard — shown when packet exists (always, including terminal), OR when all
+                signers are ready and the deal is not yet terminal (no packet yet, active prep flow).
                 Hidden when prerequisites are missing so the "Prepare agreement" button is not reachable. */}
-            {(sigData.packet || signersPreflight.allReady) ? (
+            {(sigData.packet || (signersPreflight.allReady && !isTerminalStage)) ? (
               <SignatureCard
                 dealId={dealId}
                 threadStatus={effectiveThreadStatus}
@@ -1320,7 +1341,9 @@ export default async function AdminDealReviewPage({
               />
             ) : (
               <p className="text-sm text-muted-foreground">
-                Prepare is unavailable until signer prerequisites are resolved.
+                {isTerminalStage
+                  ? "No signature packet was recorded for this deal."
+                  : "Prepare is unavailable until signer prerequisites are resolved."}
               </p>
             )}
           </div>
@@ -1328,19 +1351,22 @@ export default async function AdminDealReviewPage({
       )}
 
       {/* ── Deal actions ── */}
-      <div className="rounded-lg border overflow-hidden">
-        <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b">
-          Deal actions
+      {/* Suppressed for terminal stages — deal state is final and triage actions are no longer applicable. */}
+      {!isTerminalStage && (
+        <div className="rounded-lg border overflow-hidden">
+          <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b">
+            Deal actions
+          </div>
+          <div className="p-4">
+            <AdminDealActions
+              dealId={dealId}
+              currentTriageStatus={deal.triage_status ?? null}
+              avmEligibilityResult={avmEligibility.result}
+              hasOpenReviewRequest={hasOpenReviewRequest}
+            />
+          </div>
         </div>
-        <div className="p-4">
-          <AdminDealActions
-            dealId={dealId}
-            currentTriageStatus={deal.triage_status ?? null}
-            avmEligibilityResult={avmEligibility.result}
-            hasOpenReviewRequest={hasOpenReviewRequest}
-          />
-        </div>
-      </div>
+      )}
 
       {/* ── Deal close ── */}
       {/*
