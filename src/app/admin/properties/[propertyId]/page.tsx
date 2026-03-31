@@ -15,6 +15,7 @@ import {
 import { AdminPropertyReviewControls } from "@/components/admin/AdminPropertyReviewControls";
 import type { PropertyReviewStatus } from "@/components/admin/AdminPropertyReviewControls";
 import { AdminVendorReviewPanel } from "@/components/admin/AdminVendorReviewPanel";
+import { AdminAttomScreeningPanel } from "@/components/admin/AdminAttomScreeningPanel";
 import { AdminEscalationSimPanel } from "@/components/admin/AdminEscalationSimPanel";
 import { AdminManualAppraisalSimPanel } from "@/components/admin/AdminManualAppraisalSimPanel";
 import { AdminPropertyClosingPanel } from "@/components/admin/AdminPropertyClosingPanel";
@@ -272,11 +273,22 @@ export default async function AdminPropertyAuditPage({
     const proposalTerms = extractAvmDealTerms(linkedDealProposalSnapshot);
     const securedDebt =
       p.has_secured_property_debt === true ? (p.secured_property_debt_amount ?? 0) : 0;
+    // Prefer canonical properties.latest_verified_fmv (written by ATTOM screening
+    // and the escalation sim) over the RentCast property_review_summary AVM amount.
+    // Fall back to vendorSummary only when ATTOM has not yet run.
+    const canonicalFmv = (p.latest_verified_fmv as number | null) ?? null;
+    const fallbackFmv = canonicalFmv ?? (vendorSummary?.fmv_amount as number | null) ?? null;
     linkedDealAvmEligibility = computeAvmEligibility({
-      verifiedFmv: (vendorSummary?.fmv_amount as number | null) ?? null,
-      fmvProvider: (vendorSummary?.fmv_provider as string | null) ?? null,
-      fmvFetchedAt: (vendorSummary?.fmv_fetched_at as string | null) ?? null,
-      fmvExpiresAt: (vendorSummary?.fmv_expires_at as string | null) ?? null,
+      verifiedFmv: fallbackFmv,
+      fmvProvider: canonicalFmv != null
+        ? ((p.fmv_verification_source as string | null) ?? "attom")
+        : ((vendorSummary?.fmv_provider as string | null) ?? null),
+      fmvFetchedAt: canonicalFmv != null
+        ? ((p.fmv_verified_at as string | null) ?? null)
+        : ((vendorSummary?.fmv_fetched_at as string | null) ?? null),
+      fmvExpiresAt: canonicalFmv != null
+        ? ((p.property_review_expires_at as string | null) ?? null)
+        : ((vendorSummary?.fmv_expires_at as string | null) ?? null),
       proposedFmv: proposalTerms.property_value,
       securedDebt,
       ltvRatio: (p.ltv_policy_ratio as number | null) ?? DEFAULT_LTV_RATIO,
@@ -294,6 +306,8 @@ export default async function AdminPropertyAuditPage({
   }[];
   const latestProfileRun = recentRuns.find((r) => r.artifact_type === "property_profile") ?? null;
   const latestAvmRun = recentRuns.find((r) => r.artifact_type === "avm") ?? null;
+  // ATTOM enhanced screening runs are stored with artifact_type "enhanced_screening"
+  const latestAttomRun = recentRuns.find((r) => r.artifact_type === "enhanced_screening") ?? null;
   const lastProfileError =
     latestProfileRun?.status === "failed"
       ? { error_message: latestProfileRun.error_message }
@@ -880,7 +894,7 @@ export default async function AdminPropertyAuditPage({
         </div>
       </div>
 
-      {/* ── Vendor review data ── */}
+      {/* ── Vendor review data (RentCast profile + AVM) ── */}
       <AdminVendorReviewPanel
         propertyId={propertyId}
         initialSummary={vendorSummary}
@@ -889,36 +903,60 @@ export default async function AdminPropertyAuditPage({
         initialProfileDetails={persistedProfileDetails}
       />
 
-      {/* ── Stronger valuation pathway (property-review–owned) ── */}
+      {/* ── ATTOM enhanced screening ── */}
       {/*
-        Single entry point for escalated valuation and deposit workflows.
-        Deal review never owns or surfaces deposit/escalation actions.
-        On AVM completion the updated FMV flows into property_review_summary and
-        deal eligibility re-derives automatically — no deal-page action needed.
+        Real ATTOM data integration: property detail + AVM fetched in parallel from
+        ATTOM Data Solutions. On a clean outcome the controlling FMV, verification state,
+        and eligible cash cap are materialised onto the property immediately.
+        Run history is stored in property_review_runs (artifact_type: enhanced_screening).
+        Requires ATTOM_API_KEY to be configured.
+      */}
+      <AdminAttomScreeningPanel
+        propertyId={propertyId}
+        lastRun={
+          latestAttomRun
+            ? {
+                status: latestAttomRun.status,
+                requested_at: latestAttomRun.requested_at,
+                normalized_payload: latestAttomRun.normalized_payload as any,
+              }
+            : null
+        }
+        verificationState={(p.verification_state as string | null) ?? null}
+        eligibilityPosture={(p.current_eligibility_posture as string | null) ?? null}
+        limitingFactorsJson={p.current_limiting_factors_json ?? null}
+        latestVerifiedFmv={(p.latest_verified_fmv as number | null) ?? null}
+        fmvVerificationSource={(p.fmv_verification_source as string | null) ?? null}
+        eligibleCashCap={(p.current_fractpath_eligible_cash_cap as number | null) ?? null}
+      />
+
+      {/* ── Deposit + escalation simulation (dev/staging only) ── */}
+      {/*
+        Simulates escalated deposit collection and a manual FMV override without
+        hitting real payment or ATTOM systems.  Use the ATTOM enhanced screening
+        panel above for real screening data.
 
         TODO(stripe): Replace deposit simulation with live Stripe payment-intent flow.
-        TODO(attom):  Replace AVM simulation with live ATTOM order + result ingestion.
       */}
       <div className="rounded-lg border overflow-hidden">
         <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b flex items-center gap-2">
-          <span>Stronger valuation pathway</span>
+          <span>Escalation deposit + FMV override</span>
+          <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-amber-100 text-amber-800">
+            [SIMULATION]
+          </span>
           {p.escalation_avm_status === "completed" ? (
             <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-emerald-100 text-emerald-800">
-              FMV applied
+              Override applied
             </span>
           ) : p.escalation_deposit_status === "paid" ? (
             <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-blue-100 text-blue-800">
-              Deposit paid — awaiting valuation
+              Deposit paid
             </span>
           ) : p.escalation_deposit_status ? (
             <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-yellow-100 text-yellow-800">
               Deposit {p.escalation_deposit_status}
             </span>
-          ) : (
-            <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-gray-100 text-gray-500">
-              Not started
-            </span>
-          )}
+          ) : null}
         </div>
         <div className="p-4">
           <AdminEscalationSimPanel
@@ -926,7 +964,6 @@ export default async function AdminPropertyAuditPage({
             depositStatus={(p.escalation_deposit_status as string | null) ?? null}
             avmStatus={(p.escalation_avm_status as string | null) ?? null}
             suggestedFmv={
-              // Pre-fill with owner-stated FMV as a starting point for the escalated estimate.
               (p.owner_stated_fmv as number | null) ??
               (vendorSummary?.fmv_amount as number | null) ??
               null
