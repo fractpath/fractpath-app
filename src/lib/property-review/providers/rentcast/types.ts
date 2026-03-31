@@ -85,5 +85,5 @@ export type NormalizedAvm = {
 };
 
 export type PropertyReviewProvider = "rentcast";
-export type PropertyReviewArtifactType = "property_profile" | "avm";
+export type PropertyReviewArtifactType = "property_profile" | "avm" | "enhanced_screening";
 export type PropertyReviewRunStatus = "pending" | "completed" | "failed";
