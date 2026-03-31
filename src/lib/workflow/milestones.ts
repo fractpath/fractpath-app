@@ -300,18 +300,30 @@ export interface CustomerMilestone {
   stageNumber: number;
 }
 
+// ── LADDER DESIGN NOTES ────────────────────────────────────────────────────
+// Only user-meaningful signing milestones appear in the progress ladder.
+//
+// Intentionally excluded from CUSTOMER_MILESTONES:
+//   • Exception-path stages (enhanced_review_required/payment_pending/in_progress,
+//     enhanced_review_complete) — communicated via the amber exception callout and
+//     blue hero status card; including them here causes the ladder to backfill
+//     4 "completed" checkmarks at once when the deal reaches ready_for_signatures,
+//     even on happy-path deals that never visited those stages.
+//   • Admin ops stages (closing_review_pending, closing_issue_found,
+//     ready_for_closing) — internal admin checkpoints, not user-meaningful phases.
+//   • deal_eligible — unreachable; deriveWorkflowStage never returns this value.
+//
+// Terminal display: servicing_active has customerLabel=null so the tracker component
+// suppresses itself; the compact "Deal active" card renders instead. Including
+// servicing_active here via the "Deal active" entry ensures it counts as a valid
+// "upcoming" step while the ladder is still visible (at agreement_signed/deal_closed).
 export const CUSTOMER_MILESTONES: CustomerMilestone[] = [
-  { label: "Additional review required", stages: ["enhanced_review_required", "enhanced_review_payment_pending"], stageNumber: 3 },
-  { label: "Enhanced property review in progress", stages: ["enhanced_review_in_progress"], stageNumber: 5 },
-  { label: "Property value verified", stages: ["enhanced_review_complete"], stageNumber: 6 },
-  { label: "Closing review in progress", stages: ["closing_review_pending", "closing_issue_found"], stageNumber: 7 },
-  { label: "Ready for closing", stages: ["ready_for_closing"], stageNumber: 9 },
-  { label: "Under review", stages: ["deal_eligible"], stageNumber: 10 },
-  { label: "Agreement being prepared", stages: ["ready_for_signatures"], stageNumber: 11 },
-  { label: "Agreement out for signatures", stages: ["agreement_out_for_signatures"], stageNumber: 12 },
-  { label: "Agreement signed", stages: ["agreement_signed"], stageNumber: 13 },
-  { label: "Deal closed", stages: ["deal_closed"], stageNumber: 14 },
-  { label: "Deal active", stages: ["servicing_active"], stageNumber: 15 },
+  { label: "Agreement being prepared",       stages: ["ready_for_signatures"],          stageNumber: 11 },
+  { label: "Agreement out for signatures",   stages: ["agreement_out_for_signatures"],  stageNumber: 12 },
+  { label: "Agreement signed",               stages: ["agreement_signed"],              stageNumber: 13 },
+  // deal_closed and servicing_active are combined so the "Deal active" step
+  // shows as current when the thread closes and upcoming during signing.
+  { label: "Deal active",                    stages: ["deal_closed", "servicing_active"], stageNumber: 14 },
 ];
 
 export interface CustomerMilestoneStatus {
