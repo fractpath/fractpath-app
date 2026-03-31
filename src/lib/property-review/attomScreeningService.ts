@@ -51,7 +51,9 @@ type PropertyForScreening = {
   city: string | null;
   state: string | null;
   postal_code: string | null;
+  has_secured_property_debt: boolean | null;
   secured_property_debt_amount: number | null;
+  total_known_debt_amount: number | null;
   owner_stated_fmv: number | null;
   latest_verified_fmv: number | null;
 };
@@ -63,7 +65,7 @@ async function getPropertyForScreening(
 
   const { data, error } = await (supabase.from("properties") as any)
     .select(
-      "id, owner_user_id, address_line1, city, state, postal_code, secured_property_debt_amount, owner_stated_fmv, latest_verified_fmv",
+      "id, owner_user_id, address_line1, city, state, postal_code, has_secured_property_debt, secured_property_debt_amount, total_known_debt_amount, owner_stated_fmv, latest_verified_fmv",
     )
     .eq("id", propertyId)
     .single();
@@ -142,9 +144,21 @@ export async function runAttomScreening(
   });
 
   // ── Step 3: Normalize ─────────────────────────────────────────────────
+  // Resolve best available owner-declared debt.  Priority:
+  //   1. has_secured_property_debt = true  → secured_property_debt_amount (underwriting)
+  //   2. has_secured_property_debt = false → 0 (explicitly declared none)
+  //   3. has_secured_property_debt = null  → total_known_debt_amount (intake fallback)
+  //   4. All null                          → null (not declared; skips debt comparison)
+  const ownerDeclaredDebt =
+    property.has_secured_property_debt === true
+      ? (property.secured_property_debt_amount ?? 0)
+      : property.has_secured_property_debt === false
+        ? 0
+        : (property.total_known_debt_amount ?? null);
+
   const context = {
     propertyId: property.id,
-    ownerDeclaredDebt: property.secured_property_debt_amount,
+    ownerDeclaredDebt,
     ownerStatedFmv: property.owner_stated_fmv,
     currentControllingFmv: property.latest_verified_fmv,
     ownerUserId: property.owner_user_id,

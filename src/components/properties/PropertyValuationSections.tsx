@@ -133,6 +133,7 @@ function AttomSection({
   fmvVerificationSource,
   ownerAttemptedAttom: initialOwnerAttempted,
   isControlling,
+  isRealAttomComplete,
   liveIneligiblePhase,
 }: {
   propertyId: string;
@@ -142,6 +143,7 @@ function AttomSection({
   fmvVerificationSource: string | null;
   ownerAttemptedAttom: boolean;
   isControlling: boolean;
+  isRealAttomComplete: boolean;
   liveIneligiblePhase: LiveIneligiblePhase;
 }) {
   const router = useRouter();
@@ -185,20 +187,21 @@ function AttomSection({
     }
   }
 
+  // When real ATTOM screening (admin-triggered) has completed and become
+  // the controlling FMV basis, override the escalation sim state machine.
+  const effectiveComplete = isRealAttomComplete || avmComplete;
+  const effectiveControllingBadge = effectiveComplete
+    ? ATTOM_AVM_BADGE.completed
+    : badge;
+
   return (
     <SectionCard
-      title="ATTOM enhanced valuation"
-      badge={badge?.label ?? (nothingStarted && !requested ? "Available" : undefined)}
-      badgeCls={badge?.cls ?? "bg-gray-100 text-gray-500 border-gray-200"}
+      title="Enhanced valuation"
+      badge={effectiveControllingBadge?.label ?? (nothingStarted && !requested ? "Available" : undefined)}
+      badgeCls={effectiveControllingBadge?.cls ?? "bg-gray-100 text-gray-500 border-gray-200"}
     >
-      {/* Simulation disclaimer */}
-      <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded px-2 py-1">
-        [Simulation] ATTOM integration is not yet connected. This section mirrors
-        the owner-side experience for the enhanced valuation workflow.
-      </p>
-
       {/* ATTOM-first policy banner — shown when a live accepted deal requires ATTOM */}
-      {liveIneligiblePhase === "attom_required" && !avmComplete && (
+      {liveIneligiblePhase === "attom_required" && !effectiveComplete && (
         <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2 space-y-1">
           <p className="font-semibold">Required next step for your active deal</p>
           <p>
@@ -210,61 +213,61 @@ function AttomSection({
       )}
 
       <p className="text-xs text-muted-foreground">
-        ATTOM provides a data-enhanced property valuation using public record, permit history,
+        A data-enhanced property valuation uses public record, permit history,
         and comparable sale data. This replaces the automated estimate as your controlling
         property value basis.
       </p>
 
-      {/* State-based content */}
-      {avmComplete && (
+      {/* Real ATTOM or simulation AVM complete */}
+      {effectiveComplete && (
         <>
           <p className="text-xs text-emerald-800 font-medium">
             Your enhanced valuation is complete.
             {isControlling && latestVerifiedFmv != null && (
-              <> Verified value: <span className="font-bold">{fmtUsd(latestVerifiedFmv)}</span></>
+              <> Verified value: <span className="font-bold">{fmtUsd(latestVerifiedFmv)}</span>.</>
             )}
           </p>
           {!isControlling && (
             <p className="text-xs text-muted-foreground italic">
-              This ATTOM result has been superseded by a subsequent licensed manual appraisal.
-              The ATTOM report remains on file for your reference.
+              This result has been superseded by a subsequent licensed manual appraisal.
+              The report remains on file for your reference.
             </p>
           )}
         </>
       )}
 
-      {(avmOrdered || depositPaid) && !avmComplete && (
+      {!effectiveComplete && (avmOrdered || depositPaid) && (
         <p className="text-xs text-blue-800">
           Your enhanced valuation is currently in progress. We will notify you when the
           report is complete.
         </p>
       )}
 
-      {depositRequested && !depositPaid && !avmOrdered && !avmComplete && (
+      {!effectiveComplete && depositRequested && !depositPaid && !avmOrdered && (
         <p className="text-xs text-orange-800">
           A payment request for the enhanced valuation fee has been sent to you. Please
           check your email and complete the payment to proceed.
         </p>
       )}
 
-      {depositFailed && (
+      {!effectiveComplete && depositFailed && (
         <p className="text-xs text-red-800">
           There was an issue processing your payment. Please contact our team so we can
           assist you.
         </p>
       )}
 
-      {nothingStarted && requested && (
+      {!effectiveComplete && nothingStarted && requested && (
         <p className="text-xs text-yellow-800">
-          Your request has been received. Our team will reach out with payment details
+          Your request has been received. Our team will reach out with next steps
           for the enhanced valuation shortly.
         </p>
       )}
 
-      {nothingStarted && !requested && (
+      {!effectiveComplete && nothingStarted && !requested && (
         <>
           <p className="text-xs text-muted-foreground">
-            Request an enhanced valuation to obtain a stronger, verified FMV basis for your
+            Request an enhanced valuation to obtain a stronger, verified basis for your
             property. This typically strengthens your deal&apos;s eligibility profile.
           </p>
           <button
@@ -340,10 +343,6 @@ function ManualAppraisalSection({
       badge={badge?.label ?? "Not yet initiated"}
       badgeCls={badge?.cls ?? "bg-gray-100 text-gray-500 border-gray-200"}
     >
-      <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded px-2 py-1">
-        [Simulation] Real appraisal ordering and payment collection are not connected.
-      </p>
-
       <p className="text-xs text-muted-foreground">
         A licensed manual appraisal provides the strongest available FMV basis. If the
         appraised value exceeds the current verified result, it becomes the new controlling
@@ -548,15 +547,25 @@ export function PropertyValuationSections(props: ValuationSectionsProps) {
   const attomStarted = !!(escalationDepositStatus || escalationAvmStatus || ownerAttemptedAttom);
   const manualStarted = !!manualAppraisalStatus;
 
+  // fmv_verification_source values:
+  //   "rentcast" / "rentcast_sim"       → RentCast controlling
+  //   "escalation_avm_sim" / "attom_sim" → ATTOM escalation simulation controlling
+  //   "attom"                            → Real ATTOM admin screening controlling
+  //   "manual_appraisal_sim"             → Manual appraisal controlling
+  //   null                               → No controlling FMV yet (default to rentcast section shown)
   const rentcastIsControlling =
     fmvVerificationSource == null ||
     fmvVerificationSource === "rentcast_sim" ||
     fmvVerificationSource === "rentcast";
   const attomIsControlling =
     fmvVerificationSource === "escalation_avm_sim" ||
-    fmvVerificationSource === "attom_sim";
+    fmvVerificationSource === "attom_sim" ||
+    fmvVerificationSource === "attom";
   const manualIsControlling =
     fmvVerificationSource === "manual_appraisal_sim";
+
+  // True when real ATTOM admin screening (not escalation sim) is the controlling source.
+  const isRealAttomComplete = fmvVerificationSource === "attom";
 
   return (
     <div className="space-y-3">
@@ -571,8 +580,9 @@ export function PropertyValuationSections(props: ValuationSectionsProps) {
         />
       )}
 
-      {/* 2. ATTOM — show when AVM journey has started, rentcast is done, or deal requires ATTOM */}
-      {(attomStarted || rentcastFmv != null || liveIneligiblePhase !== null) && (
+      {/* 2. ATTOM — show when AVM journey has started, real ATTOM is controlling,
+                     rentcast is done, or deal requires ATTOM */}
+      {(attomStarted || attomIsControlling || rentcastFmv != null || liveIneligiblePhase !== null) && (
         <AttomSection
           propertyId={propertyId}
           escalationDepositStatus={escalationDepositStatus}
@@ -581,6 +591,7 @@ export function PropertyValuationSections(props: ValuationSectionsProps) {
           fmvVerificationSource={fmvVerificationSource}
           ownerAttemptedAttom={ownerAttemptedAttom}
           isControlling={attomIsControlling}
+          isRealAttomComplete={isRealAttomComplete}
           liveIneligiblePhase={liveIneligiblePhase}
         />
       )}
@@ -594,14 +605,14 @@ export function PropertyValuationSections(props: ValuationSectionsProps) {
         />
       )}
 
-      {/* 3. Manual appraisal — show when deal is ineligible (either phase), ATTOM is complete, or appraisal started */}
-      {(liveIneligiblePhase !== null || attomComplete || manualStarted) && (
+      {/* 3. Manual appraisal — show when deal is ineligible, ATTOM is complete, or appraisal started */}
+      {(liveIneligiblePhase !== null || attomComplete || isRealAttomComplete || manualStarted) && (
         <ManualAppraisalSection
           status={manualAppraisalStatus}
           fmv={manualAppraisalFmv}
           isControlling={manualIsControlling}
           propertyId={propertyId}
-          attomComplete={attomComplete}
+          attomComplete={attomComplete || isRealAttomComplete}
           liveIneligiblePhase={liveIneligiblePhase}
         />
       )}

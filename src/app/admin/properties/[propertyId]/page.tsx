@@ -803,6 +803,25 @@ export default async function AdminPropertyAuditPage({
             />
           </div>
 
+          {/* Information requested — contextual callout */}
+          {reviewStatus === "information_requested" && (
+            <div className="rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2.5 space-y-1.5">
+              <div className="text-xs font-semibold text-yellow-900">Awaiting homeowner information</div>
+              <p className="text-xs text-yellow-800">
+                This property is in <strong>information requested</strong> status. The homeowner has been asked to supply additional documentation.
+              </p>
+              {linkedDeal ? (
+                <p className="text-xs text-yellow-800">
+                  Use the <strong>Additional information request</strong> panel on this page to view or update the checklist and requested items.
+                </p>
+              ) : (
+                <p className="text-xs text-yellow-800 italic">
+                  No deal is currently linked to this property. The information request checklist requires an active linked deal — it will appear automatically once a deal is associated.
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Review outputs */}
           <div className="border-t pt-4 space-y-4">
             <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
@@ -814,11 +833,18 @@ export default async function AdminPropertyAuditPage({
               <div>
                 <div className="text-muted-foreground text-xs">Owner-declared debt</div>
                 <div className="font-medium">
-                  {hasDebt === null
-                    ? "Not declared"
-                    : hasDebt
-                      ? formatCurrency(p.secured_property_debt_amount)
-                      : "None"}
+                  {hasDebt === true
+                    ? formatCurrency(p.secured_property_debt_amount)
+                    : hasDebt === false
+                      ? "None"
+                      : p.total_known_debt_amount != null
+                        ? (
+                          <span>
+                            {formatCurrency(p.total_known_debt_amount)}
+                            <span className="ml-1 text-xs font-normal text-muted-foreground">(intake)</span>
+                          </span>
+                        )
+                        : "Not declared"}
                 </div>
               </div>
               <div>
