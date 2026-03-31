@@ -271,6 +271,93 @@ function AttomFactsSection({ raw }: { raw: AttomRawComposite }) {
         </div>
       )}
 
+      {/* Mortgage record */}
+      {(() => {
+        const mortgage = pd?.mortgage?.[0] ?? null;
+        if (!mortgage) return null;
+        const hasAny =
+          mortgage.amount != null ||
+          mortgage.date != null ||
+          mortgage.interestRate != null ||
+          mortgage.loanTypeCode != null ||
+          mortgage.deedType != null ||
+          mortgage.term != null ||
+          mortgage.dueDate != null ||
+          mortgage.equityFlag != null ||
+          mortgage.refiFlag != null;
+        if (!hasAny) return null;
+        return (
+          <div className="pt-1 rounded-md border bg-muted/20 px-3 py-2 space-y-1.5">
+            <div className="text-xs font-medium text-muted-foreground">
+              Mortgage record (ATTOM)
+              <span className="ml-1.5 font-normal text-muted-foreground/70 italic">
+                — origination data, not current balance
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+              {mortgage.amount != null && (
+                <div>
+                  <div className="text-xs text-muted-foreground">Orig. loan amount</div>
+                  <div className="text-xs font-medium">{fmtCurrency(mortgage.amount)}</div>
+                </div>
+              )}
+              {mortgage.date != null && (
+                <div>
+                  <div className="text-xs text-muted-foreground">Loan date</div>
+                  <div className="text-xs font-medium">{String(mortgage.date)}</div>
+                </div>
+              )}
+              {mortgage.interestRate != null && (
+                <div>
+                  <div className="text-xs text-muted-foreground">Interest rate</div>
+                  <div className="text-xs font-medium">{mortgage.interestRate}%</div>
+                </div>
+              )}
+              {mortgage.loanTypeCode != null && (
+                <div>
+                  <div className="text-xs text-muted-foreground">Loan type</div>
+                  <div className="text-xs font-medium">{String(mortgage.loanTypeCode)}</div>
+                </div>
+              )}
+              {mortgage.deedType != null && (
+                <div>
+                  <div className="text-xs text-muted-foreground">Deed type</div>
+                  <div className="text-xs font-medium">{String(mortgage.deedType)}</div>
+                </div>
+              )}
+              {mortgage.term != null && (
+                <div>
+                  <div className="text-xs text-muted-foreground">Term (months)</div>
+                  <div className="text-xs font-medium">{String(mortgage.term)}</div>
+                </div>
+              )}
+              {mortgage.dueDate != null && (
+                <div>
+                  <div className="text-xs text-muted-foreground">Due date</div>
+                  <div className="text-xs font-medium">{String(mortgage.dueDate)}</div>
+                </div>
+              )}
+              {mortgage.equityFlag != null && (
+                <div>
+                  <div className="text-xs text-muted-foreground">Equity flag</div>
+                  <div className="text-xs font-medium">{String(mortgage.equityFlag)}</div>
+                </div>
+              )}
+              {mortgage.refiFlag != null && (
+                <div>
+                  <div className="text-xs text-muted-foreground">Refi flag</div>
+                  <div className="text-xs font-medium">{String(mortgage.refiFlag)}</div>
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground italic">
+              Source: ATTOM /property/detailmortgageowner. Origination amount ≠ current outstanding balance.
+              Use equity-implied lien (AVM − est. equity) for current debt estimate.
+            </p>
+          </div>
+        );
+      })()}
+
       {/* Owner record */}
       {(owner1 != null || owner2 != null || corpIndicator != null) && (
         <div className="pt-1 space-y-1">

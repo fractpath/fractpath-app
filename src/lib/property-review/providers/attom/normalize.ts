@@ -103,10 +103,15 @@ function buildOwnerMatchResult(
 /**
  * Builds the debt discrepancy result.
  *
- * Uses ATTOM's homeEquity.estEquity field to derive an implied debt figure:
+ * Primary signal: ATTOM homeEquity.estEquity (equity-implied current debt):
  *   impliedDebt = avmValue − estEquity
  *
- * This is a secondary signal (ATTOM's equity estimate, not a title search).
+ * This is the preferred screening signal because estEquity is ATTOM's estimate
+ * of the *current* equity position, making the implied lien total a reasonable
+ * proxy for outstanding debt. The mortgage.amount field (origination amount) is
+ * recorded as context/notes but not used for comparison — it is NOT the current
+ * balance.
+ *
  * If homeEquity data is absent (subscription-gated), the comparison is skipped.
  */
 function buildDebtDiscrepancyResult(
@@ -117,10 +122,19 @@ function buildDebtDiscrepancyResult(
   const avmValue = raw.avmDetail?.avm?.amount?.value ?? null;
   const estEquity = raw.avmDetail?.homeEquity?.estEquity ?? null;
 
+  // Mortgage origination amount from detailmortgageowner — used for notes context
+  // only; NOT used for the discrepancy comparison (it's the original loan amount,
+  // not the current amortized balance).
+  const mortgageOrigination = raw.propertyDetail?.mortgage?.[0]?.amount ?? null;
+
   let screeningDebt: number | null = null;
   if (avmValue != null && estEquity != null && avmValue > 0) {
     screeningDebt = Math.max(0, avmValue - estEquity);
   }
+
+  const mortgageNote = mortgageOrigination != null
+    ? ` ATTOM mortgage origination amount on record: $${Math.round(mortgageOrigination).toLocaleString()} (original loan amount — not current balance).`
+    : "";
 
   if (reportedDebt == null) {
     return {
@@ -129,7 +143,7 @@ function buildDebtDiscrepancyResult(
       screeningDebt,
       delta: null,
       severity: null,
-      notes: "Owner has not declared secured debt; debt comparison skipped.",
+      notes: "Owner has not declared secured debt; debt comparison skipped." + mortgageNote,
     };
   }
 
@@ -141,7 +155,7 @@ function buildDebtDiscrepancyResult(
       delta: null,
       severity: null,
       notes:
-        "ATTOM home equity data unavailable (subscription tier or address not covered); debt comparison skipped.",
+        "ATTOM home equity data unavailable (subscription tier or address not covered); debt comparison skipped." + mortgageNote,
     };
   }
 
@@ -159,16 +173,18 @@ function buildDebtDiscrepancyResult(
     severity = "blocking";
   }
 
+  const baseNote =
+    severity === "none"
+      ? "Declared debt is within tolerance of ATTOM equity-implied debt."
+      : `ATTOM equity-implied debt (${Math.round(screeningDebt).toLocaleString()}) differs from declared debt (${Math.round(reportedDebt).toLocaleString()}) by $${Math.round(absDelta).toLocaleString()} (${severity}).`;
+
   return {
     discrepancyFound: severity !== "none",
     reportedDebt,
     screeningDebt,
     delta,
     severity,
-    notes:
-      severity === "none"
-        ? "Declared debt is within tolerance of ATTOM equity-implied debt."
-        : `ATTOM equity-implied debt (${Math.round(screeningDebt).toLocaleString()}) differs from declared debt (${Math.round(reportedDebt).toLocaleString()}) by $${Math.round(absDelta).toLocaleString()} (${severity}).`,
+    notes: baseNote + mortgageNote,
   };
 }
 

@@ -25,6 +25,7 @@ import {
   IneligibleDealBuyerBlock,
   AttomRequiredDealOwnerBlock,
   AttomRequiredDealBuyerBlock,
+  PropertyReviewBlockedOwnerBanner,
 } from "@/components/deal/IneligibleDealBlock";
 import { VoidOwnerCounterSection } from "@/components/deal/VoidOwnerCounterSection";
 import {
@@ -595,6 +596,20 @@ export default async function DealPage(ctx: PageProps) {
               </div>
             </div>
           )}
+
+          {/* Property review blocked-state cue — primary path.
+              Shown when an accepted deal is waiting on property-side information
+              that the owner specifically needs to supply. Only fires when:
+                - viewer is the owner
+                - thread is accepted (deal live, not just under review pre-acceptance)
+                - property is linked
+                - admin has issued an explicit information_requested status */}
+          {isOwner &&
+            effectiveThread?.status === "accepted" &&
+            resolvedPropertyId &&
+            livePropertyReviewStatus === "information_requested" && (
+              <PropertyReviewBlockedOwnerBanner propertyId={resolvedPropertyId} />
+            )}
 
           {/* Ineligible deal action block — primary path.
               Gated on showIneligibleBlock (live FMV recomputation), NOT raw triage_status.
@@ -1224,6 +1239,14 @@ export default async function DealPage(ctx: PageProps) {
               </div>
             </div>
           )}
+
+          {/* Property review blocked-state cue — fallback path. */}
+          {fallbackIsOwner &&
+            effectiveThread?.status === "accepted" &&
+            resolvedPropertyId &&
+            livePropertyReviewStatus === "information_requested" && (
+              <PropertyReviewBlockedOwnerBanner propertyId={resolvedPropertyId} />
+            )}
 
           {/* Ineligible deal action block — fallback path.
               Gated on fallbackShowIneligibleBlock (live FMV recomputation), NOT raw triage_status.

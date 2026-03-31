@@ -4,6 +4,57 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
+// ─── Property review blocked-state cue ────────────────────────────────────────
+// Shown on the owner deal page when an accepted deal is waiting on a property-side
+// action the owner specifically needs to take (e.g. admin has sent an information
+// request that requires owner documentation).
+
+type PropertyReviewBlockedProps = {
+  propertyId: string;
+};
+
+export function PropertyReviewBlockedOwnerBanner({ propertyId }: PropertyReviewBlockedProps) {
+  return (
+    <div
+      className="rounded-lg border border-orange-200 bg-orange-50 p-4 space-y-3 dark:border-orange-800 dark:bg-orange-950"
+      data-testid="property-review-blocked-banner"
+    >
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 text-orange-500 dark:text-orange-400 flex-shrink-0">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 20 20"
+            fill="currentColor"
+            className="w-4 h-4"
+          >
+            <path
+              fillRule="evenodd"
+              d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z"
+              clipRule="evenodd"
+            />
+          </svg>
+        </span>
+        <div className="space-y-1.5">
+          <p className="text-sm font-semibold text-orange-900 dark:text-orange-100">
+            Your property needs additional information
+          </p>
+          <p className="text-xs text-orange-800 dark:text-orange-200">
+            This deal is waiting on property details that our team has requested from you.
+            Please visit your property page to review and respond to the outstanding request —
+            the deal cannot advance until this information is provided.
+          </p>
+        </div>
+      </div>
+      <Link
+        href={`/properties/${propertyId}`}
+        className="inline-block text-xs rounded border border-orange-300 bg-white px-3 py-1.5 font-medium text-orange-900 hover:bg-orange-50 dark:bg-orange-900/30 dark:text-orange-100 dark:border-orange-700 dark:hover:bg-orange-900/60"
+      >
+        Go to property page →
+      </Link>
+    </div>
+  );
+}
+
 // ─── ATTOM-required blocks (Case 2) ───────────────────────────────────────────
 // Shown when the deal is ineligible under RentCast alone and ATTOM has not yet
 // completed. Renegotiation and manual appraisal are NOT available yet.

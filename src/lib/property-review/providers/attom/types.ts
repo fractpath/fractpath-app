@@ -7,11 +7,17 @@
  * include them.
  *
  * Two ATTOM endpoints are used for the enhanced screening flow:
- *   1. /propertyapi/v1.0.0/property/expandedprofile  — owner identity signals
- *   2. /propertyapi/v1.0.0/attomavm/detail           — AVM + equity signals
+ *   1. /propertyapi/v1.0.0/property/detailmortgageowner  — owner identity + mortgage/lien signals
+ *   2. /propertyapi/v1.0.0/attomavm/detail               — AVM + home equity signals
  *
- * Do NOT add fields that are not consumed by normalize.ts — keep this file
- * as narrow as possible so it does not drift from actual adapter usage.
+ * Do NOT add fields that are not consumed by normalize.ts or AdminAttomScreeningPanel —
+ * keep this file as narrow as possible so it does not drift from actual adapter usage.
+ *
+ * NOTE on /valuation/homeequity:
+ *   There is no separate /valuation/homeequity endpoint in ATTOM's standard API gateway.
+ *   The home equity fields (estEquity, estEquityPct, estEstimatedValue) are returned by
+ *   /attomavm/detail under the homeEquity sub-object. That endpoint is the correct
+ *   source for equity signals at the current subscription tier.
  */
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -24,7 +30,7 @@ export type AttomIdentifier = {
   fips?: string | null;
 };
 
-/** Situs address fields as returned in ATTOM expanded profile responses. */
+/** Situs address fields as returned in ATTOM property responses. */
 export type AttomSitusAddress = {
   line1?: string | null;
   /** City (ATTOM calls this "locality"). */
@@ -33,10 +39,15 @@ export type AttomSitusAddress = {
   countrySubd?: string | null;
   /** ZIP code (ATTOM calls this "postal1"). */
   postal1?: string | null;
+  /** Match code for how well the address matched ATTOM's record. */
+  matchCode?: string | null;
 };
 
 // ────────────────────────────────────────────────────────────────────────────
-// expandedProfile response shapes
+// detailmortgageowner response shapes
+// (supersedes the previous expandedprofile-only shapes; the endpoint is a
+// superset of expandedprofile — it returns the same owner + property summary
+// fields plus mortgage/lien records)
 // ────────────────────────────────────────────────────────────────────────────
 
 export type AttomOwnerPerson = {
@@ -45,7 +56,7 @@ export type AttomOwnerPerson = {
 };
 
 /**
- * Ownership fields from ATTOM's expandedProfile.
+ * Ownership fields from ATTOM's detailmortgageowner.
  * mailAddress is the tax-mailing address for the owner.
  * corporateIndicator is non-null when the title is held by an entity.
  */
@@ -68,11 +79,55 @@ export type AttomSummary = {
   propLandUse?: string | null;
 };
 
+/**
+ * Mortgage/lien record from ATTOM's detailmortgageowner endpoint.
+ *
+ * ATTOM typically returns the most recent or primary lien record.
+ * The `amount` field is the original loan amount at origination — it is NOT
+ * the current amortized balance. Use `/attomavm/detail` homeEquity signals
+ * (estEquity, estEstimatedValue) for an estimated current equity/debt picture.
+ *
+ * All fields are optional because:
+ *   (a) they are subscription-gated at ATTOM's API tier
+ *   (b) some properties have no recorded mortgage (e.g. owned free-and-clear)
+ */
+export type AttomMortgage = {
+  /** Original loan amount at origination (dollars). NOT the current balance. */
+  amount?: number | null;
+  /** Loan origination date (ISO or ATTOM date string). */
+  date?: string | null;
+  /** Annual interest rate as a percentage (e.g. 3.75 = 3.75%). */
+  interestRate?: number | null;
+  /** ATTOM loan type code (e.g. "CV" = conventional, "FH" = FHA). */
+  loanTypeCode?: string | null;
+  /** Deed type recorded at origination. */
+  deedType?: string | null;
+  /** Loan term in months. */
+  term?: number | null;
+  /** Maturity / due date of the loan. */
+  dueDate?: string | null;
+  /** Equity flag — ATTOM indicator that the loan is a home equity product. */
+  equityFlag?: string | null;
+  /** Refi flag — ATTOM indicator that the loan is a refinance. */
+  refiFlag?: string | null;
+};
+
+/**
+ * Property record returned by /property/detailmortgageowner.
+ * This is a superset of the old expandedprofile record — same owner/summary
+ * fields plus the mortgage array.
+ */
 export type AttomPropertyDetailRecord = {
   identifier?: AttomIdentifier | null;
   address?: AttomSitusAddress | null;
   summary?: AttomSummary | null;
   owner?: AttomOwner | null;
+  /**
+   * Array of mortgage/lien records. Most properties have one primary record.
+   * ATTOM may return multiple records for properties with multiple liens.
+   * Only the first record is used by the normalizer.
+   */
+  mortgage?: AttomMortgage[] | null;
 };
 
 export type AttomPropertyDetailResponse = {
@@ -97,13 +152,20 @@ export type AttomAvm = {
   amount?: AttomAvmAmount | null;
   condition?: {
     propIndicator?: string | null;
+    /** ATTOM AVM scr (score) field if available. */
+    scr?: number | null;
   } | null;
+  /** Publication date of the AVM model run, if provided. */
+  pubDate?: string | null;
 };
 
 /**
- * ATTOM's estimated home equity signals.
+ * ATTOM's estimated home equity signals (from attomavm/detail).
  * estEquity = estimated market value minus estimated outstanding liens.
  * This is used as a secondary debt-discrepancy signal (estEquity → implied debt).
+ *
+ * NOTE: These are the canonical equity fields for our implementation. There is
+ * no separate /valuation/homeequity endpoint — this is the correct source.
  */
 export type AttomHomeEquity = {
   /** Estimated equity (market value minus estimated lien total). */
@@ -136,7 +198,7 @@ export type AttomAvmDetailResponse = {
  * Only the first property record from each response is used by the adapter.
  */
 export type AttomRawComposite = {
-  /** First record from /property/expandedprofile, or null if unavailable. */
+  /** First record from /property/detailmortgageowner, or null if unavailable. */
   propertyDetail: AttomPropertyDetailRecord | null;
   /** First record from /attomavm/detail, or null if unavailable. */
   avmDetail: AttomAvmRecord | null;

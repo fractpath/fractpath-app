@@ -3,8 +3,17 @@
  *
  * Provides minimal typed wrappers for the two ATTOM endpoints consumed by the
  * enhanced screening flow:
- *   - /propertyapi/v1.0.0/property/expandedprofile  (owner identity signals)
- *   - /propertyapi/v1.0.0/attomavm/detail           (AVM + equity signals)
+ *   - /propertyapi/v1.0.0/property/detailmortgageowner  (owner identity + mortgage/lien signals)
+ *   - /propertyapi/v1.0.0/attomavm/detail               (AVM + home equity signals)
+ *
+ * /property/detailmortgageowner supersedes the previous /property/expandedprofile call.
+ * It is a superset of expandedprofile — it returns the same owner/property-summary fields
+ * plus mortgage/lien records (origination amount, rate, loan type, term, due date, etc.).
+ *
+ * /attomavm/detail is retained because it provides the primary AVM value and
+ * ATTOM's home equity estimates (estEquity, estEstimatedValue, estEquityPct).
+ * There is no separate /valuation/homeequity endpoint in ATTOM's standard gateway —
+ * the home equity fields are exclusively available through /attomavm/detail.
  *
  * No domain logic lives here — all normalization is in normalize.ts.
  * Configuration is loaded from env vars at call time (not module init) so
@@ -110,7 +119,7 @@ export async function fetchAttomPropertyDetail(
   input: AddressInput,
 ): Promise<AttomPropertyDetailResponse> {
   return attomFetch<AttomPropertyDetailResponse>(
-    "/propertyapi/v1.0.0/property/expandedprofile",
+    "/propertyapi/v1.0.0/property/detailmortgageowner",
     buildAddressParams(input),
   );
 }
