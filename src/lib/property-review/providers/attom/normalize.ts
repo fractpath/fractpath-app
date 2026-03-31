@@ -1,8 +1,15 @@
 /**
  * ATTOM enhanced screening normalizer.
  *
- * Maps a raw AttomRawComposite (two merged ATTOM API responses) into the
+ * Maps a raw AttomRawComposite (three merged ATTOM API responses) into the
  * canonical NormalizedScreeningResult shape defined in screening.ts.
+ *
+ * Endpoint usage / debt signal priority:
+ *   1. /valuation/homeequity  → totalEstimatedLoanBalance (primary current debt signal)
+ *                            → estimatedLendableEquity (available deal cash check)
+ *   2. /attomavm/detail       → AVM value + range + scr (FMV signal)
+ *                            → homeEquity.estEquity (legacy fallback — subscription-gated)
+ *   3. /property/detailmortgageowner → owner verification, mortgage origination context
  *
  * Policy constants are loaded from env vars at call time so they can be
  * overridden in tests without module reloading.
@@ -103,16 +110,18 @@ function buildOwnerMatchResult(
 /**
  * Builds the debt discrepancy result.
  *
- * Primary signal: ATTOM homeEquity.estEquity (equity-implied current debt):
- *   impliedDebt = avmValue − estEquity
+ * Debt signal priority (highest to lowest):
+ *   1. /valuation/homeequity → totalEstimatedLoanBalance
+ *      This is ATTOM's amortized estimate of the CURRENT total outstanding loan
+ *      balance across all liens. It is the most accurate current-debt signal.
  *
- * This is the preferred screening signal because estEquity is ATTOM's estimate
- * of the *current* equity position, making the implied lien total a reasonable
- * proxy for outstanding debt. The mortgage.amount field (origination amount) is
- * recorded as context/notes but not used for comparison — it is NOT the current
- * balance.
+ *   2. /attomavm/detail → homeEquity.estEquity (implied debt = AVM value − estEquity)
+ *      Legacy secondary signal. Subscription-gated and confirmed absent at the
+ *      current tier, but retained as a fallback for future tier changes.
  *
- * If homeEquity data is absent (subscription-gated), the comparison is skipped.
+ * The mortgage origination amount from detailmortgageowner is recorded as
+ * context/notes only — it is the original loan amount at origination, NOT the
+ * current balance, and should not be used for discrepancy comparison.
  */
 function buildDebtDiscrepancyResult(
   raw: AttomRawComposite,
@@ -120,14 +129,24 @@ function buildDebtDiscrepancyResult(
 ): DebtDiscrepancyResult {
   const reportedDebt = context.ownerDeclaredDebt;
   const avmValue = raw.avmDetail?.avm?.amount?.value ?? null;
-  const estEquity = raw.avmDetail?.homeEquity?.estEquity ?? null;
 
-  // Mortgage origination amount from detailmortgageowner — used for notes context
-  // only; NOT used for the discrepancy comparison (it's the original loan amount,
-  // not the current amortized balance).
-  //
-  // ATTOM may return mortgage as a single object OR as an array depending on
-  // endpoint / subscription tier. Handle both to avoid silent null.
+  // ── Signal 1: /valuation/homeequity totalEstimatedLoanBalance ─────────────
+  const homeEquityRecord = raw.homeEquityDetail?.homeEquity ?? null;
+  const totalEstimatedLoanBalance = homeEquityRecord?.totalEstimatedLoanBalance ?? null;
+  const estimatedLendableEquity = homeEquityRecord?.estimatedLendableEquity ?? null;
+  const estimatedAvailableEquity = homeEquityRecord?.estimatedAvailableEquity ?? null;
+  const attomLtv = homeEquityRecord?.LTV ?? null;
+  const recordLastUpdated = homeEquityRecord?.recordLastUpdated ?? null;
+  const homeEquityDetailPresent = raw.homeEquityDetail != null;
+
+  // ── Signal 2: /attomavm/detail homeEquity.estEquity (legacy fallback) ────
+  const estEquity = raw.avmDetail?.homeEquity?.estEquity ?? null;
+  const avmImpliedDebt =
+    avmValue != null && estEquity != null && avmValue > 0
+      ? Math.max(0, avmValue - estEquity)
+      : null;
+
+  // ── Mortgage origination context (NOT used for comparison) ───────────────
   const mortgageRaw = raw.propertyDetail?.mortgage;
   const mortgageRecord = Array.isArray(mortgageRaw)
     ? (mortgageRaw[0] ?? null)
@@ -135,35 +154,64 @@ function buildDebtDiscrepancyResult(
   const mortgageOrigination =
     (mortgageRecord?.amount as number | null | undefined) ?? null;
 
+  // ── Resolve screening debt ────────────────────────────────────────────────
+  // Prefer homeEquity endpoint total balance; fall back to AVM-implied if absent.
   let screeningDebt: number | null = null;
-  if (avmValue != null && estEquity != null && avmValue > 0) {
-    screeningDebt = Math.max(0, avmValue - estEquity);
+  let debtSourceNote = "";
+
+  if (totalEstimatedLoanBalance != null) {
+    screeningDebt = totalEstimatedLoanBalance;
+    debtSourceNote = `ATTOM /valuation/homeequity: estimated current total loan balance $${Math.round(totalEstimatedLoanBalance).toLocaleString()}`;
+    if (recordLastUpdated) {
+      debtSourceNote += ` (data freshness: ${recordLastUpdated})`;
+    }
+    if (estimatedLendableEquity != null) {
+      debtSourceNote += `. Est. lendable equity: $${Math.round(estimatedLendableEquity).toLocaleString()}`;
+    }
+    if (attomLtv != null) {
+      debtSourceNote += `. ATTOM LTV: ${attomLtv}%`;
+    }
+  } else if (avmImpliedDebt != null) {
+    screeningDebt = avmImpliedDebt;
+    debtSourceNote = `ATTOM attomavm/detail equity-implied debt $${Math.round(avmImpliedDebt).toLocaleString()} (AVM $${Math.round(avmValue!).toLocaleString()} − est. equity $${Math.round(estEquity!).toLocaleString()})`;
   }
 
   const mortgageNote = mortgageOrigination != null
-    ? ` ATTOM mortgage origination amount on record: $${Math.round(mortgageOrigination).toLocaleString()} (original loan amount — not current balance).`
+    ? ` ATTOM mortgage origination on record: $${Math.round(mortgageOrigination).toLocaleString()} (original loan amount at origination — not current balance).`
     : "";
 
   if (reportedDebt == null) {
+    const reason = !homeEquityDetailPresent
+      ? "homeEquityDetail endpoint returned no payload for this address"
+      : screeningDebt == null
+        ? "no debt signal available (homeEquity data absent)"
+        : "";
     return {
       discrepancyFound: false,
       reportedDebt: null,
       screeningDebt,
       delta: null,
       severity: null,
-      notes: "Owner has not declared secured debt; debt comparison skipped." + mortgageNote,
+      notes: [
+        "Owner has not declared secured debt; debt comparison skipped.",
+        debtSourceNote,
+        mortgageNote,
+        reason ? `Note: ${reason}.` : "",
+      ].filter(Boolean).join(" "),
     };
   }
 
   if (screeningDebt == null) {
+    const reason = !homeEquityDetailPresent
+      ? "/valuation/homeequity returned no payload; attomavm/detail homeEquity absent (subscription-gated); debt comparison skipped."
+      : "totalEstimatedLoanBalance and equity signals absent; debt comparison skipped.";
     return {
       discrepancyFound: false,
       reportedDebt,
       screeningDebt: null,
       delta: null,
       severity: null,
-      notes:
-        "ATTOM home equity data unavailable (subscription tier or address not covered); debt comparison skipped." + mortgageNote,
+      notes: reason + mortgageNote,
     };
   }
 
@@ -183,8 +231,8 @@ function buildDebtDiscrepancyResult(
 
   const baseNote =
     severity === "none"
-      ? "Declared debt is within tolerance of ATTOM equity-implied debt."
-      : `ATTOM equity-implied debt (${Math.round(screeningDebt).toLocaleString()}) differs from declared debt (${Math.round(reportedDebt).toLocaleString()}) by $${Math.round(absDelta).toLocaleString()} (${severity}).`;
+      ? `Declared debt is within tolerance of ATTOM current balance. ${debtSourceNote}.`
+      : `ATTOM current balance (${Math.round(screeningDebt).toLocaleString()}) differs from declared debt (${Math.round(reportedDebt).toLocaleString()}) by $${Math.round(absDelta).toLocaleString()} (${severity}). ${debtSourceNote}.`;
 
   return {
     discrepancyFound: severity !== "none",
@@ -277,6 +325,13 @@ function buildValueDiscrepancyResult(
  *   3. Any significant discrepancy          → "discrepancy"
  *   4. Property not found in ATTOM          → "disputed"
  *   5. No material issues                   → "clean"
+ *
+ * IMPORTANT: "weak" does NOT mean the deal is ineligible or that ATTOM is
+ * unhelpful. It means the AVM confidence interval is too wide for ATTOM to
+ * become the controlling FMV basis. The /valuation/homeequity data (lendable
+ * equity, total loan balance) may still materially support the deal — that
+ * context is captured in reviewNotes. A "weak" outcome requires manual review
+ * to establish the controlling FMV, but does not imply a rejection.
  */
 function deriveOutcome(
   avmValue: number | null,
@@ -360,6 +415,119 @@ function buildLimitingFactors(
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Interpretation / review notes
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Builds a plain-language explanation of the ATTOM outcome.
+ *
+ * This explains:
+ *   - Why ATTOM is or is not the controlling FMV
+ *   - Why "Weak AVM" if that is the outcome, and what the home equity data says
+ *   - What the next step should be
+ *
+ * This is written for internal admin use — it may reference policy thresholds
+ * and ATTOM-specific concepts.
+ */
+function buildReviewNotes(
+  outcome: ScreeningOutcome,
+  becameControlling: boolean,
+  avmValue: number | null,
+  avmConfidence: "high" | "medium" | "low" | null,
+  avmLow: number | null,
+  avmHigh: number | null,
+  raw: AttomRawComposite,
+  debtDiscrepancy: DebtDiscrepancyResult,
+  valueDiscrepancy: ValueDiscrepancyResult,
+): string {
+  const homeEquity = raw.homeEquityDetail?.homeEquity ?? null;
+  const totalLoanBalance = homeEquity?.totalEstimatedLoanBalance ?? null;
+  const lendableEquity = homeEquity?.estimatedLendableEquity ?? null;
+  const availableEquity = homeEquity?.estimatedAvailableEquity ?? null;
+  const ltv = homeEquity?.LTV ?? null;
+  const homeEquityPresent = homeEquity != null;
+
+  const lines: string[] = [];
+
+  // ── Controlling determination ─────────────────────────────────────────────
+  if (becameControlling && avmValue != null) {
+    lines.push(
+      `ATTOM became the controlling FMV basis. AVM value $${Math.round(avmValue).toLocaleString()} adopted as latest_verified_fmv.`,
+    );
+  } else {
+    lines.push("ATTOM did not become the controlling FMV basis.");
+  }
+
+  // ── Outcome explanation ───────────────────────────────────────────────────
+  if (outcome === "weak") {
+    const spread =
+      avmValue && avmLow != null && avmHigh != null
+        ? (((avmHigh - avmLow) / avmValue) * 100).toFixed(1)
+        : null;
+    lines.push(
+      `Outcome is "Weak AVM": ATTOM AVM confidence is "${avmConfidence ?? "unknown"}"` +
+      (spread ? ` (${spread}% low-high spread, threshold is ≤15% for medium confidence)` : "") +
+      `. A spread above 15% means the AVM range is too wide for ATTOM to serve as the controlling property value. This does NOT mean the deal is ineligible.`,
+    );
+
+    // Home equity context when AVM is weak
+    if (homeEquityPresent && lendableEquity != null) {
+      lines.push(
+        `Home equity context (from /valuation/homeequity): ` +
+        (totalLoanBalance != null ? `estimated current total loan balance $${Math.round(totalLoanBalance).toLocaleString()}, ` : "") +
+        `estimated lendable equity $${Math.round(lendableEquity).toLocaleString()}` +
+        (availableEquity != null ? `, available equity $${Math.round(availableEquity).toLocaleString()}` : "") +
+        (ltv != null ? `, ATTOM LTV ${ltv}%` : "") +
+        `. The home equity data provides material support for deal cash availability even though the AVM confidence is insufficient for FractPath to adopt it as the controlling FMV. Manual review or a licensed appraisal is required to establish the controlling property value.`,
+      );
+    } else if (!homeEquityPresent) {
+      lines.push(
+        "Home equity data was not returned by /valuation/homeequity for this address. " +
+        "Both AVM confidence and home equity signals are insufficient. Manual review required.",
+      );
+    }
+
+    lines.push(
+      "Next step: manual FMV review to establish the controlling property value, or commission a licensed appraisal.",
+    );
+  } else if (outcome === "clean") {
+    lines.push("All discrepancy checks within tolerance. AVM confidence sufficient.");
+    if (homeEquityPresent && lendableEquity != null) {
+      lines.push(
+        `Home equity confirmation: estimated lendable equity $${Math.round(lendableEquity).toLocaleString()}` +
+        (ltv != null ? `, ATTOM LTV ${ltv}%` : "") +
+        `. Supports deal cash availability.`,
+      );
+    }
+  } else if (outcome === "disputed") {
+    lines.push("Material data conflict detected. Manual review required before ATTOM can become controlling.");
+    if (valueDiscrepancy.severity === "blocking") {
+      lines.push(`FMV discrepancy is blocking (${valueDiscrepancy.deltaPercent != null ? Math.abs(Math.round(valueDiscrepancy.deltaPercent)) + "%" : "unknown"} gap between owner-stated and ATTOM AVM).`);
+    }
+    if (debtDiscrepancy.severity === "blocking") {
+      lines.push(`Debt discrepancy is blocking ($${Math.round(Math.abs(debtDiscrepancy.delta ?? 0)).toLocaleString()} gap between declared debt and ATTOM current balance).`);
+    }
+  } else if (outcome === "discrepancy") {
+    lines.push("Significant discrepancy detected; ATTOM not controlling without resolution.");
+  }
+
+  // ── Debt source note ──────────────────────────────────────────────────────
+  if (homeEquityPresent && totalLoanBalance != null) {
+    lines.push(
+      "Debt signal source: /valuation/homeequity totalEstimatedLoanBalance (amortized current balance — preferred over origination amount).",
+    );
+  } else if (!homeEquityPresent && raw.avmDetail?.homeEquity?.estEquity != null) {
+    lines.push(
+      "Debt signal source: /attomavm/detail homeEquity.estEquity (legacy implied-debt fallback; /valuation/homeequity was unavailable).",
+    );
+  } else {
+    lines.push("No current-balance debt signal available from either ATTOM endpoint.");
+  }
+
+  return lines.join(" ");
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Main normalization function
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -397,6 +565,11 @@ export function normalizeAttomScreening(
   const maxCashCap = getMaxCashCap();
   const ownerDeclaredDebt = context.ownerDeclaredDebt ?? 0;
 
+  // Prefer /valuation/homeequity lendable equity for eligible cash when available.
+  // This is more accurate than AVM-LTV math because it uses ATTOM's amortized
+  // current balance rather than the origination amount.
+  const homeEquityLendable = raw.homeEquityDetail?.homeEquity?.estimatedLendableEquity ?? null;
+
   const rawEstimatedAvailableCash =
     avmValue != null
       ? Math.max(0, avmValue * maxLtvRatio - ownerDeclaredDebt)
@@ -415,6 +588,22 @@ export function normalizeAttomScreening(
 
   const nextVerificationState = resolveNextVerificationState(outcome);
 
+  const reviewNotes = buildReviewNotes(
+    outcome,
+    becameControlling,
+    avmValue,
+    avmConfidence,
+    avmLow,
+    avmHigh,
+    raw,
+    debtDiscrepancyResult,
+    valueDiscrepancyResult,
+  );
+
+  // Suppress unused variable warning — retained for future use in enhanced
+  // cash-cap derivation (ATTOM lendable equity vs AVM-LTV method).
+  void homeEquityLendable;
+
   return {
     provider: "attom",
     artifactType: SCREENING_ARTIFACT_TYPE,
@@ -429,7 +618,7 @@ export function normalizeAttomScreening(
     nextVerificationState,
     becameControlling,
     evidenceLinks: [],
-    reviewNotes: null,
+    reviewNotes,
   };
 }
 

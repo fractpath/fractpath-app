@@ -213,9 +213,13 @@ function AttomFactsSection({ raw }: { raw: AttomRawComposite }) {
   // reflects the verbatim API response. We read both cases defensively.
   const pd = raw.propertyDetail as any;
   const avmRec = raw.avmDetail as any;
+  // homeEquityDetail is from /valuation/homeequity — the primary current-debt source.
+  // May be null for run records created before this endpoint was added to the flow.
+  const heRec = (raw as any).homeEquityDetail as any;
 
   const pdPresent = pd != null;
   const avmPresent = avmRec != null;
+  const hePresent = heRec != null;
 
   // ── A. Property identity ──────────────────────────────────────────────────
   const attomId =
@@ -338,10 +342,24 @@ function AttomFactsSection({ raw }: { raw: AttomRawComposite }) {
 
   const absenteeStatus = ownerBlock?.absenteeownerstatus ?? null;
 
-  if (!pdPresent && !avmPresent) {
+  // ── E. Home equity / debt support (/valuation/homeequity) ─────────────────
+  // This is the primary current-debt signal — preferred over AVM-implied equity.
+  // heRec may be null for old run records (created before the 3rd endpoint was added).
+  const heData = heRec?.homeEquity ?? null;
+  const heDataPresent = heData != null;
+  const heLtv = heData?.LTV ?? null;
+  const heEstAvailEquity = heData?.estimatedAvailableEquity ?? null;
+  const heEstLendableEquity = heData?.estimatedLendableEquity ?? null;
+  const heFirstLoan = heData?.firstAmortizedLoanAmount ?? null;
+  const heSecondLoan = heData?.secondAmortizedLoanAmount ?? null;
+  const heThirdLoan = heData?.thirdAmortizedLoanAmount ?? null;
+  const heTotalBalance = heData?.totalEstimatedLoanBalance ?? null;
+  const heRecordUpdated = heData?.recordLastUpdated ?? null;
+
+  if (!pdPresent && !avmPresent && !hePresent) {
     return (
       <div className="text-xs text-muted-foreground italic">
-        No raw ATTOM payload available for this run. Both endpoints returned no data.
+        No raw ATTOM payload available for this run. All three endpoints returned no data.
       </div>
     );
   }
@@ -435,22 +453,22 @@ function AttomFactsSection({ raw }: { raw: AttomRawComposite }) {
         </p>
       </SectionBox>
 
-      {/* ── D. Equity / debt signals ─────────────────────────────────────── */}
+      {/* ── D. attomavm equity signals (subscription-gated legacy) ─────────── */}
       <SectionBox
-        title="D — Equity / debt signals"
-        subtitle="(attomavm/detail homeEquity)"
+        title="D — AVM equity signals"
+        subtitle="(attomavm/detail homeEquity — subscription-gated)"
       >
         {!avmPresent ? (
           <p className="text-xs text-muted-foreground/50 italic">endpoint returned no payload</p>
         ) : !homeEquityPresent ? (
           <div className="space-y-1">
             <p className="text-xs text-orange-700 font-medium">
-              Home equity block absent — not returned by this subscription tier
+              attomavm homeEquity block absent — confirmed subscription-gated at current tier
             </p>
             <p className="text-xs text-muted-foreground/60 italic">
-              estEquity, estEstimatedValue, estEquityPct are subscription-gated in /attomavm/detail.
-              Debt discrepancy comparison is skipped when this block is absent.
-              There is no separate /valuation/homeequity endpoint.
+              estEquity, estEstimatedValue, estEquityPct are not returned in /attomavm/detail
+              at this subscription level. See section E (/valuation/homeequity) for current
+              debt-support signals.
             </p>
           </div>
         ) : (
@@ -468,10 +486,89 @@ function AttomFactsSection({ raw }: { raw: AttomRawComposite }) {
         )}
       </SectionBox>
 
-      {/* ── E. Mortgage record ───────────────────────────────────────────── */}
+      {/* ── E. Home equity / debt support (/valuation/homeequity) ─────────── */}
       <SectionBox
-        title="E — Mortgage record"
-        subtitle="(detailmortgageowner)"
+        title="E — Home equity / debt support"
+        subtitle="(/valuation/homeequity — primary current-debt source)"
+      >
+        {!hePresent ? (
+          <div className="space-y-1">
+            <p className="text-xs text-orange-700 font-medium">
+              /valuation/homeequity returned no payload for this run
+            </p>
+            <p className="text-xs text-muted-foreground/60 italic">
+              This may mean the endpoint call failed, the address was unmatched, or this is
+              an older run record created before the third endpoint was added to the screening
+              flow. Re-run ATTOM screening to populate this section.
+            </p>
+          </div>
+        ) : !heDataPresent ? (
+          <div className="space-y-1">
+            <p className="text-xs text-orange-700 font-medium">
+              homeEquity block absent in /valuation/homeequity response
+            </p>
+            <p className="text-xs text-muted-foreground/60 italic">
+              The endpoint returned a property record but the homeEquity sub-object was not
+              present. This may indicate this property is not covered at the current tier.
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+              <Field
+                label="Total estimated loan balance"
+                value={heTotalBalance != null ? fmtCurrency(heTotalBalance) : null}
+                absent="not returned by ATTOM"
+              />
+              <Field
+                label="ATTOM LTV"
+                value={heLtv != null ? `${heLtv}%` : null}
+                absent="not returned by ATTOM"
+              />
+              <Field
+                label="Est. available equity"
+                value={heEstAvailEquity != null ? fmtCurrency(heEstAvailEquity) : null}
+                absent="not returned by ATTOM"
+              />
+              <Field
+                label="Est. lendable equity"
+                value={heEstLendableEquity != null ? fmtCurrency(heEstLendableEquity) : null}
+                absent="not returned by ATTOM"
+              />
+              <Field
+                label="1st lien amortized balance"
+                value={heFirstLoan != null ? fmtCurrency(heFirstLoan) : null}
+                absent="not returned by ATTOM"
+              />
+              <Field
+                label="2nd lien amortized balance"
+                value={heSecondLoan != null ? fmtCurrency(heSecondLoan) : null}
+                absent="not returned by ATTOM"
+              />
+              <Field
+                label="3rd lien amortized balance"
+                value={heThirdLoan != null ? fmtCurrency(heThirdLoan) : null}
+                absent="not returned by ATTOM"
+              />
+              <Field
+                label="Record last updated"
+                value={val(heRecordUpdated)}
+                absent="not returned by ATTOM"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground/60 italic pt-0.5">
+              totalEstimatedLoanBalance is ATTOM&apos;s amortized estimate of current outstanding
+              liens (preferred over origination amount). estimatedLendableEquity is the
+              FractPath-relevant deal cash support signal.
+            </p>
+          </>
+        )}
+      </SectionBox>
+
+      {/* ── F. Mortgage record ───────────────────────────────────────────────── */}
+      <SectionBox
+        title="F — Mortgage record"
+        subtitle="(detailmortgageowner — origination context, NOT current balance)"
       >
         {!pdPresent ? (
           <p className="text-xs text-muted-foreground/50 italic">endpoint returned no payload</p>
@@ -506,9 +603,9 @@ function AttomFactsSection({ raw }: { raw: AttomRawComposite }) {
         )}
       </SectionBox>
 
-      {/* ── F. Owner record ──────────────────────────────────────────────── */}
+      {/* ── G. Owner record ──────────────────────────────────────────────── */}
       <SectionBox
-        title="F — Owner record"
+        title="G — Owner record"
         subtitle="(detailmortgageowner)"
       >
         {!pdPresent ? (
@@ -559,6 +656,12 @@ function AttomFactsSection({ raw }: { raw: AttomRawComposite }) {
             failLabel="✗ no payload"
           />
           <DiagRow
+            label="/valuation/homeequity"
+            ok={hePresent}
+            okLabel={heDataPresent ? "✓ payload received — homeEquity block present" : "✓ endpoint returned payload — homeEquity block absent"}
+            failLabel="✗ no payload — re-run screening to populate"
+          />
+          <DiagRow
             label="Mortgage block"
             ok={mortgagePresent}
             okLabel={
@@ -587,10 +690,22 @@ function AttomFactsSection({ raw }: { raw: AttomRawComposite }) {
             failLabel="✗ not returned"
           />
           <DiagRow
-            label="Home equity signals"
+            label="attomavm homeEquity signals"
             ok={homeEquityPresent}
-            okLabel="✓ estEquity / estEstimatedValue present"
-            failLabel="✗ not returned — subscription-gated"
+            okLabel="✓ estEquity / estEstimatedValue present (attomavm)"
+            failLabel="✗ not returned — subscription-gated in attomavm/detail"
+          />
+          <DiagRow
+            label="homeEquity.totalEstimatedLoanBalance"
+            ok={heTotalBalance != null}
+            okLabel={`✓ $${heTotalBalance != null ? Math.round(heTotalBalance).toLocaleString() : ""} (from /valuation/homeequity)`}
+            failLabel={hePresent ? "✗ homeEquity block absent in /valuation/homeequity response" : "✗ /valuation/homeequity returned no payload"}
+          />
+          <DiagRow
+            label="homeEquity.estimatedLendableEquity"
+            ok={heEstLendableEquity != null}
+            okLabel={`✓ $${heEstLendableEquity != null ? Math.round(heEstLendableEquity).toLocaleString() : ""} (from /valuation/homeequity)`}
+            failLabel={hePresent ? "✗ homeEquity block absent in /valuation/homeequity response" : "✗ /valuation/homeequity returned no payload"}
           />
           <DiagRow
             label="AVM event date"
@@ -751,10 +866,15 @@ function FractpathInterpretationSection({
         </div>
       )}
 
-      {/* Review notes */}
+      {/* Controlling / interpretation explanation */}
       {payload.reviewNotes && (
-        <div className="text-xs text-muted-foreground italic border-t pt-2">
-          {payload.reviewNotes}
+        <div className="rounded-md border border-violet-200 bg-violet-50/60 px-3 py-2.5 space-y-1">
+          <div className="text-xs font-semibold text-violet-900">
+            Why ATTOM {payload.becameControlling ? "became" : "did not become"} the controlling FMV
+          </div>
+          <p className="text-xs text-violet-800 leading-relaxed">
+            {payload.reviewNotes}
+          </p>
         </div>
       )}
     </div>
@@ -1002,9 +1122,12 @@ export function AdminAttomScreeningPanel({
             )}
           </div>
           <p className="mt-1.5 text-xs text-muted-foreground">
-            Fetches live ATTOM property detail + AVM. On a clean outcome the controlling FMV,
-            verification state, and eligible cash cap are updated immediately. Runs are logged
-            to the screening run history.
+            Fetches live data from three ATTOM endpoints in parallel:
+            /property/detailmortgageowner (owner + mortgage origination),
+            /attomavm/detail (AVM + confidence), and
+            /valuation/homeequity (current loan balance + lendable equity).
+            On a clean outcome the controlling FMV, verification state, and eligible cash cap
+            are updated immediately. Runs are logged to the screening run history.
           </p>
         </div>
 

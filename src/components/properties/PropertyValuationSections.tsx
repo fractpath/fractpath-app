@@ -39,6 +39,12 @@ export type ValuationSectionsProps = {
    */
   liveIneligiblePhase: LiveIneligiblePhase;
   linkedDealId: string | null;
+  /**
+   * ISO timestamp of when the most recent real ATTOM admin screening completed.
+   * Used to show "independently reviewed on [date]" on the owner page.
+   * Owner-safe: shown as a date only, no internal ATTOM details are exposed.
+   */
+  attomScreeningCompletedAt?: string | null;
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -135,6 +141,7 @@ function AttomSection({
   isControlling,
   isRealAttomComplete,
   liveIneligiblePhase,
+  attomScreeningCompletedAt,
 }: {
   propertyId: string;
   escalationDepositStatus: string | null;
@@ -145,6 +152,7 @@ function AttomSection({
   isControlling: boolean;
   isRealAttomComplete: boolean;
   liveIneligiblePhase: LiveIneligiblePhase;
+  attomScreeningCompletedAt?: string | null;
 }) {
   const router = useRouter();
   const [requested, setRequested] = useState(initialOwnerAttempted);
@@ -221,17 +229,55 @@ function AttomSection({
       {/* Real ATTOM or simulation AVM complete */}
       {effectiveComplete && (
         <>
-          <p className="text-xs text-emerald-800 font-medium">
-            Your enhanced valuation is complete.
-            {isControlling && latestVerifiedFmv != null && (
-              <> Verified value: <span className="font-bold">{fmtUsd(latestVerifiedFmv)}</span>.</>
-            )}
-          </p>
-          {!isControlling && (
-            <p className="text-xs text-muted-foreground italic">
-              This result has been superseded by a subsequent licensed manual appraisal.
-              The report remains on file for your reference.
-            </p>
+          {/* When real ATTOM admin screening is the source — show owner-safe enhanced review state */}
+          {isRealAttomComplete ? (
+            <div className="space-y-1.5">
+              <p className="text-xs text-emerald-800 font-semibold">
+                Enhanced data review complete.
+              </p>
+              <p className="text-xs text-emerald-800">
+                An independent data review of your property has been completed
+                {attomScreeningCompletedAt ? (() => {
+                  try {
+                    const d = new Date(attomScreeningCompletedAt);
+                    return ` on ${d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}`;
+                  } catch { return ""; }
+                })() : ""}.
+                {isControlling && latestVerifiedFmv != null && (
+                  <> The verified property value established through this review is{" "}
+                    <span className="font-bold">{fmtUsd(latestVerifiedFmv)}</span>.
+                  </>
+                )}
+              </p>
+              {isControlling && (
+                <p className="text-xs text-muted-foreground">
+                  This independently reviewed value is currently used as the verified basis
+                  for your property. Our team will notify you if any further steps are needed.
+                </p>
+              )}
+              {!isControlling && (
+                <p className="text-xs text-muted-foreground italic">
+                  This review is on file. A subsequent appraisal has established the current
+                  controlling value.
+                </p>
+              )}
+            </div>
+          ) : (
+            /* Escalation sim path */
+            <>
+              <p className="text-xs text-emerald-800 font-medium">
+                Your enhanced valuation is complete.
+                {isControlling && latestVerifiedFmv != null && (
+                  <> Verified value: <span className="font-bold">{fmtUsd(latestVerifiedFmv)}</span>.</>
+                )}
+              </p>
+              {!isControlling && (
+                <p className="text-xs text-muted-foreground italic">
+                  This result has been superseded by a subsequent licensed manual appraisal.
+                  The report remains on file for your reference.
+                </p>
+              )}
+            </>
           )}
         </>
       )}
@@ -541,6 +587,7 @@ export function PropertyValuationSections(props: ValuationSectionsProps) {
     fmvVerificationSource,
     liveIneligiblePhase,
     linkedDealId,
+    attomScreeningCompletedAt,
   } = props;
 
   const attomComplete = escalationAvmStatus === "completed";
@@ -593,6 +640,7 @@ export function PropertyValuationSections(props: ValuationSectionsProps) {
           isControlling={attomIsControlling}
           isRealAttomComplete={isRealAttomComplete}
           liveIneligiblePhase={liveIneligiblePhase}
+          attomScreeningCompletedAt={attomScreeningCompletedAt}
         />
       )}
 

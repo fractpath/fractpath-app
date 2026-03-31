@@ -145,10 +145,13 @@ describe("normalizeAttomScreening — clean outcome", () => {
     expect(result.limitingFactors).toHaveLength(0);
   });
 
-  it("evidenceLinks is empty and reviewNotes is null", () => {
+  it("evidenceLinks is empty and reviewNotes is a non-null explanatory string", () => {
     const result = normalizeAttomScreening(makeCleanRaw(), makeContext());
     expect(result.evidenceLinks).toHaveLength(0);
-    expect(result.reviewNotes).toBeNull();
+    // reviewNotes is now always populated with a plain-language interpretation
+    // (buildReviewNotes always returns a string, never null)
+    expect(typeof result.reviewNotes).toBe("string");
+    expect(result.reviewNotes!.length).toBeGreaterThan(0);
   });
 });
 

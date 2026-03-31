@@ -58,6 +58,12 @@ export type PropertyWorkflowState = {
    * Derived server-side from property_status_audit.
    */
   ownerAttemptedAttom: boolean;
+  /**
+   * ISO timestamp of when the most recent real ATTOM admin screening completed.
+   * Null if no screening has been run. Used on the owner page to show
+   * "enhanced review completed on [date]" without leaking internal details.
+   */
+  attomScreeningCompletedAt: string | null;
 };
 
 type Props = {
@@ -323,7 +329,8 @@ export function PropertyDetailClient({
           workflowState.escalationAvmStatus ||
           workflowState.ownerAttemptedAttom ||
           workflowState.manualAppraisalStatus ||
-          workflowState.liveIneligiblePhase !== null) && (
+          workflowState.liveIneligiblePhase !== null ||
+          workflowState.fmvVerificationSource === "attom") && (
           <PropertyValuationSections
             propertyId={property.id}
             rentcastFmv={workflowState.rentcastFmv}
@@ -337,6 +344,7 @@ export function PropertyDetailClient({
             fmvVerificationSource={workflowState.fmvVerificationSource}
             liveIneligiblePhase={workflowState.liveIneligiblePhase}
             linkedDealId={linkedDeal?.deal_id ?? null}
+            attomScreeningCompletedAt={workflowState.attomScreeningCompletedAt}
           />
         )}
 

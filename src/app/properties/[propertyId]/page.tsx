@@ -155,6 +155,21 @@ export default async function PropertyDetailPage({ params }: PageProps) {
     // non-fatal — proceed without activity
   }
 
+  // Fetch most recent real ATTOM admin screening completion timestamp (non-fatal)
+  let attomScreeningCompletedAt: string | null = null;
+  try {
+    const { data: attomRun } = await (svc.from("property_review_runs") as any)
+      .select("requested_at")
+      .eq("property_id", propertyId)
+      .eq("provider", "attom")
+      .order("requested_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    attomScreeningCompletedAt = attomRun?.requested_at ?? null;
+  } catch {
+    // non-fatal — proceed without screening date
+  }
+
   const workflowState: PropertyWorkflowState = {
     propertyStatus: row.status ?? null,
     propertyReviewStatus: row.property_review_status ?? null,
@@ -173,6 +188,7 @@ export default async function PropertyDetailPage({ params }: PageProps) {
     manualAppraisalStatus: row.manual_appraisal_status ?? null,
     manualAppraisalFmv: row.manual_appraisal_fmv ?? null,
     ownerAttemptedAttom,
+    attomScreeningCompletedAt,
   };
 
   // Fetch open/submitted review request for the linked deal + this property
