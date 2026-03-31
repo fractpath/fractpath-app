@@ -113,14 +113,116 @@ function deriveConfidenceFromRange(
 }
 
 // ─── Section A: ATTOM Native Facts ────────────────────────────────────────────
+//
+// Diagnostic-complete rendering of every ATTOM fact group.
+//
+// Design rules:
+//   1. Every group (identity, property type, AVM, equity/debt, mortgage, owner)
+//      is ALWAYS rendered — even when the group is empty.
+//   2. Every field that is absent shows an explicit absence label so an operator
+//      can distinguish: (a) ATTOM did not return it, (b) it is subscription-gated,
+//      (c) the whole endpoint returned no payload.
+//   3. ATTOM's actual API response uses lowercase field names in several objects
+//      (e.g. owner.owner1.lastname, mortgage.deedtype).  The raw payload is stored
+//      verbatim from the API response, so we read both lowercase and camelCase to
+//      be resilient to field-name drift across subscription tiers / API versions.
+//   4. mortgage may be an object OR an array depending on subscription tier.
+//      Both formats are handled.
+
+type AbsenceReason =
+  | "not returned by ATTOM"
+  | "subscription-gated"
+  | "endpoint returned no data";
+
+function Field({
+  label,
+  value,
+  absent = "not returned by ATTOM",
+  wide,
+}: {
+  label: string;
+  value: React.ReactNode | null | undefined;
+  absent?: AbsenceReason | string;
+  wide?: boolean;
+}) {
+  const display = value ?? null;
+  return (
+    <div className={wide ? "col-span-2" : undefined}>
+      <div className="text-xs text-muted-foreground">{label}</div>
+      {display != null ? (
+        <div className="text-xs font-medium">{display}</div>
+      ) : (
+        <div className="text-xs text-muted-foreground/50 italic">{absent}</div>
+      )}
+    </div>
+  );
+}
+
+function SectionBox({
+  title,
+  subtitle,
+  children,
+  absent,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+  absent?: string;
+}) {
+  return (
+    <div className="rounded-md border bg-muted/20 px-3 py-2 space-y-1.5">
+      <div className="flex items-baseline gap-1.5">
+        <span className="text-xs font-medium text-muted-foreground">{title}</span>
+        {subtitle && (
+          <span className="text-xs text-muted-foreground/60 italic">{subtitle}</span>
+        )}
+        {absent && (
+          <span className="text-xs text-muted-foreground/50 italic">— {absent}</span>
+        )}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function DiagRow({
+  label,
+  ok,
+  okLabel,
+  failLabel,
+}: {
+  label: string;
+  ok: boolean;
+  okLabel: string;
+  failLabel: string;
+}) {
+  return (
+    <>
+      <div className="text-muted-foreground">{label}</div>
+      <div className={ok ? "text-green-700 font-medium" : "text-orange-700 italic"}>
+        {ok ? okLabel : failLabel}
+      </div>
+    </>
+  );
+}
 
 function AttomFactsSection({ raw }: { raw: AttomRawComposite }) {
-  const pd = raw.propertyDetail;
-  const avmRec = raw.avmDetail;
+  // Cast to any to handle actual ATTOM response field names.
+  // ATTOM's API returns lowercase keys in several objects (owner, mortgage).
+  // Our TypeScript types define camelCase for clarity, but the stored raw_payload
+  // reflects the verbatim API response. We read both cases defensively.
+  const pd = raw.propertyDetail as any;
+  const avmRec = raw.avmDetail as any;
 
+  const pdPresent = pd != null;
+  const avmPresent = avmRec != null;
+
+  // ── A. Property identity ──────────────────────────────────────────────────
   const attomId =
     pd?.identifier?.attomId ??
+    pd?.identifier?.Id ??
     avmRec?.identifier?.attomId ??
+    avmRec?.identifier?.Id ??
     null;
 
   const matchedAddress = pd?.address
@@ -131,258 +233,376 @@ function AttomFactsSection({ raw }: { raw: AttomRawComposite }) {
         pd.address.postal1,
       ]
         .filter(Boolean)
-        .join(", ")
+        .join(", ") || null
     : null;
 
-  const avmValue = avmRec?.avm?.amount?.value ?? null;
-  const avmLow = avmRec?.avm?.amount?.low ?? null;
-  const avmHigh = avmRec?.avm?.amount?.high ?? null;
-  const confidence = deriveConfidenceFromRange(avmValue, avmLow, avmHigh);
-  const propIndicator = avmRec?.avm?.condition?.propIndicator ?? null;
+  // matchCode — ATTOM address match quality indicator (e.g. "ExaStr" = exact street match)
+  const matchCode =
+    pd?.address?.matchCode ?? avmRec?.address?.matchCode ?? null;
 
-  const estEquity = avmRec?.homeEquity?.estEquity ?? null;
-  const estEquityPct = avmRec?.homeEquity?.estEquityPct ?? null;
-  const estEstimatedValue = avmRec?.homeEquity?.estEstimatedValue ?? null;
-
+  // ── B. Property type ──────────────────────────────────────────────────────
   const proptype = pd?.summary?.proptype ?? null;
   const propclass = pd?.summary?.propclass ?? null;
   const yearbuilt = pd?.summary?.yearbuilt ?? null;
   const propLandUse = pd?.summary?.propLandUse ?? null;
 
-  const owner1 = pd?.owner?.owner1;
-  const owner2 = pd?.owner?.owner2;
-  const corpIndicator = pd?.owner?.corporateIndicator ?? null;
+  // ── C. AVM ───────────────────────────────────────────────────────────────
+  const avmAmount = avmRec?.avm?.amount;
+  const avmValue = avmAmount?.value ?? null;
+  const avmLow = avmAmount?.low ?? null;
+  const avmHigh = avmAmount?.high ?? null;
+  // scr is returned inside avm.amount (not avm.condition) in the actual API response.
+  // Also check avm.condition.scr as fallback for future API versions.
+  const avmScr = avmAmount?.scr ?? avmRec?.avm?.condition?.scr ?? null;
+  const propIndicator =
+    avmRec?.avm?.condition?.propIndicator ?? pd?.summary?.propIndicator ?? null;
+  // ATTOM returns the AVM run date as "eventDate" in the actual response.
+  // Our type named this "pubDate"; check both.
+  const avmEventDate = avmRec?.avm?.eventDate ?? avmRec?.avm?.pubDate ?? null;
+  const confidence = deriveConfidenceFromRange(avmValue, avmLow, avmHigh);
 
-  function Row({ label, value }: { label: string; value: React.ReactNode }) {
-    if (value == null || value === "" || value === "—") return null;
+  // ── D. Home equity / debt signals ─────────────────────────────────────────
+  // homeEquity is subscription-gated. If avmRec is present but homeEquity is absent,
+  // this subscription tier does not include equity signals.
+  const homeEquityBlock = avmRec?.homeEquity ?? null;
+  const homeEquityPresent = homeEquityBlock != null;
+  const estEquity = homeEquityBlock?.estEquity ?? null;
+  const estEquityPct = homeEquityBlock?.estEquityPct ?? null;
+  const estEstimatedValue = homeEquityBlock?.estEstimatedValue ?? null;
+  const impliedLien =
+    avmValue != null && estEquity != null
+      ? Math.max(0, avmValue - estEquity)
+      : null;
+
+  // ── E. Mortgage record ───────────────────────────────────────────────────
+  // ATTOM may return mortgage as an object OR an array.
+  // Fields use lowercase names in the actual API response.
+  const mortgageRaw = pd?.mortgage ?? null;
+  const mortgagePresent = mortgageRaw != null;
+  const mortgage = mortgageRaw
+    ? Array.isArray(mortgageRaw)
+      ? (mortgageRaw[0] ?? null)
+      : mortgageRaw
+    : null;
+
+  // Read both ATTOM lowercase names and our camelCase type names
+  const mortgageAmount = mortgage?.amount ?? null;
+  const mortgageDate = mortgage?.date ?? null;
+  const mortgageRate = mortgage?.interestRate ?? null;
+  const mortgageLoanType = mortgage?.loanTypeCode ?? mortgage?.loantype ?? null;
+  const mortgageDeedType = mortgage?.deedtype ?? mortgage?.deedType ?? null;
+  const mortgageTerm = mortgage?.term ?? null;
+  const mortgageDueDate =
+    (mortgage?.duedate != null && mortgage.duedate !== ""
+      ? mortgage.duedate
+      : null) ??
+    (mortgage?.dueDate != null && mortgage.dueDate !== ""
+      ? mortgage.dueDate
+      : null);
+  const mortgageEquityFlag = mortgage?.equityFlag ?? mortgage?.equityflag ?? null;
+  const mortgageRefiFlag = mortgage?.refiFlag ?? mortgage?.refiflag ?? null;
+  // lender — extra field returned by detailmortgageowner, not in our type but visible in raw
+  const mortgageLender =
+    mortgage?.lender?.lastname ??
+    mortgage?.lender?.companyName ??
+    mortgage?.lender?.companycode ??
+    null;
+
+  // ── F. Owner record ────────────────────────────────────────────────────
+  // ATTOM returns lowercase field names: lastname, firstnameandmi, corporateindicator.
+  // Also has: fullname (convenient concatenation), owner2/3/4 (usually empty objects).
+  const ownerBlock = pd?.owner ?? null;
+  const ownerPresent = ownerBlock != null;
+  const owner1Raw = ownerBlock?.owner1 ?? null;
+  const owner2Raw = ownerBlock?.owner2 ?? null;
+
+  // Read both ATTOM lowercase and camelCase type field names
+  function extractOwnerName(ownerRaw: Record<string, unknown> | null): string | null {
+    if (!ownerRaw) return null;
+    const full = ownerRaw.fullname as string | undefined;
+    if (full) return full;
+    const parts = [
+      (ownerRaw.firstnameandmi ?? ownerRaw.firstNameAndMi) as string | undefined,
+      (ownerRaw.lastname ?? ownerRaw.lastName) as string | undefined,
+    ].filter(Boolean);
+    return parts.length > 0 ? parts.join(" ") : null;
+  }
+
+  const owner1Name = extractOwnerName(owner1Raw);
+  const owner2Name = extractOwnerName(owner2Raw);
+
+  const corpIndicator =
+    ownerBlock?.corporateindicator ??
+    ownerBlock?.corporateIndicator ??
+    null;
+
+  const absenteeStatus = ownerBlock?.absenteeownerstatus ?? null;
+
+  if (!pdPresent && !avmPresent) {
     return (
-      <div className="flex items-start gap-3">
-        <span className="w-44 shrink-0 text-xs text-muted-foreground leading-5">{label}</span>
-        <span className="text-xs text-foreground leading-5 font-medium">{value}</span>
+      <div className="text-xs text-muted-foreground italic">
+        No raw ATTOM payload available for this run. Both endpoints returned no data.
       </div>
     );
   }
 
-  const hasAnyData =
-    attomId != null ||
-    matchedAddress != null ||
-    avmValue != null ||
-    estEquity != null ||
-    proptype != null ||
-    owner1 != null;
+  const noData = <span className="text-muted-foreground/50 italic text-xs">not returned by ATTOM</span>;
+  const subGated = <span className="text-muted-foreground/50 italic text-xs">not returned — subscription-gated</span>;
+  const endpointAbsent = <span className="text-muted-foreground/50 italic text-xs">endpoint returned no payload</span>;
 
-  if (!hasAnyData) {
-    return (
-      <div className="text-xs text-muted-foreground italic">
-        No raw ATTOM payload available for this run.
-      </div>
-    );
+  function val(v: string | number | null | undefined, fmt?: (x: number) => string): React.ReactNode | null {
+    if (v == null) return null;
+    if (typeof v === "number" && fmt) return fmt(v);
+    return String(v);
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
 
-      {/* Property identity */}
-      {(attomId != null || matchedAddress != null) && (
-        <div className="space-y-1">
-          <Row label="ATTOM property ID" value={attomId != null ? String(attomId) : null} />
-          <Row label="Matched address" value={matchedAddress} />
+      {/* ── A. Property identity ─────────────────────────────────────────── */}
+      <div className="space-y-1.5">
+        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+          A — Property identity
+          {!pdPresent && <span className="ml-1.5 font-normal normal-case text-muted-foreground/50 italic">(detailmortgageowner returned no payload)</span>}
         </div>
-      )}
-
-      {/* Property type */}
-      {(proptype != null || propclass != null || yearbuilt != null || propLandUse != null) && (
-        <div className="pt-1 space-y-1">
-          <Row label="Property type" value={proptype} />
-          <Row label="Property class" value={propclass} />
-          <Row label="Land use" value={propLandUse} />
-          <Row label="Year built" value={yearbuilt != null ? String(yearbuilt) : null} />
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+          <Field label="ATTOM property ID" value={attomId != null ? String(attomId) : null} />
+          <Field label="Match code" value={val(matchCode)} absent="not returned by ATTOM" />
+          <Field label="Matched address" value={matchedAddress} wide absent="not returned by ATTOM" />
         </div>
-      )}
+      </div>
 
-      {/* AVM */}
-      {avmValue != null && (
-        <div className="pt-1 rounded-md border bg-muted/20 px-3 py-2 space-y-1.5">
-          <div className="text-xs font-medium text-muted-foreground">ATTOM AVM</div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-            <div>
-              <div className="text-xs text-muted-foreground">Point estimate</div>
-              <div className="text-xs font-semibold">{fmtCurrency(avmValue)}</div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground">Range</div>
-              <div className="text-xs font-medium">
-                {avmLow != null && avmHigh != null
-                  ? `${fmtCurrency(avmLow)} – ${fmtCurrency(avmHigh)}`
-                  : "—"}
-              </div>
-            </div>
-            {confidence != null && (
-              <div>
-                <div className="text-xs text-muted-foreground">Derived confidence</div>
-                <div className={`text-xs font-medium capitalize ${CONFIDENCE_CLS[confidence] ?? ""}`}>
-                  {confidence}
-                </div>
-              </div>
-            )}
-            {propIndicator != null && (
-              <div>
-                <div className="text-xs text-muted-foreground">Prop indicator</div>
-                <div className="text-xs font-medium">{propIndicator}</div>
-              </div>
-            )}
-          </div>
+      {/* ── B. Property type ─────────────────────────────────────────────── */}
+      <div className="space-y-1.5">
+        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+          B — Property type
+          {!pdPresent && <span className="ml-1.5 font-normal normal-case text-muted-foreground/50 italic">(detailmortgageowner returned no payload)</span>}
         </div>
-      )}
-
-      {/* Home equity signals */}
-      {(estEquity != null || estEstimatedValue != null) && (
-        <div className="pt-1 rounded-md border bg-muted/20 px-3 py-2 space-y-1.5">
-          <div className="text-xs font-medium text-muted-foreground">ATTOM home equity signals</div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-            {estEstimatedValue != null && (
-              <div>
-                <div className="text-xs text-muted-foreground">Est. market value</div>
-                <div className="text-xs font-medium">{fmtCurrency(estEstimatedValue)}</div>
-              </div>
-            )}
-            {estEquity != null && (
-              <div>
-                <div className="text-xs text-muted-foreground">Est. equity</div>
-                <div className="text-xs font-medium">{fmtCurrency(estEquity)}</div>
-              </div>
-            )}
-            {estEquityPct != null && (
-              <div>
-                <div className="text-xs text-muted-foreground">Equity %</div>
-                <div className="text-xs font-medium">{fmtPct(estEquityPct)}</div>
-              </div>
-            )}
-            {estEquity != null && avmValue != null && (
-              <div>
-                <div className="text-xs text-muted-foreground">Implied lien total</div>
-                <div className="text-xs font-medium">{fmtCurrency(Math.max(0, avmValue - estEquity))}</div>
-              </div>
-            )}
-          </div>
-          <p className="text-xs text-muted-foreground italic">
-            Implied lien = AVM value − est. equity (ATTOM secondary signal, not a title search).
-          </p>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+          <Field label="Property type" value={val(proptype)} />
+          <Field label="Property class" value={val(propclass)} />
+          <Field label="Land use" value={val(propLandUse)} />
+          <Field label="Year built" value={val(yearbuilt)} />
         </div>
-      )}
+      </div>
 
-      {/* Mortgage record */}
-      {(() => {
-        const mortgage = pd?.mortgage?.[0] ?? null;
-        if (!mortgage) return null;
-        const hasAny =
-          mortgage.amount != null ||
-          mortgage.date != null ||
-          mortgage.interestRate != null ||
-          mortgage.loanTypeCode != null ||
-          mortgage.deedType != null ||
-          mortgage.term != null ||
-          mortgage.dueDate != null ||
-          mortgage.equityFlag != null ||
-          mortgage.refiFlag != null;
-        if (!hasAny) return null;
-        return (
-          <div className="pt-1 rounded-md border bg-muted/20 px-3 py-2 space-y-1.5">
-            <div className="text-xs font-medium text-muted-foreground">
-              Mortgage record (ATTOM)
-              <span className="ml-1.5 font-normal text-muted-foreground/70 italic">
-                — origination data, not current balance
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-              {mortgage.amount != null && (
-                <div>
-                  <div className="text-xs text-muted-foreground">Orig. loan amount</div>
-                  <div className="text-xs font-medium">{fmtCurrency(mortgage.amount)}</div>
-                </div>
-              )}
-              {mortgage.date != null && (
-                <div>
-                  <div className="text-xs text-muted-foreground">Loan date</div>
-                  <div className="text-xs font-medium">{String(mortgage.date)}</div>
-                </div>
-              )}
-              {mortgage.interestRate != null && (
-                <div>
-                  <div className="text-xs text-muted-foreground">Interest rate</div>
-                  <div className="text-xs font-medium">{mortgage.interestRate}%</div>
-                </div>
-              )}
-              {mortgage.loanTypeCode != null && (
-                <div>
-                  <div className="text-xs text-muted-foreground">Loan type</div>
-                  <div className="text-xs font-medium">{String(mortgage.loanTypeCode)}</div>
-                </div>
-              )}
-              {mortgage.deedType != null && (
-                <div>
-                  <div className="text-xs text-muted-foreground">Deed type</div>
-                  <div className="text-xs font-medium">{String(mortgage.deedType)}</div>
-                </div>
-              )}
-              {mortgage.term != null && (
-                <div>
-                  <div className="text-xs text-muted-foreground">Term (months)</div>
-                  <div className="text-xs font-medium">{String(mortgage.term)}</div>
-                </div>
-              )}
-              {mortgage.dueDate != null && (
-                <div>
-                  <div className="text-xs text-muted-foreground">Due date</div>
-                  <div className="text-xs font-medium">{String(mortgage.dueDate)}</div>
-                </div>
-              )}
-              {mortgage.equityFlag != null && (
-                <div>
-                  <div className="text-xs text-muted-foreground">Equity flag</div>
-                  <div className="text-xs font-medium">{String(mortgage.equityFlag)}</div>
-                </div>
-              )}
-              {mortgage.refiFlag != null && (
-                <div>
-                  <div className="text-xs text-muted-foreground">Refi flag</div>
-                  <div className="text-xs font-medium">{String(mortgage.refiFlag)}</div>
-                </div>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground italic">
-              Source: ATTOM /property/detailmortgageowner. Origination amount ≠ current outstanding balance.
-              Use equity-implied lien (AVM − est. equity) for current debt estimate.
+      {/* ── C. AVM data ──────────────────────────────────────────────────── */}
+      <SectionBox
+        title="C — AVM data"
+        subtitle={avmPresent ? "(attomavm/detail)" : undefined}
+        absent={!avmPresent ? "attomavm/detail returned no payload" : undefined}
+      >
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+          <Field
+            label="Point estimate"
+            value={avmValue != null ? fmtCurrency(avmValue) : null}
+          />
+          <Field
+            label="Range (low – high)"
+            value={
+              avmLow != null && avmHigh != null
+                ? `${fmtCurrency(avmLow)} – ${fmtCurrency(avmHigh)}`
+                : null
+            }
+          />
+          <Field
+            label="ATTOM scr confidence"
+            value={avmScr != null ? String(avmScr) : null}
+            absent="not returned by ATTOM"
+          />
+          <Field
+            label="Derived confidence (spread)"
+            value={confidence != null ? `${confidence} (${
+              avmLow != null && avmHigh != null && avmValue != null
+                ? `${(((avmHigh - avmLow) / avmValue) * 100).toFixed(1)}% spread`
+                : "—"
+            })` : null}
+            absent="not derivable — AVM absent"
+          />
+          <Field
+            label="Prop indicator"
+            value={val(propIndicator)}
+            absent="not returned by ATTOM"
+          />
+          <Field
+            label="AVM run date (eventDate)"
+            value={val(avmEventDate)}
+            absent="not returned by ATTOM"
+          />
+        </div>
+        <p className="text-xs text-muted-foreground/60 italic pt-0.5">
+          scr is returned inside avm.amount in the API response (not avm.condition).
+        </p>
+      </SectionBox>
+
+      {/* ── D. Equity / debt signals ─────────────────────────────────────── */}
+      <SectionBox
+        title="D — Equity / debt signals"
+        subtitle="(attomavm/detail homeEquity)"
+      >
+        {!avmPresent ? (
+          <p className="text-xs text-muted-foreground/50 italic">endpoint returned no payload</p>
+        ) : !homeEquityPresent ? (
+          <div className="space-y-1">
+            <p className="text-xs text-orange-700 font-medium">
+              Home equity block absent — not returned by this subscription tier
+            </p>
+            <p className="text-xs text-muted-foreground/60 italic">
+              estEquity, estEstimatedValue, estEquityPct are subscription-gated in /attomavm/detail.
+              Debt discrepancy comparison is skipped when this block is absent.
+              There is no separate /valuation/homeequity endpoint.
             </p>
           </div>
-        );
-      })()}
+        ) : (
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+            <Field label="Est. market value" value={estEstimatedValue != null ? fmtCurrency(estEstimatedValue) : null} absent="subscription-gated" />
+            <Field label="Est. equity" value={estEquity != null ? fmtCurrency(estEquity) : null} absent="subscription-gated" />
+            <Field label="Equity %" value={estEquityPct != null ? fmtPct(estEquityPct) : null} absent="subscription-gated" />
+            <Field label="Implied lien (AVM − equity)" value={impliedLien != null ? fmtCurrency(impliedLien) : null} absent="not derivable — equity absent" />
+          </div>
+        )}
+        {homeEquityPresent && (
+          <p className="text-xs text-muted-foreground/60 italic pt-0.5">
+            Implied lien = AVM value − est. equity (ATTOM secondary signal, not a title search).
+          </p>
+        )}
+      </SectionBox>
 
-      {/* Owner record */}
-      {(owner1 != null || owner2 != null || corpIndicator != null) && (
-        <div className="pt-1 space-y-1">
-          <div className="text-xs font-medium text-muted-foreground">Owner record (ATTOM)</div>
-          {owner1 && (
-            <Row
-              label="Owner 1"
-              value={[owner1.firstNameAndMi, owner1.lastName].filter(Boolean).join(" ") || "—"}
+      {/* ── E. Mortgage record ───────────────────────────────────────────── */}
+      <SectionBox
+        title="E — Mortgage record"
+        subtitle="(detailmortgageowner)"
+      >
+        {!pdPresent ? (
+          <p className="text-xs text-muted-foreground/50 italic">endpoint returned no payload</p>
+        ) : !mortgagePresent ? (
+          <div className="space-y-1">
+            <p className="text-xs text-orange-700 font-medium">
+              Mortgage block absent — not returned by ATTOM
+            </p>
+            <p className="text-xs text-muted-foreground/60 italic">
+              Property may have no recorded lien, or mortgage data requires a higher subscription tier.
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+              <Field label="Orig. loan amount" value={mortgageAmount != null ? fmtCurrency(mortgageAmount) : null} absent="not returned by ATTOM" />
+              <Field label="Loan date" value={val(mortgageDate)} absent="not returned by ATTOM" />
+              <Field label="Interest rate" value={mortgageRate != null ? `${mortgageRate}%` : null} absent="not returned — subscription-gated" />
+              <Field label="Loan type" value={val(mortgageLoanType)} absent="not returned — subscription-gated" />
+              <Field label="Deed type" value={val(mortgageDeedType)} absent="not returned by ATTOM" />
+              <Field label="Term (months)" value={mortgageTerm != null ? String(mortgageTerm) : null} absent="not returned — subscription-gated" />
+              <Field label="Due date" value={val(mortgageDueDate)} absent="not returned by ATTOM" />
+              <Field label="Lender" value={val(mortgageLender)} absent="not returned by ATTOM" />
+              <Field label="Equity flag" value={val(mortgageEquityFlag)} absent="not returned — subscription-gated" />
+              <Field label="Refi flag" value={val(mortgageRefiFlag)} absent="not returned — subscription-gated" />
+            </div>
+            <p className="text-xs text-muted-foreground/60 italic pt-0.5">
+              Origination amount ≠ current outstanding balance.
+              Rate, term, equity/refi flags are subscription-gated and may be absent even when the mortgage block is present.
+            </p>
+          </>
+        )}
+      </SectionBox>
+
+      {/* ── F. Owner record ──────────────────────────────────────────────── */}
+      <SectionBox
+        title="F — Owner record"
+        subtitle="(detailmortgageowner)"
+      >
+        {!pdPresent ? (
+          <p className="text-xs text-muted-foreground/50 italic">endpoint returned no payload</p>
+        ) : !ownerPresent ? (
+          <p className="text-xs text-orange-700 font-medium">
+            Owner block absent — not returned by ATTOM
+          </p>
+        ) : (
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+            <Field label="Owner 1" value={val(owner1Name)} absent="not returned by ATTOM" />
+            <Field label="Owner 2" value={val(owner2Name) || null} absent="not returned by ATTOM" />
+            <Field
+              label="Corporate indicator"
+              value={corpIndicator != null ? String(corpIndicator) : null}
+              absent="not returned by ATTOM"
             />
-          )}
-          {owner2 && (
-            <Row
-              label="Owner 2"
-              value={[owner2.firstNameAndMi, owner2.lastName].filter(Boolean).join(" ") || "—"}
+            <Field
+              label="Absentee status"
+              value={val(absenteeStatus)}
+              absent="not returned by ATTOM"
             />
-          )}
-          {corpIndicator != null && (
-            <Row label="Corporate indicator" value={corpIndicator} />
-          )}
+          </div>
+        )}
+        {ownerPresent && (
+          <p className="text-xs text-muted-foreground/60 italic pt-0.5">
+            ATTOM field names are lowercase (lastname, firstnameandmi, corporateindicator) — read defensively.
+          </p>
+        )}
+      </SectionBox>
+
+      {/* ── Diagnostic footer ─────────────────────────────────────────────── */}
+      <div className="rounded-md border border-dashed border-muted-foreground/30 bg-muted/10 px-3 py-2 space-y-1.5">
+        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+          Diagnostic — ATTOM endpoint coverage
         </div>
-      )}
-
-      <p className="text-xs text-muted-foreground pt-1">
-        Fetched: {fmtDate(raw.fetchedAt)}
-      </p>
+        <div className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-0.5 text-xs">
+          <DiagRow
+            label="/property/detailmortgageowner"
+            ok={pdPresent}
+            okLabel="✓ payload received"
+            failLabel="✗ no payload"
+          />
+          <DiagRow
+            label="/attomavm/detail"
+            ok={avmPresent}
+            okLabel="✓ payload received"
+            failLabel="✗ no payload"
+          />
+          <DiagRow
+            label="Mortgage block"
+            ok={mortgagePresent}
+            okLabel={
+              Array.isArray(mortgageRaw)
+                ? `✓ ${mortgageRaw.length} record(s) (array)`
+                : "✓ present (object — ATTOM returned single record)"
+            }
+            failLabel="✗ absent — no lien on record or subscription-gated"
+          />
+          <DiagRow
+            label="Owner 1 name"
+            ok={owner1Name != null}
+            okLabel={`✓ ${owner1Name ?? ""}`}
+            failLabel="✗ absent in payload"
+          />
+          <DiagRow
+            label="Owner 2 name"
+            ok={owner2Name != null && owner2Name.trim() !== ""}
+            okLabel={`✓ ${owner2Name ?? ""}`}
+            failLabel="✗ absent (owner2 block empty)"
+          />
+          <DiagRow
+            label="AVM scr confidence"
+            ok={avmScr != null}
+            okLabel={`✓ scr=${avmScr} (field: avm.amount.scr)`}
+            failLabel="✗ not returned"
+          />
+          <DiagRow
+            label="Home equity signals"
+            ok={homeEquityPresent}
+            okLabel="✓ estEquity / estEstimatedValue present"
+            failLabel="✗ not returned — subscription-gated"
+          />
+          <DiagRow
+            label="AVM event date"
+            ok={avmEventDate != null}
+            okLabel={`✓ ${avmEventDate ?? ""} (field: avm.eventDate)`}
+            failLabel="✗ not returned"
+          />
+        </div>
+        <p className="text-xs text-muted-foreground/50 italic">
+          Fetched: {fmtDate(raw.fetchedAt)} · Raw payload stored verbatim in property_review_runs.raw_payload
+        </p>
+      </div>
     </div>
   );
 }

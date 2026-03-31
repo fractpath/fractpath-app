@@ -125,7 +125,15 @@ function buildDebtDiscrepancyResult(
   // Mortgage origination amount from detailmortgageowner — used for notes context
   // only; NOT used for the discrepancy comparison (it's the original loan amount,
   // not the current amortized balance).
-  const mortgageOrigination = raw.propertyDetail?.mortgage?.[0]?.amount ?? null;
+  //
+  // ATTOM may return mortgage as a single object OR as an array depending on
+  // endpoint / subscription tier. Handle both to avoid silent null.
+  const mortgageRaw = raw.propertyDetail?.mortgage;
+  const mortgageRecord = Array.isArray(mortgageRaw)
+    ? (mortgageRaw[0] ?? null)
+    : ((mortgageRaw as Record<string, unknown> | null | undefined) ?? null);
+  const mortgageOrigination =
+    (mortgageRecord?.amount as number | null | undefined) ?? null;
 
   let screeningDebt: number | null = null;
   if (avmValue != null && estEquity != null && avmValue > 0) {
