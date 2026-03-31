@@ -65,6 +65,7 @@ FractPath is built with Next.js, leveraging API routes for backend logic and Sup
 - **Proposal Status Values:** Canonical values for `deal_proposals.status` are: `draft`, `submitted`, `accepted`, `rejected`, `withdrawn`.
 - **Calculator Widget Package:** Provides React UI components (`DealSnapshotView`, `DealEditModal`) and utilities.
 - **Canonical Compute Package:** The core `@fractpath/compute` engine, serving as the single source of truth for deal calculations and versioning.
+    - **ATTOM Enhanced Screening:** `runAttomScreening` in `src/lib/property-review/attomScreeningService.ts` orchestrates a two-call ATTOM sequence (`/property/expandedprofile` + `/attomavm/detail`), normalizes to `NormalizedScreeningResult` via `attomAdapter` in `src/lib/property-review/providers/attom/`, persists the artifact via `persistScreeningArtifact`, and applies canonical fields via `applyScreeningResultToProperty`. Admin trigger: `POST /api/admin/properties/[propertyId]/review/run-attom-screening`. Requires `ATTOM_API_KEY` env var; optional `ATTOM_BASE_URL`, `ATTOM_SCREENING_TTL_DAYS`, `ATTOM_MAX_LTV_RATIO`, `ATTOM_MAX_CASH_CAP`. Raw composite payload stored in `property_review_runs.raw_payload`; normalized result in `normalized_payload`.
 
 ## External Dependencies
 - **Next.js:** Application framework.

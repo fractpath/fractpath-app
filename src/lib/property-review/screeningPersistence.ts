@@ -68,6 +68,13 @@ export type PersistScreeningArtifactInput = {
    * Do NOT include PII or secrets.
    */
   requestParams?: Record<string, unknown>;
+  /**
+   * Raw vendor API response payload (for audit trail).
+   * When provided, stored in property_review_runs.raw_payload so the verbatim
+   * vendor response is preserved alongside the normalized result.
+   * Should be the composite payload before normalization (e.g. AttomRawComposite).
+   */
+  rawPayload?: unknown;
 };
 
 /**
@@ -116,7 +123,7 @@ export async function persistScreeningArtifact(
       is_current: true,
       source_key: input.sourceKey ?? null,
       request_params: input.requestParams ?? {},
-      raw_payload: null,
+      raw_payload: input.rawPayload ?? null,
       normalized_payload: input.result,
       error_code: null,
       error_message: null,
