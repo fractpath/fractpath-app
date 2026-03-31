@@ -78,6 +78,11 @@ export type HomeownerPropertyShape = {
   owner_stated_fmv_source: string | null;
   owner_stated_fmv_source_other: string | null;
   willing_to_proceed_formal_review: string | null;
+  // Phase 1 verification state machine fields
+  verification_state: string | null;
+  verified_appraisal_value_status: string | null;
+  owner_verification_removed_at: string | null;
+  verified_appraisal_value_context_owner_id: string | null;
   // Routing extras (set by the fetcher, not always present)
   visibility?: string;
   claim_thread_id?: string | null;
@@ -132,6 +137,10 @@ export function toHomeownerProperty(
     owner_stated_fmv_source: row.owner_stated_fmv_source ?? null,
     owner_stated_fmv_source_other: row.owner_stated_fmv_source_other ?? null,
     willing_to_proceed_formal_review: row.willing_to_proceed_formal_review ?? null,
+    verification_state: row.verification_state ?? null,
+    verified_appraisal_value_status: row.verified_appraisal_value_status ?? null,
+    owner_verification_removed_at: row.owner_verification_removed_at ?? null,
+    verified_appraisal_value_context_owner_id: row.verified_appraisal_value_context_owner_id ?? null,
     visibility: extras?.visibility,
     claim_thread_id: extras?.claim_thread_id ?? null,
     claim_deal_id: extras?.claim_deal_id ?? null,
@@ -214,4 +223,9 @@ export type AdminPropertyShape = HomeownerPropertyShape & {
   review_notes: string | null;
   reviewed_at: string | null;
   verified_at: string | null;
+  // Phase 1 admin-only fields
+  owner_verification_removed_reason: string | null;
+  current_eligibility_posture: string | null;
+  current_fractpath_eligible_cash_cap: number | null;
+  current_limiting_factors_json: unknown | null;
 };

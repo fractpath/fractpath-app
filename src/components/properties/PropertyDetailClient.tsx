@@ -17,6 +17,12 @@ import {
   type PropertyAuditEntry,
 } from "@/components/properties/PropertyActivityTimeline";
 import type { HomeownerPropertyShape } from "@/lib/property/projections";
+import {
+  shouldShowOwnerVerifiedBadge,
+  shouldShowVerifiedAppraisalValueBadge,
+  isAppraisalBadgeExpired,
+  isAppraisalBadgeUnderReview,
+} from "@/lib/property/badges";
 
 type LinkedDeal = {
   thread_id: string;
@@ -261,6 +267,20 @@ export function PropertyDetailClient({
 
   const badge = STATUS_BADGE[property.status] ?? STATUS_BADGE.unverified;
 
+  const showOwnerVerifiedBadge = shouldShowOwnerVerifiedBadge(
+    property.verification_state ?? null,
+    property.owner_verification_removed_at ?? null,
+  );
+  const showVerifiedAppraisalBadge = shouldShowVerifiedAppraisalValueBadge(
+    property.verified_appraisal_value_status ?? null,
+  );
+  const appraisalExpired = isAppraisalBadgeExpired(
+    property.verified_appraisal_value_status ?? null,
+  );
+  const appraisalUnderReview = isAppraisalBadgeUnderReview(
+    property.verified_appraisal_value_status ?? null,
+  );
+
   const hasAnyIntake =
     property.ownership_type ||
     property.occupancy_use ||
@@ -335,6 +355,35 @@ export function PropertyDetailClient({
             {badge.label}
           </span>
           <span className="text-xs text-muted-foreground">{badge.hint}</span>
+
+          {showOwnerVerifiedBadge && (
+            <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
+                <path fillRule="evenodd" d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1Zm3.844 4.574a.75.75 0 0 1 .082 1.058l-3.5 4a.75.75 0 0 1-1.09.058L5.086 8.44a.75.75 0 0 1 1.08-1.043l1.696 1.753 2.96-3.385a.75.75 0 0 1 1.022-.19Z" clipRule="evenodd" />
+              </svg>
+              Owner Verified
+            </span>
+          )}
+
+          {showVerifiedAppraisalBadge && (
+            <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium border ${
+              appraisalUnderReview
+                ? "bg-blue-50 text-blue-800 border-blue-200"
+                : "bg-violet-100 text-violet-800 border-violet-200"
+            }`}>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
+                <path d="M6.5 9a2.5 2.5 0 1 1 5 0 2.5 2.5 0 0 1-5 0Z" />
+                <path fillRule="evenodd" d="M1.5 1A1.5 1.5 0 0 0 0 2.5v11A1.5 1.5 0 0 0 1.5 15h13a1.5 1.5 0 0 0 1.5-1.5v-11A1.5 1.5 0 0 0 14.5 1h-13Zm1 3a.5.5 0 0 1 .5-.5H5a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5Zm.5 2.5a.5.5 0 0 0 0 1h1a.5.5 0 0 0 0-1H3Zm5.5 4.5a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" clipRule="evenodd" />
+              </svg>
+              {appraisalUnderReview ? "Appraisal under review" : "Verified Appraisal Value"}
+            </span>
+          )}
+
+          {appraisalExpired && (
+            <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium bg-orange-100 text-orange-800 border border-orange-200">
+              Appraisal expired
+            </span>
+          )}
         </div>
 
         {property.ownership_status && (

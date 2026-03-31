@@ -39,7 +39,9 @@ export default async function PropertyDetailPage({ params }: PageProps) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect(`/login?returnTo=${encodeURIComponent(`/properties/${propertyId}`)}`);
+    redirect(
+      `/login?returnTo=${encodeURIComponent(`/properties/${propertyId}`)}`,
+    );
   }
 
   const svc = createServiceClient();
