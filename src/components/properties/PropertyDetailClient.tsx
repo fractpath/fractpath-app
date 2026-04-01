@@ -64,6 +64,15 @@ export type PropertyWorkflowState = {
    * "enhanced review completed on [date]" without leaking internal details.
    */
   attomScreeningCompletedAt: string | null;
+  /**
+   * Debt discrepancy fields from ATTOM normalized screening payload.
+   * Shown only when ATTOM has completed and flagged a non-trivial discrepancy.
+   * All optional — the section is suppressed when not present.
+   */
+  attomEstimatedDebt?: number | null;
+  ownerDeclaredDebt?: number | null;
+  debtDiscrepancySeverity?: string | null;
+  debtDiscrepancyDelta?: number | null;
 };
 
 type Props = {
@@ -345,6 +354,10 @@ export function PropertyDetailClient({
             liveIneligiblePhase={workflowState.liveIneligiblePhase}
             linkedDealId={linkedDeal?.deal_id ?? null}
             attomScreeningCompletedAt={workflowState.attomScreeningCompletedAt}
+            attomEstimatedDebt={workflowState.attomEstimatedDebt}
+            ownerDeclaredDebt={workflowState.ownerDeclaredDebt}
+            debtDiscrepancySeverity={workflowState.debtDiscrepancySeverity}
+            debtDiscrepancyDelta={workflowState.debtDiscrepancyDelta}
           />
         )}
 

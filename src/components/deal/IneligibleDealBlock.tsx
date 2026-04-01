@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { CounterOfferModal } from "./CounterOfferModal";
 
 // ─── Property review blocked-state cue ────────────────────────────────────────
 // Shown on the owner deal page when an accepted deal is waiting on a property-side
@@ -107,6 +108,11 @@ export function AttomRequiredDealBuyerBlock() {
 }
 
 // ─── Owner-side block (Case 4: ATTOM complete, still ineligible) ───────────────
+// Merges renegotiation intent logging and formal counter-offer submission into a
+// single owner-facing component.  The separate VoidOwnerCounterSection is no
+// longer used — this block renders both CTAs so the owner sees one coherent view.
+
+type AnyRecord = Record<string, unknown>;
 
 type OwnerProps = {
   dealId: string;
@@ -115,6 +121,9 @@ type OwnerProps = {
   exceptionDescription: string | null;
   /** Pre-seeds the renegotiation "already logged" state when DB confirms it was requested. */
   renegotiationAlreadyRequested?: boolean;
+  /** When present, the "Propose revised terms" button opens the CounterOfferModal directly. */
+  proposalId?: string;
+  currentTerms?: AnyRecord | null;
 };
 
 export function IneligibleDealOwnerBlock({
@@ -123,11 +132,14 @@ export function IneligibleDealOwnerBlock({
   manualAppraisalStatus,
   exceptionDescription,
   renegotiationAlreadyRequested = false,
+  proposalId,
+  currentTerms,
 }: OwnerProps) {
   const router = useRouter();
   const [logged, setLogged] = useState(renegotiationAlreadyRequested);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [counterOpen, setCounterOpen] = useState(false);
 
   const appraisalInProgress =
     manualAppraisalStatus === "payment_pending" || manualAppraisalStatus === "in_progress";
@@ -172,28 +184,64 @@ export function IneligibleDealOwnerBlock({
       <div className="space-y-2 border-t border-amber-200 pt-3">
         <p className="text-xs font-semibold text-amber-900">Your options:</p>
 
-        {/* Path A — renegotiate */}
+        {/* Path A — propose revised terms */}
         <div className="rounded-md bg-white border border-amber-200 px-3 py-2.5 space-y-1.5">
           <p className="text-xs font-medium text-foreground">A — Propose revised terms</p>
           <p className="text-xs text-muted-foreground">
             Work with the buyer to adjust the requested amount so it falls within the eligible range
-            for your verified property value. Use the button below to notify our team that you want
-            to renegotiate.
+            for your verified property value.
+            {proposalId
+              ? " Use the button below to submit revised terms — the buyer will be notified and can review your proposal."
+              : " Use the button below to notify our team that you want to renegotiate."}
           </p>
-          {!logged ? (
-            <button
-              disabled={busy}
-              onClick={logRenegotiationRequest}
-              className="text-xs rounded border px-2.5 py-1.5 bg-white hover:bg-muted disabled:opacity-50 cursor-pointer"
-            >
-              {busy ? "Submitting…" : "Notify team — I want to renegotiate"}
-            </button>
-          ) : (
-            <p className="text-xs text-emerald-800 font-medium">
-              ✓ Renegotiation request logged — our team will be in touch.
-            </p>
+
+          {/* Counter-offer modal path — preferred when a prior proposal exists */}
+          {proposalId && (
+            <div className="space-y-1.5">
+              <button
+                type="button"
+                onClick={() => setCounterOpen(true)}
+                className="rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90 disabled:opacity-50 cursor-pointer"
+                data-testid="ineligible-propose-revised-terms"
+              >
+                Propose revised terms
+              </button>
+              {counterOpen && currentTerms && (
+                <CounterOfferModal
+                  open={counterOpen}
+                  onClose={() => setCounterOpen(false)}
+                  proposalId={proposalId}
+                  termsSnapshot={currentTerms}
+                />
+              )}
+              {counterOpen && !currentTerms && (
+                <p className="text-sm text-muted-foreground">
+                  No prior terms snapshot available. Use the deal widget to add terms first, then
+                  return here to propose.
+                </p>
+              )}
+            </div>
           )}
-          {err && <p className="text-xs text-red-700">{err}</p>}
+
+          {/* Intent-only path — fallback when no proposal exists yet */}
+          {!proposalId && (
+            <div className="space-y-1.5">
+              {!logged ? (
+                <button
+                  disabled={busy}
+                  onClick={logRenegotiationRequest}
+                  className="text-xs rounded border px-2.5 py-1.5 bg-white hover:bg-muted disabled:opacity-50 cursor-pointer"
+                >
+                  {busy ? "Submitting…" : "Notify team — I want to renegotiate"}
+                </button>
+              ) : (
+                <p className="text-xs text-emerald-800 font-medium">
+                  ✓ Renegotiation request logged — our team will be in touch.
+                </p>
+              )}
+              {err && <p className="text-xs text-red-700">{err}</p>}
+            </div>
+          )}
         </div>
 
         {/* Path B — valuation challenge */}

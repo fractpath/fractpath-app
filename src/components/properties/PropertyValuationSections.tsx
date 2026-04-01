@@ -45,6 +45,15 @@ export type ValuationSectionsProps = {
    * Owner-safe: shown as a date only, no internal ATTOM details are exposed.
    */
   attomScreeningCompletedAt?: string | null;
+  /**
+   * Debt discrepancy fields — shown only when ATTOM screening has completed and flagged a
+   * significant discrepancy between the owner-declared debt and the ATTOM-estimated debt.
+   * All fields are optional; the section renders only when severity is present and non-trivial.
+   */
+  attomEstimatedDebt?: number | null;
+  ownerDeclaredDebt?: number | null;
+  debtDiscrepancySeverity?: string | null;
+  debtDiscrepancyDelta?: number | null;
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -571,6 +580,133 @@ function IneligibleGuidanceBlock({
   );
 }
 
+// ─── Section 4: Debt challenge ───────────────────────────────────────────────
+// Shown when ATTOM screening is complete and has flagged a significant discrepancy
+// between the owner-declared secured debt and the ATTOM-estimated encumbrance.
+// Per policy, this is an admin review signal — NOT an automatic deal blocker.
+// This section lets the owner review the context and submit a written declaration
+// to the review team explaining their position on the debt figure.
+
+const SEVERITY_BADGE: Record<string, { label: string; cls: string }> = {
+  significant: { label: "Significant difference", cls: "bg-orange-100 text-orange-800 border-orange-200" },
+  moderate:    { label: "Moderate difference",    cls: "bg-yellow-100 text-yellow-800 border-yellow-200" },
+  minor:       { label: "Minor difference",       cls: "bg-gray-100 text-gray-500 border-gray-200" },
+};
+
+function DebtChallengeSection({
+  propertyId,
+  attomEstimatedDebt,
+  ownerDeclaredDebt,
+  debtDiscrepancySeverity,
+  debtDiscrepancyDelta,
+}: {
+  propertyId: string;
+  attomEstimatedDebt: number | null;
+  ownerDeclaredDebt: number | null;
+  debtDiscrepancySeverity: string;
+  debtDiscrepancyDelta: number | null;
+}) {
+  const router = useRouter();
+  const [statement, setStatement] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const badge = SEVERITY_BADGE[debtDiscrepancySeverity] ?? SEVERITY_BADGE.moderate;
+
+  async function handleSubmit() {
+    if (!statement.trim()) {
+      setErr("Please enter a statement before submitting.");
+      return;
+    }
+    setSubmitting(true);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/me/properties/${propertyId}/debt-challenge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ statement: statement.trim() }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) {
+        setErr(json.error ?? "Submission failed");
+      } else {
+        setSubmitted(true);
+        router.refresh();
+      }
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "Network error");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <SectionCard
+      title="Secured debt — data review note"
+      badge={badge.label}
+      badgeCls={badge.cls}
+    >
+      <p className="text-xs text-muted-foreground">
+        During the enhanced property review, a difference was found between the secured debt you
+        reported and the public-record estimate our data provider identified. Our team will
+        review this as part of the overall property assessment — it does not automatically affect
+        your deal.
+      </p>
+
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        <div className="rounded-md border px-3 py-2 bg-background">
+          <p className="text-muted-foreground">You reported</p>
+          <p className="font-semibold">{ownerDeclaredDebt != null ? fmtUsd(ownerDeclaredDebt) : "Not provided"}</p>
+        </div>
+        <div className="rounded-md border px-3 py-2 bg-background">
+          <p className="text-muted-foreground">Data review estimate</p>
+          <p className="font-semibold">{attomEstimatedDebt != null ? fmtUsd(attomEstimatedDebt) : "Not available"}</p>
+        </div>
+      </div>
+
+      {debtDiscrepancyDelta != null && Math.abs(debtDiscrepancyDelta) > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Difference: approximately{" "}
+          <span className="font-medium">{fmtUsd(Math.abs(debtDiscrepancyDelta))}</span>.
+        </p>
+      )}
+
+      {submitted ? (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2">
+          <p className="text-xs text-emerald-800 font-medium">
+            ✓ Your statement has been submitted. Our team will review it along with your property record.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">
+            If you believe your reported figure is accurate, you can submit a brief statement
+            below explaining the source of the debt (e.g., mortgage servicer name, payoff
+            statement, or other documentation you can reference). This is optional — our team
+            may also reach out directly.
+          </p>
+          <textarea
+            className="w-full text-sm border rounded p-2 min-h-[80px] resize-none focus:outline-none focus:ring-1 focus:ring-ring"
+            value={statement}
+            onChange={(e) => setStatement(e.target.value)}
+            placeholder="Explain the source of your secured debt figure, e.g. mortgage servicer, approximate payoff balance, etc."
+            disabled={submitting}
+          />
+          <button
+            disabled={submitting || !statement.trim()}
+            onClick={handleSubmit}
+            className="text-xs rounded border px-2.5 py-1.5 bg-white hover:bg-muted disabled:opacity-50 cursor-pointer"
+          >
+            {submitting ? "Submitting…" : "Submit statement to review team"}
+          </button>
+          {err && <p className="text-xs text-red-700">{err}</p>}
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
 // ─── Main export ─────────────────────────────────────────────────────────────
 
 export function PropertyValuationSections(props: ValuationSectionsProps) {
@@ -588,6 +724,10 @@ export function PropertyValuationSections(props: ValuationSectionsProps) {
     liveIneligiblePhase,
     linkedDealId,
     attomScreeningCompletedAt,
+    attomEstimatedDebt,
+    ownerDeclaredDebt,
+    debtDiscrepancySeverity,
+    debtDiscrepancyDelta,
   } = props;
 
   const attomComplete = escalationAvmStatus === "completed";
@@ -608,8 +748,11 @@ export function PropertyValuationSections(props: ValuationSectionsProps) {
     fmvVerificationSource === "escalation_avm_sim" ||
     fmvVerificationSource === "attom_sim" ||
     fmvVerificationSource === "attom";
+  // "escalated_sim" is a legacy value written by an older version of the
+  // escalation/avm route — now superseded by "manual_appraisal_sim".
   const manualIsControlling =
-    fmvVerificationSource === "manual_appraisal_sim";
+    fmvVerificationSource === "manual_appraisal_sim" ||
+    fmvVerificationSource === "escalated_sim";
 
   // True when real ATTOM admin screening (not escalation sim) is the controlling source.
   const isRealAttomComplete = fmvVerificationSource === "attom";
@@ -664,6 +807,20 @@ export function PropertyValuationSections(props: ValuationSectionsProps) {
           liveIneligiblePhase={liveIneligiblePhase}
         />
       )}
+
+      {/* 4. Debt challenge — show when ATTOM is complete and a non-trivial discrepancy was flagged */}
+      {isRealAttomComplete &&
+        debtDiscrepancySeverity &&
+        debtDiscrepancySeverity !== "none" &&
+        debtDiscrepancySeverity !== "minor" && (
+          <DebtChallengeSection
+            propertyId={propertyId}
+            attomEstimatedDebt={attomEstimatedDebt ?? null}
+            ownerDeclaredDebt={ownerDeclaredDebt ?? null}
+            debtDiscrepancySeverity={debtDiscrepancySeverity}
+            debtDiscrepancyDelta={debtDiscrepancyDelta ?? null}
+          />
+        )}
     </div>
   );
 }

@@ -131,8 +131,12 @@ export type LimitingFactor = {
   code: string;
   /** Human-readable label for admin display. */
   label: string;
-  /** warning = reduces cap but does not block; blocking = prevents deal eligibility. */
-  severity: "warning" | "blocking";
+  /**
+   * warning          = reduces cap but does not block deal eligibility
+   * blocking         = prevents deal eligibility; hard stop
+   * review_required  = admin review signal; does not auto-block; drives documentation/discretion workflow
+   */
+  severity: "warning" | "blocking" | "review_required";
 };
 
 /**

@@ -76,6 +76,7 @@ const SEVERITY_CLS: Record<string, string> = {
 const LIMITING_SEVERITY_CLS: Record<string, string> = {
   warning: "bg-yellow-100 text-yellow-800",
   blocking: "bg-red-100 text-red-800",
+  review_required: "bg-orange-100 text-orange-800",
 };
 
 const POSTURE_BADGE: Record<string, { label: string; cls: string }> = {

@@ -205,7 +205,9 @@ describe("normalizeAttomScreening — FMV discrepancy outcomes", () => {
     expect(result.valueDiscrepancyResult.discrepancyFound).toBe(true);
     expect(result.outcome).toBe("discrepancy");
     expect(result.nextVerificationState).toBe("owner_clarification_required");
-    expect(result.becameControlling).toBe(false);
+    // T001 policy: ATTOM always becomes controlling when avmValue > 0, regardless of FMV discrepancy.
+    // Admin sees the discrepancy via the value_discrepancy limitingFactor but the value is still adopted.
+    expect(result.becameControlling).toBe(true);
   });
 
   it("outcome=disputed when FMV discrepancy is blocking (>30%)", () => {
@@ -217,7 +219,8 @@ describe("normalizeAttomScreening — FMV discrepancy outcomes", () => {
     expect(result.valueDiscrepancyResult.severity).toBe("blocking");
     expect(result.outcome).toBe("disputed");
     expect(result.nextVerificationState).toBe("manual_review_required");
-    expect(result.becameControlling).toBe(false);
+    // T001 policy: ATTOM always becomes controlling when avmValue > 0, regardless of FMV discrepancy.
+    expect(result.becameControlling).toBe(true);
   });
 
   it("valueDiscrepancyResult has correct delta and deltaPercent signs", () => {
@@ -265,7 +268,10 @@ describe("normalizeAttomScreening — debt discrepancy", () => {
 
     expect(result.debtDiscrepancyResult.discrepancyFound).toBe(true);
     expect(result.debtDiscrepancyResult.severity).toBe("significant");
-    expect(result.outcome).toBe("discrepancy");
+    // T001 policy: debt discrepancy is a review signal only — it does NOT drive the outcome.
+    // AVM is otherwise clean, so the outcome remains "clean"; admin reviews the debt mismatch
+    // via the debt_discrepancy limitingFactor (severity: "review_required").
+    expect(result.outcome).toBe("clean");
   });
 
   it("skips debt comparison when ownerDeclaredDebt is null", () => {
@@ -314,13 +320,15 @@ describe("normalizeAttomScreening — weak outcome", () => {
     expect(result.outcome).toBe("weak");
   });
 
-  it("adds avm_insufficient limiting factor when outcome is weak", () => {
+  it("adds avm_confidence_low limiting factor when outcome is weak", () => {
     const raw = makeCleanRaw();
     raw.avmDetail = null;
     const result = normalizeAttomScreening(raw, makeContext());
 
-    expect(result.limitingFactors.some((f) => f.code === "avm_insufficient")).toBe(true);
-    expect(result.limitingFactors.find((f) => f.code === "avm_insufficient")?.severity).toBe("blocking");
+    // T001 policy: weak AVM is a review flag (review_required), not a hard blocker.
+    // Code renamed from "avm_insufficient" to "avm_confidence_low".
+    expect(result.limitingFactors.some((f) => f.code === "avm_confidence_low")).toBe(true);
+    expect(result.limitingFactors.find((f) => f.code === "avm_confidence_low")?.severity).toBe("review_required");
   });
 });
 
@@ -417,22 +425,25 @@ describe("normalizeAttomScreening — cash cap and policy math", () => {
 // 10. becameControlling on non-clean outcomes
 // ────────────────────────────────────────────────────────────────────────────
 
-describe("normalizeAttomScreening — becameControlling stays false on non-clean outcomes", () => {
-  it("discrepancy outcome → becameControlling=false, controllingFmvCandidate=null", () => {
+describe("normalizeAttomScreening — becameControlling on non-clean outcomes", () => {
+  it("discrepancy outcome → becameControlling=true per T001 policy (FMV still adopted)", () => {
     const raw = makeCleanRaw(500_000);
     const ctx = makeContext({ ownerStatedFmv: 400_000 }); // 20% off → discrepancy
     const result = normalizeAttomScreening(raw, ctx);
 
     expect(result.outcome).toBe("discrepancy");
-    expect(result.becameControlling).toBe(false);
-    expect(result.controllingFmvCandidate).toBeNull();
+    // T001 policy: ATTOM becomes controlling whenever avmValue > 0.
+    // FMV discrepancy is an admin review flag, not a controlling gate.
+    expect(result.becameControlling).toBe(true);
+    expect(result.controllingFmvCandidate).toBe(500_000);
   });
 
-  it("weak outcome → becameControlling=false", () => {
+  it("weak outcome → becameControlling=false (no avmValue available)", () => {
     const raw = makeCleanRaw();
     raw.avmDetail = null;
     const result = normalizeAttomScreening(raw, makeContext());
 
+    // No AVM value → becameControlling remains false (nothing to adopt)
     expect(result.becameControlling).toBe(false);
     expect(result.controllingFmvCandidate).toBeNull();
   });

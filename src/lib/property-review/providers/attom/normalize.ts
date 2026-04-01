@@ -321,39 +321,35 @@ function buildValueDiscrepancyResult(
  *
  * Resolution priority (highest to lowest):
  *   1. No AVM value or low confidence       → "weak"
- *   2. Any blocking discrepancy             → "disputed"
- *   3. Any significant discrepancy          → "discrepancy"
+ *   2. Blocking FMV discrepancy             → "disputed"
+ *   3. Significant FMV discrepancy          → "discrepancy"
  *   4. Property not found in ATTOM          → "disputed"
  *   5. No material issues                   → "clean"
  *
+ * POLICY: Debt discrepancy does NOT drive outcome. Debt signals are reviewed
+ * by an admin and can trigger a documentation request, but they do not block
+ * ATTOM from becoming the controlling FMV basis on their own.
+ *
  * IMPORTANT: "weak" does NOT mean the deal is ineligible or that ATTOM is
- * unhelpful. It means the AVM confidence interval is too wide for ATTOM to
- * become the controlling FMV basis. The /valuation/homeequity data (lendable
- * equity, total loan balance) may still materially support the deal — that
- * context is captured in reviewNotes. A "weak" outcome requires manual review
- * to establish the controlling FMV, but does not imply a rejection.
+ * unhelpful. It means the AVM confidence interval is too wide. ATTOM still
+ * becomes controlling — admin reviews with weak confidence flag. Manual review
+ * or licensed appraisal is the resolution path for weak AVM confidence.
  */
 function deriveOutcome(
   avmValue: number | null,
   avmConfidence: "high" | "medium" | "low" | null,
   ownerMatch: OwnerMatchResult,
-  debtDiscrepancy: DebtDiscrepancyResult,
+  _debtDiscrepancy: DebtDiscrepancyResult,
   valueDiscrepancy: ValueDiscrepancyResult,
 ): ScreeningOutcome {
   if (avmValue == null || avmValue <= 0) return "weak";
   if (avmConfidence === "low") return "weak";
 
-  if (
-    valueDiscrepancy.severity === "blocking" ||
-    debtDiscrepancy.severity === "blocking"
-  ) {
+  if (valueDiscrepancy.severity === "blocking") {
     return "disputed";
   }
 
-  if (
-    valueDiscrepancy.severity === "significant" ||
-    debtDiscrepancy.severity === "significant"
-  ) {
+  if (valueDiscrepancy.severity === "significant") {
     return "discrepancy";
   }
 
@@ -373,14 +369,16 @@ function buildLimitingFactors(
 ): LimitingFactor[] {
   const factors: LimitingFactor[] = [];
 
+  // POLICY: Debt discrepancy is a review signal only — not an automated eligibility blocker.
+  // Admin discretion and owner documentation are the resolution path.
   if (
     debtDiscrepancy.severity === "significant" ||
     debtDiscrepancy.severity === "blocking"
   ) {
     factors.push({
       code: `debt_discrepancy_${debtDiscrepancy.severity}`,
-      label: `Debt discrepancy — ${debtDiscrepancy.severity}`,
-      severity: debtDiscrepancy.severity === "blocking" ? "blocking" : "warning",
+      label: `Debt discrepancy — review required (${debtDiscrepancy.severity})`,
+      severity: "review_required",
     });
   }
 
@@ -397,16 +395,16 @@ function buildLimitingFactors(
 
   if (outcome === "weak") {
     factors.push({
-      code: "avm_insufficient",
-      label: "AVM confidence insufficient for deal eligibility determination",
-      severity: "blocking",
+      code: "avm_confidence_low",
+      label: "AVM confidence low — admin review recommended before advancing",
+      severity: "review_required",
     });
   }
 
   if (outcome === "disputed") {
     factors.push({
       code: "data_conflict_requires_manual_review",
-      label: "Material data conflict — manual review required",
+      label: "Material FMV data conflict — manual review required",
       severity: "blocking",
     });
   }
@@ -452,10 +450,10 @@ function buildReviewNotes(
   // ── Controlling determination ─────────────────────────────────────────────
   if (becameControlling && avmValue != null) {
     lines.push(
-      `ATTOM became the controlling FMV basis. AVM value $${Math.round(avmValue).toLocaleString()} adopted as latest_verified_fmv.`,
+      `ATTOM is now the controlling FMV basis. AVM value $${Math.round(avmValue).toLocaleString()} adopted as latest_verified_fmv.`,
     );
   } else {
-    lines.push("ATTOM did not become the controlling FMV basis.");
+    lines.push("No valid AVM value returned — ATTOM could not become the controlling FMV basis.");
   }
 
   // ── Outcome explanation ───────────────────────────────────────────────────
@@ -465,12 +463,11 @@ function buildReviewNotes(
         ? (((avmHigh - avmLow) / avmValue) * 100).toFixed(1)
         : null;
     lines.push(
-      `Outcome is "Weak AVM": ATTOM AVM confidence is "${avmConfidence ?? "unknown"}"` +
-      (spread ? ` (${spread}% low-high spread, threshold is ≤15% for medium confidence)` : "") +
-      `. A spread above 15% means the AVM range is too wide for ATTOM to serve as the controlling property value. This does NOT mean the deal is ineligible.`,
+      `AVM confidence is "${avmConfidence ?? "unknown"}"` +
+      (spread ? ` (${spread}% low-high spread, threshold is ≤15% for medium)` : "") +
+      `. ATTOM has still been adopted as the controlling FMV basis per policy — weak confidence is a review flag, not a blocker. Admin review is recommended before the deal advances. A licensed manual appraisal can supersede the AVM for value if needed.`,
     );
 
-    // Home equity context when AVM is weak
     if (homeEquityPresent && lendableEquity != null) {
       lines.push(
         `Home equity context (from /valuation/homeequity): ` +
@@ -478,20 +475,16 @@ function buildReviewNotes(
         `estimated lendable equity $${Math.round(lendableEquity).toLocaleString()}` +
         (availableEquity != null ? `, available equity $${Math.round(availableEquity).toLocaleString()}` : "") +
         (ltv != null ? `, ATTOM LTV ${ltv}%` : "") +
-        `. The home equity data provides material support for deal cash availability even though the AVM confidence is insufficient for FractPath to adopt it as the controlling FMV. Manual review or a licensed appraisal is required to establish the controlling property value.`,
+        `. Home equity data supports deal cash availability context.`,
       );
     } else if (!homeEquityPresent) {
       lines.push(
         "Home equity data was not returned by /valuation/homeequity for this address. " +
-        "Both AVM confidence and home equity signals are insufficient. Manual review required.",
+        "AVM confidence is weak and home equity signals are unavailable. Admin review recommended.",
       );
     }
-
-    lines.push(
-      "Next step: manual FMV review to establish the controlling property value, or commission a licensed appraisal.",
-    );
   } else if (outcome === "clean") {
-    lines.push("All discrepancy checks within tolerance. AVM confidence sufficient.");
+    lines.push("All FMV discrepancy checks within tolerance. AVM confidence sufficient.");
     if (homeEquityPresent && lendableEquity != null) {
       lines.push(
         `Home equity confirmation: estimated lendable equity $${Math.round(lendableEquity).toLocaleString()}` +
@@ -500,15 +493,18 @@ function buildReviewNotes(
       );
     }
   } else if (outcome === "disputed") {
-    lines.push("Material data conflict detected. Manual review required before ATTOM can become controlling.");
+    lines.push("Material FMV conflict detected. ATTOM AVM adopted as controlling basis per policy, but FMV discrepancy is blocking — admin review required before deal can advance.");
     if (valueDiscrepancy.severity === "blocking") {
       lines.push(`FMV discrepancy is blocking (${valueDiscrepancy.deltaPercent != null ? Math.abs(Math.round(valueDiscrepancy.deltaPercent)) + "%" : "unknown"} gap between owner-stated and ATTOM AVM).`);
     }
-    if (debtDiscrepancy.severity === "blocking") {
-      lines.push(`Debt discrepancy is blocking ($${Math.round(Math.abs(debtDiscrepancy.delta ?? 0)).toLocaleString()} gap between declared debt and ATTOM current balance).`);
+    if (debtDiscrepancy.severity === "blocking" || debtDiscrepancy.severity === "significant") {
+      lines.push(`Debt discrepancy flagged for review ($${Math.round(Math.abs(debtDiscrepancy.delta ?? 0)).toLocaleString()} gap between declared debt and ATTOM current balance). Debt discrepancy is a review signal — admin can request owner documentation to resolve.`);
     }
   } else if (outcome === "discrepancy") {
-    lines.push("Significant discrepancy detected; ATTOM not controlling without resolution.");
+    lines.push("Significant FMV discrepancy detected. ATTOM AVM adopted as controlling basis. Admin review required.");
+    if (debtDiscrepancy.severity === "blocking" || debtDiscrepancy.severity === "significant") {
+      lines.push(`Debt discrepancy flagged for review ($${Math.round(Math.abs(debtDiscrepancy.delta ?? 0)).toLocaleString()} gap). Debt is a review signal only — does not affect controlling FMV basis.`);
+    }
   }
 
   // ── Debt source note ──────────────────────────────────────────────────────
@@ -558,7 +554,12 @@ export function normalizeAttomScreening(
     valueDiscrepancyResult,
   );
 
-  const becameControlling = outcome === "clean" && avmValue != null;
+  // Policy: ATTOM becomes the controlling FMV basis whenever a valid AVM value
+  // is present, regardless of confidence spread or debt discrepancy.
+  // "weak" outcome flags low confidence for admin review but does NOT prevent
+  // ATTOM from superseding RentCast as the controlling basis.
+  // Manual appraisal is the only supersession path above ATTOM.
+  const becameControlling = avmValue != null && avmValue > 0;
   const controllingFmvCandidate = becameControlling ? avmValue : null;
 
   const maxLtvRatio = getMaxLtvRatio();

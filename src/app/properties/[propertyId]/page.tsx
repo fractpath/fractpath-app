@@ -155,19 +155,32 @@ export default async function PropertyDetailPage({ params }: PageProps) {
     // non-fatal — proceed without activity
   }
 
-  // Fetch most recent real ATTOM admin screening completion timestamp (non-fatal)
+  // Fetch most recent real ATTOM admin screening — completion timestamp + debt discrepancy (non-fatal)
   let attomScreeningCompletedAt: string | null = null;
+  let attomEstimatedDebt: number | null = null;
+  let ownerDeclaredDebt: number | null = null;
+  let debtDiscrepancySeverity: string | null = null;
+  let debtDiscrepancyDelta: number | null = null;
   try {
     const { data: attomRun } = await (svc.from("property_review_runs") as any)
-      .select("requested_at")
+      .select("requested_at, normalized_payload")
       .eq("property_id", propertyId)
       .eq("provider", "attom")
       .order("requested_at", { ascending: false })
       .limit(1)
       .maybeSingle();
     attomScreeningCompletedAt = attomRun?.requested_at ?? null;
+    if (attomRun?.normalized_payload) {
+      const ddr = (attomRun.normalized_payload as any)?.debtDiscrepancyResult ?? null;
+      if (ddr) {
+        attomEstimatedDebt = (ddr.screeningDebt as number | null) ?? null;
+        ownerDeclaredDebt = (ddr.reportedDebt as number | null) ?? null;
+        debtDiscrepancySeverity = (ddr.severity as string | null) ?? null;
+        debtDiscrepancyDelta = (ddr.delta as number | null) ?? null;
+      }
+    }
   } catch {
-    // non-fatal — proceed without screening date
+    // non-fatal — proceed without screening data
   }
 
   const workflowState: PropertyWorkflowState = {
@@ -182,13 +195,28 @@ export default async function PropertyDetailPage({ params }: PageProps) {
     liveIneligiblePhase: (() => {
       const triageStatus = linkedDeal?.deal_triage_status ?? null;
       const avmStatus = row.escalation_avm_status ?? null;
+      const fmvSource = row.fmv_verification_source ?? null;
+      // ATTOM is "complete" via either the escalation simulation path
+      // (escalation_avm_status === "completed") OR the real ATTOM admin
+      // screening path (fmv_verification_source === "attom" / "manual_appraisal_sim").
+      // Per policy, once ATTOM-or-stronger is controlling, renegotiation and
+      // manual appraisal challenge are both available.
+      const attomOrStrongerComplete =
+        avmStatus === "completed" ||
+        fmvSource === "attom" ||
+        fmvSource === "manual_appraisal_sim" ||
+        fmvSource === "escalated_sim";
       if (triageStatus !== "ineligible") return null;
-      return avmStatus === "completed" ? "void_renegotiable" : "attom_required";
+      return attomOrStrongerComplete ? "void_renegotiable" : "attom_required";
     })() satisfies LiveIneligiblePhase,
     manualAppraisalStatus: row.manual_appraisal_status ?? null,
     manualAppraisalFmv: row.manual_appraisal_fmv ?? null,
     ownerAttemptedAttom,
     attomScreeningCompletedAt,
+    attomEstimatedDebt,
+    ownerDeclaredDebt,
+    debtDiscrepancySeverity,
+    debtDiscrepancyDelta,
   };
 
   // Fetch open/submitted review request for the linked deal + this property

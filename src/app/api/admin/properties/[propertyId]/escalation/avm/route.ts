@@ -2,19 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { createServiceClient } from "@/lib/supabase/service";
 
-// TODO(attom): Replace this simulation route with a real ATTOM order + result ingestion flow.
-// The `action` field maps to future ATTOM lifecycle events:
-//   "order"    → POST to ATTOM API, store order-id on property; await webhook
-//   "complete" → driven by ATTOM webhook (valuation result received)
-//   "reset"    → cancel in-flight order and clear local state
+// TODO(appraisal): Replace this simulation route with a real licensed appraiser order + result ingestion flow.
+// The `action` field maps to future manual appraisal lifecycle events:
+//   "order"    → Confirm appraiser engagement; notify owner
+//   "complete" → Driven by appraiser report delivery; admin enters confirmed FMV
+//   "reset"    → Cancel in-flight order and clear local state
 
 type AvmAction = "order" | "complete" | "reset";
 
 const VALID_ACTIONS = new Set<AvmAction>(["order", "complete", "reset"]);
 
-// Simulated AVM result lives for 12 months.
+// Simulated appraisal result lives for 12 months.
 const SIM_EXPIRY_MS = 365 * 24 * 60 * 60 * 1000;
-const SIM_PROVIDER = "escalated_sim";
+// "manual_appraisal_sim" — consistent with AdminManualAppraisalSimPanel and the
+// resolveControllingFmv / ineligibleDescription checks on the deal page.
+const SIM_PROVIDER = "manual_appraisal_sim";
 
 type Ctx = { params: Promise<{ propertyId: string }> };
 

@@ -27,7 +27,6 @@ import {
   AttomRequiredDealBuyerBlock,
   PropertyReviewBlockedOwnerBanner,
 } from "@/components/deal/IneligibleDealBlock";
-import { VoidOwnerCounterSection } from "@/components/deal/VoidOwnerCounterSection";
 import {
   resolveControllingFmv,
   computeAvmEligibility,
@@ -512,26 +511,6 @@ export default async function DealPage(ctx: PageProps) {
       ineligibleDescription = canonicalResult.exceptionDescription ?? null;
     }
 
-    // Formal void counter UI: owner sees a "Propose revised terms" flow (not just
-    // informational copy or an intent-log button) when:
-    //   • the deal is live-ineligible and thread not yet in renegotiation (showIneligibleBlock)
-    //   • ATTOM has completed — attom_required is resolved (currentStage !== "attom_required")
-    //   • the viewer is the owner
-    //   • there is a current proposal to counter against
-    //   • normal negotiation flow is not already active (avoids double-rendering)
-    // Gate on canonicalResult.isExceptionState — the same condition that fires the
-    // exception banner — NOT showIneligibleBlock.  showIneligibleBlock is suppressed
-    // when live FMV recomputation clears the ineligibility, but the canonical stage
-    // may still be deal_terms_ineligible because the DB triage_status hasn't been
-    // updated yet.  Tying the counter UI to the banner condition makes them consistent:
-    // if the owner sees an exception banner, they must also see a way to act on it.
-    const showVoidOwnerCounterUi =
-      canonicalResult.isExceptionState &&
-      currentStage !== "attom_required" &&
-      isOwner &&
-      !!negState.currentProposal &&
-      !showNegotiationUi;
-
     return (
       <div className="min-h-screen">
         <AppHeader />
@@ -626,16 +605,8 @@ export default async function DealPage(ctx: PageProps) {
               manualAppraisalStatus={liveManualAppraisalStatus}
               exceptionDescription={ineligibleDescription}
               renegotiationAlreadyRequested={currentStage === "renegotiation_requested"}
-            />
-          )}
-
-          {/* Formal void counter flow — owner only, ATTOM complete, prior proposal exists.
-              Rendered alongside IneligibleDealOwnerBlock so the owner can both log intent
-              and formally submit revised terms through the thread in a single page view. */}
-          {showVoidOwnerCounterUi && (
-            <VoidOwnerCounterSection
-              proposalId={negState.currentProposal!.id}
-              currentTerms={negState.currentProposal!.terms_snapshot ?? null}
+              proposalId={negState.currentProposal?.id}
+              currentTerms={negState.currentProposal?.terms_snapshot ?? null}
             />
           )}
 
@@ -1163,18 +1134,6 @@ export default async function DealPage(ctx: PageProps) {
       fallbackIneligibleDescription = canonicalResult.exceptionDescription ?? null;
     }
 
-    // Formal void counter UI (fallback path).
-    // Gated on canonicalResult.isExceptionState (not fallbackShowIneligibleBlock) — same
-    // reason as primary path: live FMV recomputation may clear the ineligible block while
-    // the canonical stage is still deal_terms_ineligible, leaving the owner with an
-    // exception banner but no action.
-    const fallbackShowVoidOwnerCounterUi =
-      canonicalResult.isExceptionState &&
-      canonicalResult.stage !== "attom_required" &&
-      fallbackIsOwner &&
-      !!negState.currentProposal &&
-      !showNegotiationUi;
-
     return (
       <div className="min-h-screen">
         <AppHeader />
@@ -1263,14 +1222,8 @@ export default async function DealPage(ctx: PageProps) {
               manualAppraisalStatus={liveManualAppraisalStatus}
               exceptionDescription={fallbackIneligibleDescription}
               renegotiationAlreadyRequested={canonicalResult.stage === "renegotiation_requested"}
-            />
-          )}
-
-          {/* Formal void counter flow — fallback path, owner only. */}
-          {fallbackShowVoidOwnerCounterUi && (
-            <VoidOwnerCounterSection
-              proposalId={negState.currentProposal!.id}
-              currentTerms={negState.currentProposal!.terms_snapshot ?? null}
+              proposalId={negState.currentProposal?.id}
+              currentTerms={negState.currentProposal?.terms_snapshot ?? null}
             />
           )}
 

@@ -16,6 +16,7 @@ import { AdminPropertyReviewControls } from "@/components/admin/AdminPropertyRev
 import type { PropertyReviewStatus } from "@/components/admin/AdminPropertyReviewControls";
 import { AdminVendorReviewPanel } from "@/components/admin/AdminVendorReviewPanel";
 import { AdminAttomScreeningPanel } from "@/components/admin/AdminAttomScreeningPanel";
+import { AdminDebtBasisPanel } from "@/components/admin/AdminDebtBasisPanel";
 import { AdminEscalationSimPanel } from "@/components/admin/AdminEscalationSimPanel";
 import { AdminManualAppraisalSimPanel } from "@/components/admin/AdminManualAppraisalSimPanel";
 import { AdminPropertyClosingPanel } from "@/components/admin/AdminPropertyClosingPanel";
@@ -138,7 +139,7 @@ export default async function AdminPropertyAuditPage({
 
   const propRes = await (supabase.from("properties") as any)
     .select(
-      "id, owner_user_id, address_line1, address_line2, city, state, postal_code, status, created_at, updated_at, reviewed_at, reviewed_by, verified_at, verified_by, review_notes, has_secured_property_debt, secured_property_debt_amount, secured_debt_certified_at, secured_debt_last_verified_at, secured_debt_fresh_until, secured_debt_verification_status, latest_verified_fmv, fmv_verified_at, fmv_verification_source, ltv_policy_ratio, max_accessible_cash_current, ownership_type, occupancy_use, occupancy_use_other, major_condition_issue, major_condition_issue_details, known_liens_and_claims, total_known_debt_amount, total_known_debt_confidence, debt_statement_availability, title_claims_known, title_claims_details, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, owner_stated_fmv_source_other, willing_to_proceed_formal_review, property_review_status, property_review_status_updated_at, property_review_note, property_review_expires_at, property_review_completed_at, escalation_deposit_status, escalation_avm_status, closing_review_status, closing_review_note, manual_appraisal_status, manual_appraisal_fmv, verification_state, owner_verification_removed_at, owner_verification_removed_reason, verified_appraisal_value_status, verified_appraisal_value_context_owner_id, current_fractpath_eligible_cash_cap, current_eligibility_posture, current_limiting_factors_json",
+      "id, owner_user_id, address_line1, address_line2, city, state, postal_code, status, created_at, updated_at, reviewed_at, reviewed_by, verified_at, verified_by, review_notes, has_secured_property_debt, secured_property_debt_amount, secured_debt_certified_at, secured_debt_last_verified_at, secured_debt_fresh_until, secured_debt_verification_status, latest_verified_fmv, fmv_verified_at, fmv_verification_source, ltv_policy_ratio, max_accessible_cash_current, ownership_type, occupancy_use, occupancy_use_other, major_condition_issue, major_condition_issue_details, known_liens_and_claims, total_known_debt_amount, total_known_debt_confidence, debt_statement_availability, title_claims_known, title_claims_details, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, owner_stated_fmv_source_other, willing_to_proceed_formal_review, property_review_status, property_review_status_updated_at, property_review_note, property_review_expires_at, property_review_completed_at, escalation_deposit_status, escalation_avm_status, closing_review_status, closing_review_note, manual_appraisal_status, manual_appraisal_fmv, verification_state, owner_verification_removed_at, owner_verification_removed_reason, verified_appraisal_value_status, verified_appraisal_value_context_owner_id, current_fractpath_eligible_cash_cap, current_eligibility_posture, current_limiting_factors_json, current_controlling_secured_debt_basis, current_controlling_secured_debt_amount, secured_debt_basis_reason, secured_debt_basis_updated_at",
     )
     .eq("id", propertyId)
     .maybeSingle();
@@ -958,17 +959,64 @@ export default async function AdminPropertyAuditPage({
         eligibleCashCap={(p.current_fractpath_eligible_cash_cap as number | null) ?? null}
       />
 
-      {/* ── Deposit + escalation simulation (dev/staging only) ── */}
+      {/* ── Debt basis management ── */}
       {/*
-        Simulates escalated deposit collection and a manual FMV override without
-        hitting real payment or ATTOM systems.  Use the ATTOM enhanced screening
-        panel above for real screening data.
+        Shows ATTOM vs owner-declared debt discrepancy and lets admin adopt an
+        authoritative debt basis.  Per FractPath policy, debt discrepancy is an
+        admin review signal — it does NOT auto-block deal eligibility.
+      */}
+      {latestAttomRun && (
+        (() => {
+          const np = latestAttomRun.normalized_payload as any;
+          const ddr = np?.debtDiscrepancyResult ?? null;
+          return (
+            <div className="rounded-lg border overflow-hidden">
+              <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b flex items-center gap-2">
+                <span>Debt basis</span>
+                {ddr?.severity && ddr.severity !== "none" && ddr.severity !== "minor" && (
+                  <span className={`text-xs rounded-full px-2 py-0.5 font-normal ${
+                    ddr.severity === "blocking" || ddr.severity === "significant"
+                      ? "bg-orange-100 text-orange-800"
+                      : "bg-yellow-100 text-yellow-800"
+                  }`}>
+                    Review required — {ddr.severity} discrepancy
+                  </span>
+                )}
+                {(!ddr || ddr.severity === "none" || ddr.severity === "minor") && (
+                  <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-gray-100 text-gray-500">
+                    No significant discrepancy
+                  </span>
+                )}
+              </div>
+              <div className="p-4">
+                <AdminDebtBasisPanel
+                  propertyId={propertyId}
+                  attomEstimatedDebt={(ddr?.screeningDebt as number | null) ?? null}
+                  ownerDeclaredDebt={(ddr?.reportedDebt as number | null) ?? (p.secured_property_debt_amount as number | null) ?? null}
+                  debtDiscrepancySeverity={(ddr?.severity as string | null) ?? null}
+                  debtDiscrepancyDelta={(ddr?.delta as number | null) ?? null}
+                  currentControllingDebtBasis={(p.current_controlling_secured_debt_basis as string | null) ?? null}
+                  currentControllingDebtAmount={(p.current_controlling_secured_debt_amount as number | null) ?? null}
+                  debtBasisReason={(p.secured_debt_basis_reason as string | null) ?? null}
+                  debtBasisUpdatedAt={(p.secured_debt_basis_updated_at as string | null) ?? null}
+                />
+              </div>
+            </div>
+          );
+        })()
+      )}
 
-        TODO(stripe): Replace deposit simulation with live Stripe payment-intent flow.
+      {/* ── Manual appraisal simulation (dev/staging only) ── */}
+      {/*
+        Simulates manual appraisal payment collection and FMV submission without
+        hitting real payment or appraiser systems.
+
+        TODO(stripe): Replace payment simulation with live Stripe payment-intent flow.
+        TODO(appraisal): Replace result submission with real licensed appraiser report ingestion.
       */}
       <div className="rounded-lg border overflow-hidden">
         <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b flex items-center gap-2">
-          <span>Escalation deposit + FMV override</span>
+          <span>Manual appraisal simulation</span>
           <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-amber-100 text-amber-800">
             [SIMULATION]
           </span>
