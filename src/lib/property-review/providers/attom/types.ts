@@ -261,6 +261,41 @@ export type AttomHomeEquityDetailResponse = {
 };
 
 // ────────────────────────────────────────────────────────────────────────────
+// Per-endpoint audit tracking
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Audit record for a single ATTOM API call.
+ * Stored inside AttomRawComposite._endpoints so the admin panel can show
+ * the exact outcome of each endpoint independently.
+ *
+ * fullResponse: the verbatim JSON from the API (before any property[0] extraction)
+ *   — this is critical for diagnosing structural mismatches where the endpoint
+ *   returns HTTP 200 but with an unexpected shape (e.g. no property[] wrapper).
+ *
+ * extractedRecord: property[0] from fullResponse, or null.
+ *
+ * topLevelKeys: keys of fullResponse — helps diagnose wrong response shape
+ *   without having to log the full payload (which may be large).
+ */
+export type AttomEndpointResult<T> = {
+  status: "fulfilled" | "rejected";
+  /** Full verbatim API response (before property[0] extraction). */
+  fullResponse: T | null;
+  /** Top-level keys of fullResponse — for diagnosing unexpected response shape. */
+  topLevelKeys: string[];
+  /**
+   * property[0] extracted from fullResponse.property[].
+   * null if fullResponse had no property[] array, or the array was empty.
+   */
+  extractedRecord: (T extends { property?: (infer R)[] } ? R : never) | null;
+  /** Error message if status === "rejected", null otherwise. */
+  errorMessage: string | null;
+  /** HTTP status code if the call returned a non-2xx response. */
+  httpStatus?: number | null;
+};
+
+// ────────────────────────────────────────────────────────────────────────────
 // Composite raw payload
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -273,6 +308,10 @@ export type AttomHomeEquityDetailResponse = {
  *   propertyDetail    → /property/detailmortgageowner    (owner + mortgage origination)
  *   avmDetail         → /attomavm/detail                 (AVM point estimate + range + scr)
  *   homeEquityDetail  → /valuation/homeequity            (current balance + lendable equity)
+ *
+ * _endpoints tracks each call independently so the admin panel can show
+ * per-endpoint status, errors, and raw response shape diagnostics.
+ * This field is absent in run records created before it was added (old runs).
  */
 export type AttomRawComposite = {
   /** First record from /property/detailmortgageowner, or null if unavailable. */
@@ -282,10 +321,20 @@ export type AttomRawComposite = {
   /**
    * First record from /valuation/homeequity, or null if unavailable.
    * null does NOT mean the data does not exist — it means either the endpoint
-   * call failed or the address was not matched. The normalizer will skip
-   * debt discrepancy comparison when this is null.
+   * call failed, the address was not matched, or the response had an unexpected
+   * shape (check _endpoints.valuation_homeequity for the exact reason).
    */
   homeEquityDetail: AttomHomeEquityDetailRecord | null;
   /** ISO timestamp of when the ATTOM calls were initiated. */
   fetchedAt: string;
+  /**
+   * Per-endpoint audit records. Added in the session that introduced
+   * /valuation/homeequity support. Absent in older run records (treat as
+   * undefined = "pre-audit-tracking era run, re-run to populate").
+   */
+  _endpoints?: {
+    detailmortgageowner: AttomEndpointResult<AttomPropertyDetailResponse>;
+    attomavm_detail: AttomEndpointResult<AttomAvmDetailResponse>;
+    valuation_homeequity: AttomEndpointResult<AttomHomeEquityDetailResponse>;
+  };
 };

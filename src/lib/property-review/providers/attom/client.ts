@@ -37,7 +37,9 @@
 
 import type {
   AttomAvmDetailResponse,
+  AttomEndpointResult,
   AttomHomeEquityDetailResponse,
+  AttomHomeEquityDetailRecord,
   AttomPropertyDetailResponse,
   AttomRawComposite,
 } from "./types";
@@ -159,6 +161,112 @@ export async function fetchAttomHomeEquityDetail(
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Per-endpoint audit helpers + composite screening fetch
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Builds an AttomEndpointResult from a Promise.allSettled outcome.
+ * Stores the full response (before property[0] extraction) and the extracted
+ * record, so the admin panel can diagnose structural mismatches (e.g. endpoint
+ * returns HTTP 200 but with no property[] wrapper or an empty array).
+ *
+ * Uses `any` internally because the property[] field in ATTOM response types
+ * is typed as `T[] | null | undefined`, which doesn't satisfy `unknown[]`.
+ * The caller casts the result to the specific AttomEndpointResult<T> type.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildEndpointResult<T>(outcome: PromiseSettledResult<T>): AttomEndpointResult<T> {
+  if (outcome.status === "rejected") {
+    const errorMessage =
+      outcome.reason instanceof Error
+        ? outcome.reason.message
+        : String(outcome.reason);
+    return {
+      status: "rejected",
+      fullResponse: null,
+      topLevelKeys: [],
+      extractedRecord: null,
+      errorMessage,
+    };
+  }
+
+  const full = outcome.value;
+  const asAny = full as any;
+  const topLevelKeys = full != null && typeof full === "object"
+    ? Object.keys(full as object)
+    : [];
+  const extractedRecord = (asAny?.property?.[0] ?? null) as AttomEndpointResult<T>["extractedRecord"];
+
+  return {
+    status: "fulfilled",
+    fullResponse: full,
+    topLevelKeys,
+    extractedRecord,
+    errorMessage: null,
+  };
+}
+
+/**
+ * Extracts the home equity record from a fulfilled /valuation/homeequity response.
+ *
+ * ATTOM's /valuation/homeequity follows the standard property[] wrapper pattern.
+ * However, earlier API versions and some property types may return the payload
+ * differently. This function tries property[0] first (canonical path) and logs
+ * a diagnostic warning if the response arrived but the property[] array is absent
+ * or empty — which indicates a response structure mismatch rather than a true
+ * "no data" case.
+ *
+ * All fallback attempts are logged so the server console shows exactly which
+ * path succeeded or failed, making future debugging easier.
+ */
+function extractHomeEquityRecord(
+  full: AttomHomeEquityDetailResponse,
+  address1: string,
+): AttomHomeEquityDetailRecord | null {
+  // ── Path 1: standard property[0] wrapper (expected canonical path) ─────
+  const fromProperty = full?.property?.[0] ?? null;
+  if (fromProperty != null) {
+    console.log(
+      `[ATTOM /valuation/homeequity] property[0] extraction succeeded for "${address1}".` +
+      ` homeEquity present: ${fromProperty.homeEquity != null}.` +
+      (fromProperty.homeEquity != null
+        ? ` totalEstimatedLoanBalance=${fromProperty.homeEquity.totalEstimatedLoanBalance ?? "absent"}`
+        + ` estimatedLendableEquity=${fromProperty.homeEquity.estimatedLendableEquity ?? "absent"}`
+        + ` LTV=${fromProperty.homeEquity.LTV ?? "absent"}`
+        : ""),
+    );
+    return fromProperty;
+  }
+
+  // ── Path 1 failed — log the top-level keys to help diagnose the structure ─
+  const topKeys = full != null && typeof full === "object"
+    ? Object.keys(full as object)
+    : [];
+  console.warn(
+    `[ATTOM /valuation/homeequity] property[0] is null/absent for "${address1}".` +
+    ` Top-level response keys: [${topKeys.join(", ")}].` +
+    ` status=${JSON.stringify((full as any)?.status)}.` +
+    ` This may indicate the response has a non-standard structure or the address was not matched.`,
+  );
+
+  // ── Path 2: response itself is a property record (no wrapper) ──────────
+  // Some ATTOM endpoints return the record directly when only one result is
+  // matched. This is defensive handling for undocumented response variants.
+  const fullAsAny = full as any;
+  if (fullAsAny?.homeEquity != null) {
+    console.warn(
+      `[ATTOM /valuation/homeequity] Fallback: found homeEquity at response root (no property[] wrapper). Using root record.`,
+    );
+    return full as unknown as AttomHomeEquityDetailRecord;
+  }
+
+  console.warn(
+    `[ATTOM /valuation/homeequity] No homeEquity data found via any extraction path for "${address1}". homeEquityDetail will be null.`,
+  );
+  return null;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Composite screening fetch
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -180,13 +288,19 @@ export async function fetchAttomHomeEquityDetail(
  *     homeEquityDetail=null (debt discrepancy will use AVM equity fallback or
  *     skip comparison entirely).
  *
- * Callers should treat homeEquityDetail=null as "current balance unknown" and
- * check debt discrepancy notes in the normalized result for the reason.
+ * Per-endpoint audit is stored in _endpoints (see AttomEndpointResult type).
+ * This allows the admin panel to show the exact status of each call
+ * independently, including the full raw response for diagnosing structural
+ * mismatches (e.g. HTTP 200 with unexpected response shape).
  */
 export async function fetchAttomScreeningData(
   input: AddressInput,
 ): Promise<AttomRawComposite> {
   const fetchedAt = new Date().toISOString();
+
+  console.log(
+    `[ATTOM screening] Starting parallel fetch for address1="${input.addressLine1}" city="${input.city}" state="${input.state}" zip="${input.zipCode ?? ""}"`,
+  );
 
   const [propertyDetailOutcome, avmDetailOutcome, homeEquityDetailOutcome] =
     await Promise.allSettled([
@@ -195,6 +309,19 @@ export async function fetchAttomScreeningData(
       fetchAttomHomeEquityDetail(input),
     ]);
 
+  // ── Build per-endpoint audit records ──────────────────────────────────────
+  const pdEndpoint = buildEndpointResult(propertyDetailOutcome);
+  const avmEndpoint = buildEndpointResult(avmDetailOutcome);
+  const heEndpoint = buildEndpointResult(homeEquityDetailOutcome);
+
+  console.log(
+    `[ATTOM screening] Endpoint outcomes:` +
+    ` detailmortgageowner=${pdEndpoint.status} (property[] len=${propertyDetailOutcome.status === "fulfilled" ? (propertyDetailOutcome.value.property?.length ?? 0) : "N/A"})` +
+    ` attomavm/detail=${avmEndpoint.status} (property[] len=${avmDetailOutcome.status === "fulfilled" ? (avmDetailOutcome.value.property?.length ?? 0) : "N/A"})` +
+    ` valuation/homeequity=${heEndpoint.status} (topLevelKeys=[${heEndpoint.topLevelKeys.join(", ")}])`,
+  );
+
+  // ── AVM is non-optional ───────────────────────────────────────────────────
   if (avmDetailOutcome.status === "rejected") {
     const msg =
       avmDetailOutcome.reason instanceof Error
@@ -203,33 +330,42 @@ export async function fetchAttomScreeningData(
     throw new Error(`ATTOM AVM call failed: ${msg}`);
   }
 
+  // ── Extract records ───────────────────────────────────────────────────────
   const propertyDetail =
     propertyDetailOutcome.status === "fulfilled"
       ? (propertyDetailOutcome.value.property?.[0] ?? null)
       : null;
 
   if (propertyDetailOutcome.status === "rejected") {
-    const msg =
-      propertyDetailOutcome.reason instanceof Error
-        ? propertyDetailOutcome.reason.message
-        : String(propertyDetailOutcome.reason);
-    console.warn("ATTOM_PROPERTY_DETAIL_FAILED", msg);
+    console.warn(
+      `[ATTOM screening] detailmortgageowner failed: ${pdEndpoint.errorMessage}`,
+    );
   }
 
   const avmDetail = avmDetailOutcome.value.property?.[0] ?? null;
 
+  // /valuation/homeequity uses extractHomeEquityRecord for defensive multi-path parsing
+  // and detailed diagnostic logging.
   const homeEquityDetail =
     homeEquityDetailOutcome.status === "fulfilled"
-      ? (homeEquityDetailOutcome.value.property?.[0] ?? null)
+      ? extractHomeEquityRecord(homeEquityDetailOutcome.value, input.addressLine1)
       : null;
 
   if (homeEquityDetailOutcome.status === "rejected") {
-    const msg =
-      homeEquityDetailOutcome.reason instanceof Error
-        ? homeEquityDetailOutcome.reason.message
-        : String(homeEquityDetailOutcome.reason);
-    console.warn("ATTOM_HOME_EQUITY_DETAIL_FAILED", msg);
+    console.warn(
+      `[ATTOM screening] valuation/homeequity failed: ${heEndpoint.errorMessage}`,
+    );
   }
 
-  return { propertyDetail, avmDetail, homeEquityDetail, fetchedAt };
+  return {
+    propertyDetail,
+    avmDetail,
+    homeEquityDetail,
+    fetchedAt,
+    _endpoints: {
+      detailmortgageowner: pdEndpoint as NonNullable<AttomRawComposite["_endpoints"]>["detailmortgageowner"],
+      attomavm_detail: avmEndpoint as NonNullable<AttomRawComposite["_endpoints"]>["attomavm_detail"],
+      valuation_homeequity: heEndpoint as NonNullable<AttomRawComposite["_endpoints"]>["valuation_homeequity"],
+    },
+  };
 }

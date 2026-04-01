@@ -217,9 +217,32 @@ function AttomFactsSection({ raw }: { raw: AttomRawComposite }) {
   // May be null for run records created before this endpoint was added to the flow.
   const heRec = (raw as any).homeEquityDetail as any;
 
+  // Per-endpoint audit records — present in runs created after _endpoints tracking
+  // was added. Absent (undefined) in older run records.
+  const endpoints = (raw as any)._endpoints as NonNullable<AttomRawComposite["_endpoints"]> | undefined;
+  const heEp = endpoints?.valuation_homeequity;
+  const pdEp = endpoints?.detailmortgageowner;
+  const avmEp = endpoints?.attomavm_detail;
+
+  // Was this run created before _endpoints tracking was added?
+  const isPreAuditRun = endpoints == null;
+
   const pdPresent = pd != null;
   const avmPresent = avmRec != null;
   const hePresent = heRec != null;
+
+  // Per-endpoint status (only available in post-audit runs)
+  const heEpFulfilled = heEp?.status === "fulfilled";
+  const heEpRejected = heEp?.status === "rejected";
+  const heEpError = heEp?.errorMessage ?? null;
+  const heEpTopLevelKeys: string[] = heEp?.topLevelKeys ?? [];
+  const heEpHasPropertyArray = heEpTopLevelKeys.includes("property");
+  const heEpExtractedRecord = heEp?.extractedRecord ?? null;
+  // fullResponse.property[] length helps diagnose "property array exists but is empty"
+  const heEpPropertyArrayLen: number | null =
+    heEp?.fullResponse != null
+      ? ((heEp.fullResponse as any)?.property?.length ?? null)
+      : null;
 
   // ── A. Property identity ──────────────────────────────────────────────────
   const attomId =
@@ -492,24 +515,98 @@ function AttomFactsSection({ raw }: { raw: AttomRawComposite }) {
         subtitle="(/valuation/homeequity — primary current-debt source)"
       >
         {!hePresent ? (
-          <div className="space-y-1">
-            <p className="text-xs text-orange-700 font-medium">
-              /valuation/homeequity returned no payload for this run
-            </p>
-            <p className="text-xs text-muted-foreground/60 italic">
-              This may mean the endpoint call failed, the address was unmatched, or this is
-              an older run record created before the third endpoint was added to the screening
-              flow. Re-run ATTOM screening to populate this section.
-            </p>
+          <div className="space-y-2">
+            {/* ── Pre-audit run (no _endpoints tracking) ─────────────── */}
+            {isPreAuditRun && (
+              <p className="text-xs text-orange-700 font-medium">
+                Stale run — created before per-endpoint tracking was added.
+                Re-run ATTOM screening to populate this section.
+              </p>
+            )}
+
+            {/* ── Post-audit: endpoint was rejected (HTTP error or network) ─ */}
+            {!isPreAuditRun && heEpRejected && (
+              <div className="space-y-1">
+                <p className="text-xs text-red-700 font-semibold">
+                  /valuation/homeequity call failed (HTTP error or network error)
+                </p>
+                {heEpError && (
+                  <p className="text-xs font-mono bg-red-50 border border-red-200 rounded px-2 py-1 text-red-800 break-all">
+                    {heEpError}
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground/60 italic">
+                  detailmortgageowner and attomavm/detail succeeded. This failure is
+                  specific to /valuation/homeequity. Check the ATTOM_API_KEY permissions
+                  and whether this property type is covered by the /valuation/homeequity endpoint.
+                </p>
+              </div>
+            )}
+
+            {/* ── Post-audit: endpoint fulfilled but property[0] was null ─── */}
+            {!isPreAuditRun && heEpFulfilled && (
+              <div className="space-y-1.5">
+                <p className="text-xs text-orange-700 font-semibold">
+                  /valuation/homeequity returned HTTP 200 but property[0] is null
+                </p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs">
+                  <span className="text-muted-foreground">property[] array present in response</span>
+                  <span className={heEpHasPropertyArray ? "text-emerald-700 font-medium" : "text-orange-700 font-medium"}>
+                    {heEpHasPropertyArray ? `yes (len=${heEpPropertyArrayLen ?? "?"})`  : "no — response has no property[] key"}
+                  </span>
+                  <span className="text-muted-foreground">top-level response keys</span>
+                  <span className="text-slate-700 font-mono">
+                    {heEpTopLevelKeys.length > 0 ? `[${heEpTopLevelKeys.join(", ")}]` : "(empty)"}
+                  </span>
+                  {heEpHasPropertyArray && heEpPropertyArrayLen === 0 && (
+                    <>
+                      <span className="text-muted-foreground col-span-2 italic pt-1">
+                        property[] array exists but is empty — ATTOM did not match this address.
+                        Verify address1/address2 params in server logs.
+                      </span>
+                    </>
+                  )}
+                  {!heEpHasPropertyArray && heEpTopLevelKeys.length > 0 && (
+                    <>
+                      <span className="text-muted-foreground col-span-2 italic pt-1">
+                        Response has no property[] wrapper — may use a different top-level key.
+                        Check keys above against ATTOM API docs for /valuation/homeequity.
+                      </span>
+                    </>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground/60 italic">
+                  Re-run screening to capture the latest server logs which show the raw
+                  response shape at extraction time.
+                </p>
+              </div>
+            )}
+
+            {/* ── No _endpoints and no heRec: generic fallback ─────────────── */}
+            {isPreAuditRun && (
+              <p className="text-xs text-muted-foreground/60 italic">
+                Re-run ATTOM screening to populate per-endpoint diagnostic data and this section.
+              </p>
+            )}
           </div>
         ) : !heDataPresent ? (
           <div className="space-y-1">
             <p className="text-xs text-orange-700 font-medium">
               homeEquity block absent in /valuation/homeequity response
             </p>
+            {heEpTopLevelKeys.length > 0 && (
+              <p className="text-xs text-muted-foreground/60">
+                Endpoint fulfilled. property[0] extracted
+                {heEpExtractedRecord != null
+                  ? `, top-level record keys: [${Object.keys(heEpExtractedRecord as object).join(", ")}]`
+                  : " but record was null"
+                }.
+              </p>
+            )}
             <p className="text-xs text-muted-foreground/60 italic">
               The endpoint returned a property record but the homeEquity sub-object was not
-              present. This may indicate this property is not covered at the current tier.
+              present. This may indicate this property is not covered at the current tier,
+              or the homeEquity key has a different name in the response.
             </p>
           </div>
         ) : (
