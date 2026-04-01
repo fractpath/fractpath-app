@@ -190,16 +190,22 @@ function DiagRow({
   ok,
   okLabel,
   failLabel,
+  neutral = false,
 }: {
   label: string;
   ok: boolean;
   okLabel: string;
   failLabel: string;
+  /** When true, a "not ok" state is rendered in muted text instead of orange — use for expected absences that are not errors. */
+  neutral?: boolean;
 }) {
+  const failCls = neutral
+    ? "text-muted-foreground/60 italic"
+    : "text-orange-700 italic";
   return (
     <>
       <div className="text-muted-foreground">{label}</div>
-      <div className={ok ? "text-green-700 font-medium" : "text-orange-700 italic"}>
+      <div className={ok ? "text-green-700 font-medium" : failCls}>
         {ok ? okLabel : failLabel}
       </div>
     </>
@@ -476,38 +482,50 @@ function AttomFactsSection({ raw }: { raw: AttomRawComposite }) {
         </p>
       </SectionBox>
 
-      {/* ── D. attomavm equity signals (subscription-gated legacy) ─────────── */}
-      <SectionBox
-        title="D — AVM equity signals"
-        subtitle="(attomavm/detail homeEquity — subscription-gated)"
-      >
-        {!avmPresent ? (
-          <p className="text-xs text-muted-foreground/50 italic">endpoint returned no payload</p>
-        ) : !homeEquityPresent ? (
-          <div className="space-y-1">
-            <p className="text-xs text-orange-700 font-medium">
-              attomavm homeEquity block absent — confirmed subscription-gated at current tier
-            </p>
-            <p className="text-xs text-muted-foreground/60 italic">
-              estEquity, estEstimatedValue, estEquityPct are not returned in /attomavm/detail
-              at this subscription level. See section E (/valuation/homeequity) for current
-              debt-support signals.
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-            <Field label="Est. market value" value={estEstimatedValue != null ? fmtCurrency(estEstimatedValue) : null} absent="subscription-gated" />
-            <Field label="Est. equity" value={estEquity != null ? fmtCurrency(estEquity) : null} absent="subscription-gated" />
-            <Field label="Equity %" value={estEquityPct != null ? fmtPct(estEquityPct) : null} absent="subscription-gated" />
-            <Field label="Implied lien (AVM − equity)" value={impliedLien != null ? fmtCurrency(impliedLien) : null} absent="not derivable — equity absent" />
-          </div>
-        )}
-        {homeEquityPresent && (
-          <p className="text-xs text-muted-foreground/60 italic pt-0.5">
-            Implied lien = AVM value − est. equity (ATTOM secondary signal, not a title search).
+      {/* ── D. attomavm equity signals — collapsed, subscription-gated ──────── */}
+      {/* Not shown as a primary underwriting section because these fields are   */}
+      {/* subscription-gated and confirmed absent at the current ATTOM tier.      */}
+      {/* The working debt/equity source is Section E (/valuation/homeequity).    */}
+      <details className="rounded-md border border-dashed border-muted-foreground/25 bg-muted/5">
+        <summary className="cursor-pointer select-none px-3 py-2 text-xs text-muted-foreground flex items-center gap-2 hover:text-foreground transition-colors">
+          <span className="font-medium">ATTOM package limitations</span>
+          <span className="text-muted-foreground/60">
+            — attomavm/detail homeEquity signals (subscription-gated, not used)
+          </span>
+        </summary>
+        <div className="px-3 pb-3 pt-1 space-y-2">
+          <p className="text-xs text-muted-foreground/70">
+            The <span className="font-mono">homeEquity</span> sub-object in{" "}
+            <span className="font-mono">/attomavm/detail</span> (estEquity, estEstimatedValue,
+            estEquityPct) is subscription-gated and is not returned at the current ATTOM API
+            tier. This is expected behaviour — not a bug. Debt and equity signals come from{" "}
+            <span className="font-mono">/valuation/homeequity</span> (Section E).
           </p>
-        )}
-      </SectionBox>
+          {!avmPresent ? (
+            <p className="text-xs text-muted-foreground/50 italic">attomavm/detail returned no payload</p>
+          ) : homeEquityPresent ? (
+            <div className="space-y-2">
+              <p className="text-xs text-emerald-700 font-medium">
+                homeEquity block present (unexpected at this tier — data may be available).
+              </p>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                <Field label="Est. market value" value={estEstimatedValue != null ? fmtCurrency(estEstimatedValue) : null} absent="subscription-gated" />
+                <Field label="Est. equity" value={estEquity != null ? fmtCurrency(estEquity) : null} absent="subscription-gated" />
+                <Field label="Equity %" value={estEquityPct != null ? fmtPct(estEquityPct) : null} absent="subscription-gated" />
+                <Field label="Implied lien (AVM − equity)" value={impliedLien != null ? fmtCurrency(impliedLien) : null} absent="not derivable — equity absent" />
+              </div>
+              <p className="text-xs text-muted-foreground/60 italic">
+                Implied lien = AVM value − est. equity (ATTOM secondary signal, not a title search).
+              </p>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground/60 italic">
+              Confirmed absent — estEquity, estEstimatedValue, estEquityPct not returned by
+              attomavm/detail at this subscription level. No action required.
+            </p>
+          )}
+        </div>
+      </details>
 
       {/* ── E. Home equity / debt support (/valuation/homeequity) ─────────── */}
       <SectionBox
@@ -789,8 +807,9 @@ function AttomFactsSection({ raw }: { raw: AttomRawComposite }) {
           <DiagRow
             label="attomavm homeEquity signals"
             ok={homeEquityPresent}
-            okLabel="✓ estEquity / estEstimatedValue present (attomavm)"
-            failLabel="✗ not returned — subscription-gated in attomavm/detail"
+            okLabel="✓ estEquity / estEstimatedValue present (attomavm) — unexpected at this tier"
+            failLabel="— absent (expected — subscription-gated at current tier, not an error)"
+            neutral={!homeEquityPresent}
           />
           <DiagRow
             label="homeEquity.totalEstimatedLoanBalance"
