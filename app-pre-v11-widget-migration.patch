@@ -1,0 +1,1056 @@
+From 7cad094c8eecd657c255a1c2864fc555a267854a Mon Sep 17 00:00:00 2001
+From: alexhachey <53943007-alexhachey@users.noreply.replit.com>
+Date: Thu, 2 Apr 2026 01:54:16 +0000
+Subject: [PATCH] Add workflow email notifications for various deal and
+ property updates
+
+Implement a new `sendWorkflowEmail` helper for sending targeted notifications to deal owners and buyers, integrated into multiple API routes for property and deal status changes.
+
+Replit-Commit-Author: Agent
+Replit-Commit-Session-Id: 0000d379-eb8a-420a-85e4-b026f688d3c0
+Replit-Commit-Checkpoint-Type: full_checkpoint
+Replit-Commit-Event-Id: 3bf40ee7-53b1-4446-b35d-1ab8218d7c04
+Replit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/e65d6c0f-2424-4792-91b7-dbc5497fad14/0000d379-eb8a-420a-85e4-b026f688d3c0/VN8srcf
+Replit-Helium-Checkpoint-Created: true
+---
+ docs/notification-audit.md                    | 179 +++++----
+ .../[dealId]/reopen-negotiation/route.ts      |  44 ++
+ .../deals/[dealId]/set-review-state/route.ts  |  49 +++
+ .../[propertyId]/debt-basis/route.ts          |  45 ++-
+ .../[propertyId]/manual-appraisal/route.ts    |  50 ++-
+ .../review/run-attom-screening/route.ts       | 118 ++++++
+ src/lib/workflow/sendWorkflowEmail.ts         | 375 ++++++++++++++++++
+ 7 files changed, 785 insertions(+), 75 deletions(-)
+ create mode 100644 src/lib/workflow/sendWorkflowEmail.ts
+
+diff --git a/docs/notification-audit.md b/docs/notification-audit.md
+index 1f1fd3f..0f5f233 100644
+--- a/docs/notification-audit.md
++++ b/docs/notification-audit.md
+@@ -3,17 +3,25 @@
+ This document catalogues all customer-facing notifications sent by FractPath,
+ their trigger conditions, delivery path, and suppression rules.
+ 
++Last updated: 2026-04-02
++
+ ---
+ 
+ ## Delivery Infrastructure
+ 
+-All notifications are sent inline via **Resend** using the `sendTemplateEmail`
+-helper in `src/lib/email/sendTemplateEmail.ts`.  Calls are **non-blocking**:
+-errors are logged to the console (and optionally to `deal_events`) but are never
+-propagated back to the calling request.
++FractPath sends customer notifications via two paths, both backed by **Resend**:
++
++1. **`sendInlineEmail`** (`src/lib/email/sendInlineEmail.ts`) — raw send helper.
++2. **`sendWorkflowEmail`** (`src/lib/workflow/sendWorkflowEmail.ts`) — centralized
++   workflow email helper that wraps `sendInlineEmail`. Supports owner and buyer
++   audiences, event-keyed copy, and contact resolution from `propertyId` or `dealId`.
++3. **`sendTemplateEmail`** (`src/lib/email/sendTemplateEmail.ts`) — used for
++   offer/counter-offer/share-link flows; remains unchanged.
+ 
+-Successful sends are logged to `deal_events` with event type
+-`DEAL_WORKFLOW_NOTIFICATION_SENT`.
++All sends are **non-blocking**: errors are logged to the console but never
++propagated back to the calling request.  Successful milestone sends are logged
++to `deal_events` with `DEAL_WORKFLOW_NOTIFICATION_SENT`.  Workflow email sends
++are logged to the server console only (not yet persisted to `deal_events`).
+ 
+ ---
+ 
+@@ -21,99 +29,124 @@ Successful sends are logged to `deal_events` with event type
+ 
+ Source: `src/lib/workflow/notifyMilestone.ts`
+ 
+-These fire whenever an admin transitions a property or deal to a new workflow
+-stage.  The recipient is the **deal thread owner** resolved via:
+-`deal_thread → auth.users → profiles` (in that priority order).
++Owner-only. Fire when an admin transitions a property or deal to a new workflow stage.
+ 
+ | Trigger | Stage | Subject / Body summary |
+ |---|---|---|
+-| Property under review | Stage 2 | "Your property is under review — we'll notify you when complete." |
++| Property under review | Stage 2 | "Your property is under review" |
+ | Property verified | Stage 3 | "Property verified — you can now accept deal terms." |
+-| ATTOM enhanced review ordered | Stage 4 | "Enhanced review ordered — expect results within [N] business days." |
+-| ATTOM enhanced review complete | Stage 5 | "Enhanced review complete — see your property page for the verified value." |
+-| Manual appraisal scheduled | Stage 6 | "Licensed appraisal scheduled — you will be contacted by the appraiser." |
+-| Closing review started | Stage 7 | "Closing review has begun — our team is preparing closing documents." |
+-| Closing issue found | Stage 8 | "A closing issue was found — see your deal page for details." |
+-| Property ready for closing | Stage 9 | "Your property is ready for closing — your closer will be in touch." |
+-| Deal ready for signatures | Stage 11 | "Your deal is ready for signatures — DocuSign packet sent." |
+-| Deal signed | Stage 12 | "Signatures complete — closing is being scheduled." |
+-| Deal accepted | Stage 13 | "Your deal has been accepted — see your deal page for next steps." |
+-| Deal closed | Stage 14 | "Your deal has closed — see your deal page for servicing details." |
+-| Servicing active | Stage 15 | "Servicing is now active — see your deal page for details." |
+-| Servicing issue | Stage 16 | "A servicing issue was found — our team will be in touch." |
+-
+-**Suppression rules:**
+-- Notifications are suppressed if the owner's email cannot be resolved.
+-- `DEAL_WORKFLOW_NOTIFICATION_SENT` events are checked for idempotency at the
+-  call site in admin panel handlers before triggering the send.
++| ATTOM enhanced review ordered | Stage 4 | "Enhanced review ordered" |
++| ATTOM enhanced review complete | Stage 5 | "Enhanced review complete" |
++| Manual appraisal scheduled | Stage 6 | "Licensed appraisal scheduled" |
++| Closing review started | Stage 7 | "Closing review has begun" |
++| Closing issue found | Stage 8 | "A closing issue was found" |
++| Property ready for closing | Stage 9 | "Your property is ready for closing" |
++| Deal ready for signatures | Stage 11 | "Your deal is ready for signatures" |
++| Deal signed | Stage 12 | "Signatures complete" |
++| Deal accepted | Stage 13 | "Your deal has been accepted" |
++| Deal closed | Stage 14 | "Your deal has closed" |
++| Servicing active | Stage 15 | "Servicing is now active" |
++| Servicing issue | Stage 16 | "A servicing issue was found" |
++
++**Suppression:** Suppressed if the owner's email cannot be resolved.
+ 
+ ---
+ 
+-## Transactional Email (`sendTemplateEmail`)
++## Workflow Email Notifications (`sendWorkflowEmail`)
++
++Source: `src/lib/workflow/sendWorkflowEmail.ts`
++
++### Owner events
++
++| Event key | Trigger route | Condition | Subject |
++|---|---|---|---|
++| `PROPERTY_VERIFIED_APPRAISAL_READY` | `POST /api/admin/properties/[propertyId]/review/run-attom-screening` | `becameControlling = true` AND FMV changed AND no review flags | "Your property valuation has been updated" |
++| `PROPERTY_VERIFICATION_REVIEW_REQUIRED` | Same | `becameControlling = false` AND review flags present | "Your property review requires additional attention" |
++| `PROPERTY_VERIFICATION_UPDATED` | Same | `becameControlling = true` AND FMV changed AND review flags present | "Your property details have been updated" |
++| `PROPERTY_MANUAL_REVIEW_COMPLETED` | `POST /api/admin/properties/[propertyId]/manual-appraisal` | `action = "complete"` | "Your independent appraisal review is complete" |
++| `PROPERTY_DEBT_VERIFICATION_UPDATED` | `POST /api/admin/properties/[propertyId]/debt-basis` | `action = "adopt_owner_verified"` or `"keep_attom"` | "Your property's secured debt information has been reviewed" |
++| `DEAL_TERMS_INELIGIBLE_OWNER` | `POST /api/admin/deals/[dealId]/set-review-state` | `state = "ineligible"` | "Your scenario is currently ineligible — action may be required" |
++| `NEGOTIATION_REENGAGEMENT_REQUIRED_OWNER` | `POST /api/admin/deals/[dealId]/reopen-negotiation` | On successful reopen | "Your revised scenario is ready for review" |
++
++### Buyer events
++
++| Event key | Trigger route | Condition | Subject |
++|---|---|---|---|
++| `DEAL_VERIFICATION_REVIEW_COMPLETED` | `POST /api/admin/properties/[propertyId]/review/run-attom-screening` | `becameControlling = true` AND FMV changed AND no review flags | "Property verification for this deal is complete" |
++| `DEAL_UNDER_VERIFICATION_REVIEW` | Same | FMV changed with review flags, or review flags with no FMV change | "This deal is under verification review" |
++| `DEAL_VERIFICATION_REVIEW_COMPLETED` | `POST /api/admin/properties/[propertyId]/manual-appraisal` | `action = "complete"` | "Property verification for this deal is complete" |
++| `DEAL_TERMS_NO_LONGER_ELIGIBLE_BUYER` | `POST /api/admin/deals/[dealId]/set-review-state` | `state = "ineligible"` | "This deal is no longer eligible under current terms" |
++| `NEGOTIATION_REENGAGEMENT_REQUIRED_BUYER` | `POST /api/admin/deals/[dealId]/reopen-negotiation` | On successful reopen | "Revised terms are available for this deal" |
++
++### Suppression rules
++
++- **Silent ATTOM reruns:** If `becameControlling = false` AND no review flags in `limitingFactors`,
++  no email is sent.  Logged as `ATTOM_NOTIFICATION_SILENT_RERUN`.
++- **Debt-basis informational actions:** `request_mortgage_docs`, `request_heloc_docs`,
++  `mark_attom_stale`, `escalate_title` do **not** trigger owner notification.
++  Only resolved-basis decisions (`adopt_owner_verified`, `keep_attom`) notify.
++- **Buyer debt isolation:** Buyers are **never** notified for debt-basis updates.
++  Provider names, debt amounts, and admin rationale are never included in buyer emails.
++- **Contact resolution failure:** If owner or buyer email cannot be resolved from
++  `deal_threads`, the notification is silently skipped (logged at WARN level).
++- **ATTOM reruns with unchanged FMV:** `becameControlling = true` but
++  `controllingFmvCandidate === prevFmv` → treated as silent rerun.
++
++### Contact resolution
++
++Both owner and buyer contacts are resolved from `deal_threads` via
++`resolveWorkflowContacts(svc, { propertyId | dealId })`.  Active thread
++statuses checked: `accepted`, `negotiating`, `pending_owner`, `decision_pending`,
++`closed`.  Auth email resolved via `svc.auth.admin.getUserById`; display name
++from `profiles.first_name / last_name`.
+ 
+-Source: `src/lib/email/sendTemplateEmail.ts`
+-
+-Generic helper wrapping Resend.  Sends inline HTML.  All callers pass:
+-- `to`: recipient email address
+-- `subject`: plain text subject
+-- `html`: full HTML body (callers are responsible for templating)
++---
+ 
+-Logs outcome to `deal_events` with `{ emailTo, emailSubject, success, errorMsg }`.
++## Transactional Email (`sendTemplateEmail`)
+ 
+----
++Source: `src/lib/email/sendTemplateEmail.ts`
+ 
+-## Deal Event Notifications
++Template-backed offer/share flows — **unchanged by workflow email work**.
+ 
+ ### Counter-offer submitted
+-**Trigger:** `POST /api/me/deals/[dealId]/counter-offer`  
+-**Recipients:** Other party on the deal thread  
+-**Subject:** "Revised terms submitted on your deal"  
+-**Suppression:** None — always fires on successful counter-offer creation.
++**Trigger:** `POST /api/me/deals/[dealId]/counter-offer`
++**Recipients:** Other party on the deal thread
++**Subject:** "Revised terms submitted on your deal"
+ 
+ ### Offer accepted
+-**Trigger:** `POST /api/me/deals/[dealId]/accept`  
+-**Recipients:** Buyer (notified that owner accepted)  
+-**Subject:** "Your offer has been accepted"  
+-**Suppression:** None.
++**Trigger:** `POST /api/me/deals/[dealId]/accept`
++**Recipients:** Buyer (notified that owner accepted)
++**Subject:** "Your offer has been accepted"
+ 
+ ### Offer rejected
+-**Trigger:** `POST /api/me/deals/[dealId]/reject`  
+-**Recipients:** Submitting party  
+-**Subject:** "Your offer was not accepted at this time"  
+-**Suppression:** None.
++**Trigger:** `POST /api/me/deals/[dealId]/reject`
++**Recipients:** Submitting party
++**Subject:** "Your offer was not accepted at this time"
+ 
+ ### Deal review request (admin → owner)
+-**Trigger:** Admin creates a `deal_review_requests` row via
+-`POST /api/admin/properties/[propertyId]/review-request`  
+-**Recipients:** Property owner  
+-**Subject:** "Additional information needed for your property review"  
+-**Suppression:** Only fires when `send_notification: true` is passed in the
+-request body.
+-
+----
+-
+-## Renegotiation Intent Log
+-
+-**Not a notification** — `POST /api/me/deals/[dealId]/log-renegotiation` logs
+-a `DEAL_RENEGOTIATION_REQUESTED` event to `deal_events` and does **not** send
+-an email.  Admin is expected to monitor the event log and reach out proactively.
++**Trigger:** `POST /api/admin/properties/[propertyId]/review-request`
++**Recipients:** Property owner
++**Subject:** "Additional information needed for your property review"
++**Suppression:** Only fires when `send_notification: true` is passed.
+ 
+ ---
+ 
+-## Debt Challenge Statement
++## Non-Email Audit Events
+ 
+-**Not a notification** — `POST /api/me/properties/[propertyId]/debt-challenge`
+-logs a `DEBT_CHALLENGE_STATEMENT` audit entry to `property_status_audit` and
+-does **not** send an email.  Admin sees it on the property review page.
++- **Renegotiation Intent Log:** `POST /api/me/deals/[dealId]/log-renegotiation`
++  logs `DEAL_RENEGOTIATION_REQUESTED` to `deal_events`. No email sent.
++- **Debt Challenge Statement:** `POST /api/me/properties/[propertyId]/debt-challenge`
++  logs to `property_status_audit`. No email sent.
+ 
+ ---
+ 
+-## Coverage Gaps / TODOs
++## Coverage Gaps / Intentionally Deferred
+ 
+-| Gap | Severity | Notes |
++| Gap | Status | Notes |
+ |---|---|---|
+-| No owner email on renegotiation intent | Low | Admin monitors `deal_events`; low urgency |
+-| No buyer email when deal marked ineligible | Medium | Owner-side action path exists; buyer relies on page state |
+-| No email on debt challenge statement submitted | Low | Admin sees it in property audit trail |
+-| DocuSign webhook → `DEAL_SIGNED` event not yet wired to notification | High | Requires live DocuSign integration |
++| `NEGOTIATION_CLOSED_AFTER_VERIFICATION` (buyer) | Deferred | No clear single trigger in current routes; placeholder in copy catalog |
++| Workflow email sends not persisted to `deal_events` | Low priority | Currently console-logged only; can be added when auditing is required |
++| DocuSign webhook → `DEAL_SIGNED` event not wired to notification | Deferred | Requires live DocuSign integration |
++| Branded templates replacing inline HTML | Deferred | Trigger logic is cleanly separated; templates can slot in later |
++| No email on debt challenge statement submitted (owner) | Low | Admin sees it in property audit trail |
+ | Servicing issue email body is generic | Low | Can be refined when servicing partner is onboarded |
+diff --git a/src/app/api/admin/deals/[dealId]/reopen-negotiation/route.ts b/src/app/api/admin/deals/[dealId]/reopen-negotiation/route.ts
+index 6b33bfa..d3b18b3 100644
+--- a/src/app/api/admin/deals/[dealId]/reopen-negotiation/route.ts
++++ b/src/app/api/admin/deals/[dealId]/reopen-negotiation/route.ts
+@@ -1,6 +1,11 @@
+ import { NextRequest, NextResponse } from "next/server";
+ import { requireAdmin } from "@/lib/auth/requireAdmin";
+ import { createServiceClient } from "@/lib/supabase/service";
++import {
++  resolveWorkflowContacts,
++  sendWorkflowEmail,
++  dealActionUrl,
++} from "@/lib/workflow/sendWorkflowEmail";
+ 
+ type Ctx = { params: Promise<{ dealId: string }> };
+ 
+@@ -54,5 +59,44 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
+     // Non-fatal
+   }
+ 
++  // ── Notify owner + buyer (non-blocking) ───────────────────────────────────
++  void (async () => {
++    try {
++      const contacts = await resolveWorkflowContacts(svc, { dealId });
++
++      if (contacts.owner) {
++        const r = await sendWorkflowEmail({
++          audience: "owner",
++          eventKey: "NEGOTIATION_REENGAGEMENT_REQUIRED_OWNER",
++          to: contacts.owner.email,
++          recipientName: contacts.owner.name,
++          actionUrl: dealActionUrl(dealId),
++        });
++        console.log("REOPEN_OWNER_NOTIFICATION", {
++          dealId,
++          ok: r.ok,
++          error: r.error ?? null,
++        });
++      }
++
++      if (contacts.buyer) {
++        const r = await sendWorkflowEmail({
++          audience: "buyer",
++          eventKey: "NEGOTIATION_REENGAGEMENT_REQUIRED_BUYER",
++          to: contacts.buyer.email,
++          recipientName: contacts.buyer.name,
++          actionUrl: dealActionUrl(dealId),
++        });
++        console.log("REOPEN_BUYER_NOTIFICATION", {
++          dealId,
++          ok: r.ok,
++          error: r.error ?? null,
++        });
++      }
++    } catch (err) {
++      console.error("REOPEN_NOTIFICATION_ERROR", { dealId, err });
++    }
++  })();
++
+   return NextResponse.json({ ok: true, dealId });
+ }
+diff --git a/src/app/api/admin/deals/[dealId]/set-review-state/route.ts b/src/app/api/admin/deals/[dealId]/set-review-state/route.ts
+index eb8fb47..32523d2 100644
+--- a/src/app/api/admin/deals/[dealId]/set-review-state/route.ts
++++ b/src/app/api/admin/deals/[dealId]/set-review-state/route.ts
+@@ -1,6 +1,11 @@
+ import { NextRequest, NextResponse } from "next/server";
+ import { requireAdmin } from "@/lib/auth/requireAdmin";
+ import { createServiceClient } from "@/lib/supabase/service";
++import {
++  resolveWorkflowContacts,
++  sendWorkflowEmail,
++  dealActionUrl,
++} from "@/lib/workflow/sendWorkflowEmail";
+ import {
+   computeAvmEligibility,
+   extractAvmDealTerms,
+@@ -183,5 +188,49 @@ export async function POST(req: NextRequest, ctx: Ctx) {
+     created_at: now,
+   });
+ 
++  // ── Notify owner + buyer on ineligible transitions (non-blocking) ────────
++  // Other state transitions (triage_in_progress, ready_for_signatures) are
++  // admin-internal workflow changes; customers are not notified here.
++  if (state === "ineligible") {
++    void (async () => {
++      try {
++        const contacts = await resolveWorkflowContacts(svc, { dealId });
++
++        if (contacts.owner) {
++          const r = await sendWorkflowEmail({
++            audience: "owner",
++            eventKey: "DEAL_TERMS_INELIGIBLE_OWNER",
++            to: contacts.owner.email,
++            recipientName: contacts.owner.name,
++            actionUrl: dealActionUrl(dealId),
++            note: note?.trim() || null,
++          });
++          console.log("INELIGIBLE_OWNER_NOTIFICATION", {
++            dealId,
++            ok: r.ok,
++            error: r.error ?? null,
++          });
++        }
++
++        if (contacts.buyer) {
++          const r = await sendWorkflowEmail({
++            audience: "buyer",
++            eventKey: "DEAL_TERMS_NO_LONGER_ELIGIBLE_BUYER",
++            to: contacts.buyer.email,
++            recipientName: contacts.buyer.name,
++            actionUrl: dealActionUrl(dealId),
++          });
++          console.log("INELIGIBLE_BUYER_NOTIFICATION", {
++            dealId,
++            ok: r.ok,
++            error: r.error ?? null,
++          });
++        }
++      } catch (err) {
++        console.error("INELIGIBLE_NOTIFICATION_ERROR", { dealId, err });
++      }
++    })();
++  }
++
+   return NextResponse.json({ ok: true, triage_status: STATE_TO_TRIAGE[state] });
+ }
+diff --git a/src/app/api/admin/properties/[propertyId]/debt-basis/route.ts b/src/app/api/admin/properties/[propertyId]/debt-basis/route.ts
+index 7b00cf2..41e8632 100644
+--- a/src/app/api/admin/properties/[propertyId]/debt-basis/route.ts
++++ b/src/app/api/admin/properties/[propertyId]/debt-basis/route.ts
+@@ -1,6 +1,16 @@
+ import { NextRequest, NextResponse } from "next/server";
+ import { requireAdmin } from "@/lib/auth/requireAdmin";
+ import { createServiceClient } from "@/lib/supabase/service";
++import {
++  resolveWorkflowContacts,
++  sendWorkflowEmail,
++  formatPropertyAddress,
++  propertyActionUrl,
++} from "@/lib/workflow/sendWorkflowEmail";
++
++// Actions that constitute a material debt-basis decision (notify owner).
++// Informational/pending actions (request_*,  mark_attom_stale, escalate_title) do not notify.
++const MATERIAL_DEBT_ACTIONS = new Set(["adopt_owner_verified", "keep_attom"]);
+ 
+ // ─── Policy actions for admin debt basis management ───────────────────────────
+ // FractPath policy: debt discrepancy is a review signal, not an auto-blocker.
+@@ -80,7 +90,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
+   const svc = createServiceClient();
+ 
+   const { data: prop, error: fetchErr } = await (svc.from("properties") as any)
+-    .select("id")
++    .select("id, address_line1, city, state, postal_code")
+     .eq("id", propertyId)
+     .maybeSingle();
+ 
+@@ -131,6 +141,39 @@ export async function POST(req: NextRequest, ctx: Ctx) {
+     notes: [auditLabel[action], reason].filter(Boolean).join(" — ") || null,
+   });
+ 
++  // ── Notify owner on material debt basis decisions (non-blocking) ──────────
++  // Only `adopt_owner_verified` and `keep_attom` represent a resolved basis —
++  // informational / pending actions (request_*, mark_attom_stale, escalate_title)
++  // do not trigger a notification.
++  // Buyers are NOT notified for debt-basis updates (provider details must stay internal).
++  if (MATERIAL_DEBT_ACTIONS.has(action)) {
++    void (async () => {
++      try {
++        const address = formatPropertyAddress(prop);
++        const contacts = await resolveWorkflowContacts(svc, { propertyId });
++
++        if (contacts.owner) {
++          const r = await sendWorkflowEmail({
++            audience: "owner",
++            eventKey: "PROPERTY_DEBT_VERIFICATION_UPDATED",
++            to: contacts.owner.email,
++            recipientName: contacts.owner.name,
++            propertyAddress: address,
++            actionUrl: propertyActionUrl(propertyId),
++          });
++          console.log("DEBT_BASIS_OWNER_NOTIFICATION", {
++            propertyId,
++            action,
++            ok: r.ok,
++            error: r.error ?? null,
++          });
++        }
++      } catch (err) {
++        console.error("DEBT_BASIS_NOTIFICATION_ERROR", { propertyId, action, err });
++      }
++    })();
++  }
++
+   return NextResponse.json(
+     {
+       ok: true,
+diff --git a/src/app/api/admin/properties/[propertyId]/manual-appraisal/route.ts b/src/app/api/admin/properties/[propertyId]/manual-appraisal/route.ts
+index b1a9b4e..184cb66 100644
+--- a/src/app/api/admin/properties/[propertyId]/manual-appraisal/route.ts
++++ b/src/app/api/admin/properties/[propertyId]/manual-appraisal/route.ts
+@@ -1,6 +1,13 @@
+ import { NextRequest, NextResponse } from "next/server";
+ import { requireAdmin } from "@/lib/auth/requireAdmin";
+ import { createServiceClient } from "@/lib/supabase/service";
++import {
++  resolveWorkflowContacts,
++  sendWorkflowEmail,
++  formatPropertyAddress,
++  propertyActionUrl,
++  dealActionUrl,
++} from "@/lib/workflow/sendWorkflowEmail";
+ 
+ // TODO(manual-appraisal): Replace this simulation route with a real licensed appraiser
+ // order + result ingestion flow. The `action` field maps to future appraisal lifecycle events:
+@@ -61,7 +68,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
+   const svc = createServiceClient();
+ 
+   const { data: prop, error: fetchErr } = await (svc.from("properties") as any)
+-    .select("id, manual_appraisal_status, escalation_avm_status")
++    .select("id, manual_appraisal_status, escalation_avm_status, address_line1, city, state, postal_code")
+     .eq("id", propertyId)
+     .maybeSingle();
+ 
+@@ -180,6 +187,47 @@ export async function POST(req: NextRequest, ctx: Ctx) {
+         `Manual appraisal challenge completed (sim). New controlling FMV basis: $${Math.round(fmvAmount).toLocaleString()}. Prior escalated AVM preserved in property_review_summary history. Admin should retriage linked deal.`,
+       );
+ 
++      // ── Notify owner + buyer (non-blocking) ──────────────────────────────
++      void (async () => {
++        try {
++          const address = formatPropertyAddress(prop);
++          const contacts = await resolveWorkflowContacts(svc, { propertyId });
++
++          if (contacts.owner) {
++            const r = await sendWorkflowEmail({
++              audience: "owner",
++              eventKey: "PROPERTY_MANUAL_REVIEW_COMPLETED",
++              to: contacts.owner.email,
++              recipientName: contacts.owner.name,
++              propertyAddress: address,
++              actionUrl: propertyActionUrl(propertyId),
++            });
++            console.log("MANUAL_APPRAISAL_OWNER_NOTIFICATION", {
++              propertyId,
++              ok: r.ok,
++              error: r.error ?? null,
++            });
++          }
++
++          if (contacts.buyer) {
++            const r = await sendWorkflowEmail({
++              audience: "buyer",
++              eventKey: "DEAL_VERIFICATION_REVIEW_COMPLETED",
++              to: contacts.buyer.email,
++              recipientName: contacts.buyer.name,
++              actionUrl: contacts.dealId ? dealActionUrl(contacts.dealId) : null,
++            });
++            console.log("MANUAL_APPRAISAL_BUYER_NOTIFICATION", {
++              propertyId,
++              ok: r.ok,
++              error: r.error ?? null,
++            });
++          }
++        } catch (err) {
++          console.error("MANUAL_APPRAISAL_NOTIFICATION_ERROR", { propertyId, err });
++        }
++      })();
++
+       return NextResponse.json(
+         {
+           ok: true,
+diff --git a/src/app/api/admin/properties/[propertyId]/review/run-attom-screening/route.ts b/src/app/api/admin/properties/[propertyId]/review/run-attom-screening/route.ts
+index 3698999..1e9f82c 100644
+--- a/src/app/api/admin/properties/[propertyId]/review/run-attom-screening/route.ts
++++ b/src/app/api/admin/properties/[propertyId]/review/run-attom-screening/route.ts
+@@ -23,12 +23,107 @@
+ 
+ import { NextRequest, NextResponse } from "next/server";
+ import { requireAdmin } from "@/lib/auth/requireAdmin";
++import { createServiceClient } from "@/lib/supabase/service";
+ import { runAttomScreening } from "@/lib/property-review/attomScreeningService";
++import type { NormalizedScreeningResult } from "@/lib/property/screening";
++import {
++  resolveWorkflowContacts,
++  sendWorkflowEmail,
++  formatPropertyAddress,
++  propertyActionUrl,
++  dealActionUrl,
++  type WorkflowEmailEvent,
++} from "@/lib/workflow/sendWorkflowEmail";
+ 
+ function jsonError(msg: string, status: number) {
+   return NextResponse.json({ ok: false, error: msg }, { status });
+ }
+ 
++// ── Material-change notification (non-blocking) ───────────────────────────
++//
++// A rerun is "silent" (no email) when:
++//   - ATTOM did not become controlling, AND
++//   - There are no review-flag limiting factors.
++//
++// Otherwise we determine the appropriate owner + buyer event and send.
++
++async function notifyAttomCompletion(opts: {
++  svc: ReturnType<typeof createServiceClient>;
++  propertyId: string;
++  result: NormalizedScreeningResult;
++  prevFmv: number | null;
++  address: string | null;
++  adminId: string;
++}): Promise<void> {
++  const { svc, propertyId, result, prevFmv, address, adminId } = opts;
++
++  const hasReviewFlags = result.limitingFactors.some(
++    (f) => f.severity === "review_required" || f.severity === "blocking",
++  );
++  const fmvChanged =
++    result.becameControlling &&
++    result.controllingFmvCandidate != null &&
++    result.controllingFmvCandidate !== prevFmv;
++
++  if (!fmvChanged && !hasReviewFlags) {
++    console.log("ATTOM_NOTIFICATION_SILENT_RERUN", { propertyId, adminId });
++    return;
++  }
++
++  const contacts = await resolveWorkflowContacts(svc, { propertyId });
++
++  // Owner event selection
++  let ownerEvent: WorkflowEmailEvent;
++  if (fmvChanged && !hasReviewFlags) {
++    ownerEvent = "PROPERTY_VERIFIED_APPRAISAL_READY";
++  } else if (fmvChanged) {
++    ownerEvent = "PROPERTY_VERIFICATION_UPDATED";
++  } else {
++    ownerEvent = "PROPERTY_VERIFICATION_REVIEW_REQUIRED";
++  }
++
++  // Buyer event selection
++  const buyerEvent: WorkflowEmailEvent =
++    fmvChanged && !hasReviewFlags
++      ? "DEAL_VERIFICATION_REVIEW_COMPLETED"
++      : "DEAL_UNDER_VERIFICATION_REVIEW";
++
++  if (contacts.owner) {
++    const r = await sendWorkflowEmail({
++      audience: "owner",
++      eventKey: ownerEvent,
++      to: contacts.owner.email,
++      recipientName: contacts.owner.name,
++      propertyAddress: address,
++      actionUrl: propertyActionUrl(propertyId),
++    });
++    console.log("ATTOM_OWNER_NOTIFICATION", {
++      propertyId,
++      event: ownerEvent,
++      ok: r.ok,
++      skipped: r.skipped ?? null,
++      error: r.error ?? null,
++    });
++  }
++
++  if (contacts.buyer) {
++    const r = await sendWorkflowEmail({
++      audience: "buyer",
++      eventKey: buyerEvent,
++      to: contacts.buyer.email,
++      recipientName: contacts.buyer.name,
++      actionUrl: contacts.dealId ? dealActionUrl(contacts.dealId) : null,
++    });
++    console.log("ATTOM_BUYER_NOTIFICATION", {
++      propertyId,
++      event: buyerEvent,
++      ok: r.ok,
++      skipped: r.skipped ?? null,
++      error: r.error ?? null,
++    });
++  }
++}
++
+ export async function POST(
+   _req: NextRequest,
+   ctx: { params: Promise<{ propertyId: string }> },
+@@ -40,11 +135,34 @@ export async function POST(
+   if (!propertyId) return jsonError("Missing propertyId", 400);
+ 
+   try {
++    const svc = createServiceClient();
++
++    // Fetch pre-screening state for material-change detection.
++    const { data: prevProp } = await (svc.from("properties") as any)
++      .select("latest_verified_fmv, address_line1, city, state, postal_code")
++      .eq("id", propertyId)
++      .maybeSingle();
++
++    const prevFmv: number | null = prevProp?.latest_verified_fmv ?? null;
++    const address = formatPropertyAddress(prevProp ?? {});
++
+     const { runId, result } = await runAttomScreening({
+       propertyId,
+       requestedBy: admin.user.id,
+     });
+ 
++    // Fire-and-forget notifications. Errors are logged, not propagated.
++    void notifyAttomCompletion({
++      svc,
++      propertyId,
++      result,
++      prevFmv,
++      address,
++      adminId: admin.user.id,
++    }).catch((err) =>
++      console.error("ATTOM_NOTIFICATION_UNEXPECTED_ERROR", { propertyId, err }),
++    );
++
+     return NextResponse.json(
+       {
+         ok: true,
+diff --git a/src/lib/workflow/sendWorkflowEmail.ts b/src/lib/workflow/sendWorkflowEmail.ts
+new file mode 100644
+index 0000000..e7218ed
+--- /dev/null
++++ b/src/lib/workflow/sendWorkflowEmail.ts
+@@ -0,0 +1,375 @@
++/**
++ * Centralized workflow email helper.
++ *
++ * Provides:
++ *   - `sendWorkflowEmail` — non-throwing delivery via the existing inline Resend path.
++ *   - `resolveWorkflowContacts` — resolves owner + buyer contacts from a propertyId or dealId.
++ *   - `formatPropertyAddress` — canonical address string for email copy.
++ *
++ * Design constraints:
++ *   - Owner emails may reference property/deal context freely.
++ *   - Buyer emails use abstracted language only — no provider names, debt amounts, or admin rationale.
++ *   - Silent ATTOM reruns with no material change must NOT trigger emails; that check
++ *     is performed by the caller (route handler) before invoking sendWorkflowEmail.
++ *   - All sends are non-throwing; errors are returned, not propagated.
++ *   - Template-backed offer/share email flows are not touched here.
++ */
++
++import { sendInlineEmail } from "@/lib/email/sendInlineEmail";
++
++const FROM_ADDRESS =
++  process.env.NOTIFICATION_FROM_EMAIL ?? "FractPath <noreply@updates.fractpath.com>";
++
++const APP_BASE_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://fractpath.com").replace(/\/$/, "");
++
++// ────────────────────────────────────────────────────────────────────────────
++// Event registry
++// ────────────────────────────────────────────────────────────────────────────
++
++/**
++ * Owner-audience events (property-side and deal-side).
++ * These may reference property context; never expose admin rationale or raw
++ * provider data beyond what is summarized here.
++ */
++export type OwnerWorkflowEmailEvent =
++  | "PROPERTY_VERIFIED_APPRAISAL_READY"
++  | "PROPERTY_VERIFICATION_REVIEW_REQUIRED"
++  | "PROPERTY_VERIFICATION_UPDATED"
++  | "PROPERTY_MANUAL_REVIEW_COMPLETED"
++  | "PROPERTY_DEBT_VERIFICATION_UPDATED"
++  | "DEAL_TERMS_INELIGIBLE_OWNER"
++  | "NEGOTIATION_REENGAGEMENT_REQUIRED_OWNER";
++
++/**
++ * Buyer-audience events (deal-side only).
++ * Copy must be abstract — no ATTOM/debt/appraisal/admin-rationale details.
++ */
++export type BuyerWorkflowEmailEvent =
++  | "DEAL_UNDER_VERIFICATION_REVIEW"
++  | "DEAL_VERIFICATION_REVIEW_COMPLETED"
++  | "DEAL_TERMS_NO_LONGER_ELIGIBLE_BUYER"
++  | "NEGOTIATION_REENGAGEMENT_REQUIRED_BUYER";
++
++export type WorkflowEmailEvent = OwnerWorkflowEmailEvent | BuyerWorkflowEmailEvent;
++
++export type WorkflowEmailAudience = "owner" | "buyer";
++
++// ────────────────────────────────────────────────────────────────────────────
++// Email copy catalog
++// ────────────────────────────────────────────────────────────────────────────
++
++type EventCopy = {
++  subject: string;
++  headline: string;
++  body: string;
++};
++
++const OWNER_COPY: Record<OwnerWorkflowEmailEvent, EventCopy> = {
++  PROPERTY_VERIFIED_APPRAISAL_READY: {
++    subject: "Your property valuation has been updated",
++    headline: "Property valuation updated",
++    body: "A revised valuation is now on file for your property. This updates the basis used in your scenario calculations.",
++  },
++  PROPERTY_VERIFICATION_REVIEW_REQUIRED: {
++    subject: "Your property review requires additional attention",
++    headline: "Property review in progress",
++    body: "Our team is continuing to review details for your property. We may follow up with questions or requests for documentation.",
++  },
++  PROPERTY_VERIFICATION_UPDATED: {
++    subject: "Your property details have been updated",
++    headline: "Property verification updated",
++    body: "Information on file for your property has been updated. Your scenario may reflect these changes.",
++  },
++  PROPERTY_MANUAL_REVIEW_COMPLETED: {
++    subject: "Your independent appraisal review is complete",
++    headline: "Independent appraisal complete",
++    body: "Your independent appraisal review has been completed. The updated valuation is now reflected in your scenario.",
++  },
++  PROPERTY_DEBT_VERIFICATION_UPDATED: {
++    subject: "Your property's secured debt information has been reviewed",
++    headline: "Secured debt review updated",
++    body: "Our team has completed a review of the secured debt information on file for your property.",
++  },
++  DEAL_TERMS_INELIGIBLE_OWNER: {
++    subject: "Your scenario is currently ineligible — action may be required",
++    headline: "Scenario ineligible under current terms",
++    body: "Based on the information on file, your scenario does not currently meet our eligibility criteria. You may have the option to propose revised terms.",
++  },
++  NEGOTIATION_REENGAGEMENT_REQUIRED_OWNER: {
++    subject: "Your revised scenario is ready for review",
++    headline: "Revised terms available",
++    body: "Your renegotiation request has been processed. You can now review and respond to the available terms.",
++  },
++};
++
++const BUYER_COPY: Record<BuyerWorkflowEmailEvent, EventCopy> = {
++  DEAL_UNDER_VERIFICATION_REVIEW: {
++    subject: "This deal is under verification review",
++    headline: "Deal under verification review",
++    body: "This deal is currently being reviewed by our team. No action is needed from you at this time.",
++  },
++  DEAL_VERIFICATION_REVIEW_COMPLETED: {
++    subject: "Property verification for this deal is complete",
++    headline: "Property verification complete",
++    body: "Property verification for this deal has been completed. The deal is progressing through the workflow.",
++  },
++  DEAL_TERMS_NO_LONGER_ELIGIBLE_BUYER: {
++    subject: "This deal is no longer eligible under current terms",
++    headline: "Deal ineligible under current terms",
++    body: "This deal does not currently meet eligibility criteria. The deal owner has been notified and may propose revised terms.",
++  },
++  NEGOTIATION_REENGAGEMENT_REQUIRED_BUYER: {
++    subject: "Revised terms are available for this deal",
++    headline: "Revised terms available",
++    body: "The owner of this deal has requested a revision to the terms. Updated terms may be available shortly.",
++  },
++};
++
++// ────────────────────────────────────────────────────────────────────────────
++// Options
++// ────────────────────────────────────────────────────────────────────────────
++
++export type SendWorkflowEmailOpts = {
++  audience: WorkflowEmailAudience;
++  eventKey: WorkflowEmailEvent;
++  /** Recipient email address. */
++  to: string;
++  /** Optional display name for greeting. */
++  recipientName?: string | null;
++  /** Human-readable property address shown in owner emails. Omit for buyer emails. */
++  propertyAddress?: string | null;
++  /** URL for the CTA link ("View details"). */
++  actionUrl?: string | null;
++  /** Short status summary shown in a callout box. */
++  statusLabel?: string | null;
++  /** Plain-language next step for the recipient. */
++  nextStep?: string | null;
++  /** Optional italicized note appended below the main body. */
++  note?: string | null;
++};
++
++// ────────────────────────────────────────────────────────────────────────────
++// HTML builder
++// ────────────────────────────────────────────────────────────────────────────
++
++function buildHtml(opts: SendWorkflowEmailOpts, copy: EventCopy): string {
++  const greeting = opts.recipientName ? `Hi ${opts.recipientName},` : "Hi,";
++
++  const addressLine =
++    opts.propertyAddress && opts.audience === "owner"
++      ? `<p style="color:#555;font-size:14px;margin:0 0 12px;">Property: <strong>${opts.propertyAddress}</strong></p>`
++      : "";
++
++  const statusBox = opts.statusLabel
++    ? `<div style="background:#f5f5f5;border-radius:8px;padding:14px 18px;margin:16px 0;">
++         <p style="color:#111;font-weight:600;font-size:15px;margin:0;">${opts.statusLabel}</p>
++       </div>`
++    : "";
++
++  const nextStepLine = opts.nextStep
++    ? `<p style="color:#333;font-size:14px;">Next step: ${opts.nextStep}</p>`
++    : "";
++
++  const noteHtml =
++    opts.note?.trim()
++      ? `<p style="color:#555;font-size:13px;font-style:italic;">${opts.note.trim()}</p>`
++      : "";
++
++  const ctaLine = opts.actionUrl
++    ? `<p style="color:#555;font-size:14px;">
++         <a href="${opts.actionUrl}" style="color:#2563eb;font-weight:500;">View details</a>
++       </p>`
++    : "";
++
++  return `
++<div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;">
++  <h2 style="color:#111;margin-bottom:8px;">${copy.headline}</h2>
++  <p style="color:#333;font-size:16px;">${greeting}</p>
++  <p style="color:#333;font-size:15px;">${copy.body}</p>
++  ${addressLine}
++  ${statusBox}
++  ${nextStepLine}
++  ${noteHtml}
++  ${ctaLine}
++  <hr style="border:none;border-top:1px solid #eee;margin:24px 0;">
++  <p style="color:#999;font-size:12px;">
++    FractPath — exploratory scenario tool. This is not a commitment or contract.
++  </p>
++</div>`.trim();
++}
++
++// ────────────────────────────────────────────────────────────────────────────
++// Contact resolution
++// ────────────────────────────────────────────────────────────────────────────
++
++export type WorkflowContact = {
++  email: string;
++  name: string | null;
++  userId: string | null;
++};
++
++export type WorkflowContacts = {
++  owner: WorkflowContact | null;
++  buyer: WorkflowContact | null;
++  dealId: string | null;
++};
++
++async function resolveUserContact(svc: any, userId: string): Promise<WorkflowContact | null> {
++  try {
++    const { data: authUser, error: authErr } = await svc.auth.admin.getUserById(userId);
++    if (authErr || !authUser?.user?.email) return null;
++    const email = authUser.user.email as string;
++
++    const { data: profile } = await (svc.from("profiles") as any)
++      .select("first_name, last_name")
++      .eq("id", userId)
++      .maybeSingle();
++
++    const name =
++      profile?.first_name && profile?.last_name
++        ? `${profile.first_name} ${profile.last_name}`
++        : (profile?.first_name ?? null);
++
++    return { email, name, userId };
++  } catch {
++    return null;
++  }
++}
++
++const ACTIVE_THREAD_STATUSES = [
++  "accepted",
++  "negotiating",
++  "pending_owner",
++  "decision_pending",
++  "closed",
++];
++
++/**
++ * Resolves owner and buyer contacts for a property or deal.
++ * Non-throwing — returns null contacts on any resolution failure.
++ *
++ * @param svc  Supabase service client (must have auth.admin access).
++ * @param lookup  Pass `{ propertyId }` for property-side triggers or `{ dealId }` for deal-side triggers.
++ */
++export async function resolveWorkflowContacts(
++  svc: any,
++  lookup: { propertyId: string } | { dealId: string },
++): Promise<WorkflowContacts> {
++  const empty: WorkflowContacts = { owner: null, buyer: null, dealId: null };
++  try {
++    let thread: {
++      deal_id: string;
++      owner_user_id: string | null;
++      buyer_user_id: string | null;
++    } | null = null;
++
++    if ("propertyId" in lookup) {
++      const { data } = await (svc.from("deal_threads") as any)
++        .select("deal_id, owner_user_id, buyer_user_id")
++        .eq("property_id", lookup.propertyId)
++        .in("status", ACTIVE_THREAD_STATUSES)
++        .order("created_at", { ascending: false })
++        .limit(1)
++        .maybeSingle();
++      thread = data ?? null;
++    } else {
++      const { data } = await (svc.from("deal_threads") as any)
++        .select("deal_id, owner_user_id, buyer_user_id")
++        .eq("deal_id", lookup.dealId)
++        .in("status", ACTIVE_THREAD_STATUSES)
++        .order("created_at", { ascending: false })
++        .limit(1)
++        .maybeSingle();
++      thread = data ?? null;
++    }
++
++    if (!thread) return empty;
++
++    const [owner, buyer] = await Promise.all([
++      thread.owner_user_id
++        ? resolveUserContact(svc, thread.owner_user_id)
++        : Promise.resolve(null),
++      thread.buyer_user_id
++        ? resolveUserContact(svc, thread.buyer_user_id)
++        : Promise.resolve(null),
++    ]);
++
++    return { owner, buyer, dealId: thread.deal_id };
++  } catch {
++    return empty;
++  }
++}
++
++// ────────────────────────────────────────────────────────────────────────────
++// Address formatter
++// ────────────────────────────────────────────────────────────────────────────
++
++/**
++ * Builds a canonical one-line address string for display in owner emails.
++ * Returns null when address_line1 is absent.
++ */
++export function formatPropertyAddress(prop: {
++  address_line1?: string | null;
++  city?: string | null;
++  state?: string | null;
++  postal_code?: string | null;
++}): string | null {
++  if (!prop.address_line1) return null;
++  return [prop.address_line1, prop.city, prop.state, prop.postal_code]
++    .filter(Boolean)
++    .join(", ");
++}
++
++// ────────────────────────────────────────────────────────────────────────────
++// URL helpers
++// ────────────────────────────────────────────────────────────────────────────
++
++export function propertyActionUrl(propertyId: string): string {
++  return `${APP_BASE_URL}/properties/${propertyId}`;
++}
++
++export function dealActionUrl(dealId: string): string {
++  return `${APP_BASE_URL}/deal/${dealId}`;
++}
++
++// ────────────────────────────────────────────────────────────────────────────
++// Send
++// ────────────────────────────────────────────────────────────────────────────
++
++/**
++ * Sends a workflow-triggered notification email via the generic inline Resend path.
++ *
++ * Returns `{ ok: true }` on success, `{ ok: false, error }` on failure.
++ * Returns `{ ok: false, skipped }` when no copy is defined for the event/audience pair.
++ *
++ * This function is intentionally non-throwing so route handlers can fire-and-forget
++ * without risking a crash on email delivery failure.
++ */
++export async function sendWorkflowEmail(
++  opts: SendWorkflowEmailOpts,
++): Promise<{ ok: boolean; skipped?: string; error?: string }> {
++  const copyMap: Record<string, EventCopy> =
++    opts.audience === "owner"
++      ? (OWNER_COPY as Record<string, EventCopy>)
++      : (BUYER_COPY as Record<string, EventCopy>);
++
++  const copy = copyMap[opts.eventKey];
++  if (!copy) {
++    return {
++      ok: false,
++      skipped: `No copy defined for event "${opts.eventKey}" / audience "${opts.audience}"`,
++    };
++  }
++
++  try {
++    await sendInlineEmail({
++      to: opts.to,
++      from: FROM_ADDRESS,
++      subject: copy.subject,
++      html: buildHtml(opts, copy),
++    });
++    return { ok: true };
++  } catch (err) {
++    return { ok: false, error: err instanceof Error ? err.message : String(err) };
++  }
++}
+-- 
+2.50.1
+

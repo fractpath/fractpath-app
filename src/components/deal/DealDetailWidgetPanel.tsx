@@ -32,6 +32,7 @@ function hasSubstantiveData(snap: AnyRecord | null): boolean {
   return !!(inputs || results);
 }
 
+// v11 gate — checks for the new buyout/participation/funding result shape.
 function hasRenderableComputedSnapshot(
   inputs: AnyRecord | null,
   results: AnyRecord | null,
@@ -44,19 +45,17 @@ function hasRenderableComputedSnapshot(
   if (!dealTerms || !scenario) return false;
 
   const requiredResultKeys = [
-    "isa_settlement",
-    "investor_profit",
-    "investor_multiple",
-    "investor_irr_annual",
-    "projected_fmv",
-    "invested_capital_total",
-    "vested_equity_percentage",
-    "base_equity_value",
-    "floor_amount",
-    "ceiling_amount",
-    "isa_pre_floor_cap",
-    "gain_above_capital",
-    "timing_factor_applied",
+    "current_contract_value",
+    "current_participation_value",
+    "extension_adjusted_buyout_amount",
+    "total_scheduled_buyer_funding",
+    "actual_buyer_funding_to_date",
+    "funding_completion_factor",
+    "scheduled_buyer_appreciation_share",
+    "effective_buyer_appreciation_share",
+    "base_buyout_amount",
+    "fractpath_setup_fee_amount",
+    "fractpath_revenue_to_date",
   ];
 
   for (const key of requiredResultKeys) {
@@ -69,15 +68,11 @@ function hasRenderableComputedSnapshot(
   const requiredDealTermKeys = [
     "minimum_hold_years",
     "contract_maturity_years",
-    "liquidity_trigger_year",
-    "floor_multiple",
-    "ceiling_multiple",
-    "downside_mode",
-    "platform_fee",
+    "target_exit_window_start_year",
+    "target_exit_window_end_year",
+    "long_stop_year",
     "servicing_fee_monthly",
-    "exit_fee_pct",
-    "realtor_representation_mode",
-    "realtor_commission_pct",
+    "exit_admin_fee_amount",
   ];
 
   for (const key of requiredDealTermKeys) {
