@@ -20,9 +20,16 @@ function num(v: any): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
-const DEAL_TERMS_DEFAULTS: Record<string, unknown> = {
+function safeNum(v: unknown): number {
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+
+// Internal engine-compat defaults: the installed engine is v10 and requires these fields.
+// These are NOT part of the public v11 DealTerms interface — callers do not need to supply them.
+const V10_ENGINE_COMPAT_DEFAULTS: Record<string, unknown> = {
   monthly_payment: 0,
   number_of_payments: 0,
+  // v10 timing / floor / cap fields (engine internal — not part of v11 interface)
   payback_window_start_year: 3,
   payback_window_end_year: 7,
   timing_factor_early: 1,
@@ -33,9 +40,11 @@ const DEAL_TERMS_DEFAULTS: Record<string, unknown> = {
   contract_maturity_years: 30,
   liquidity_trigger_year: 13,
   minimum_hold_years: 2,
-  platform_fee: 2500,
-  servicing_fee_monthly: 20,
-  exit_fee_pct: 0.01,
+  // v10 fee fields
+  platform_fee: 0,
+  servicing_fee_monthly: 0,
+  exit_fee_pct: 0,
+  // Realtor
   realtor_representation_mode: "NONE",
   realtor_commission_pct: 0,
   realtor_commission_payment_mode: "PER_PAYMENT_EVENT",
@@ -86,65 +95,85 @@ export async function computeDeal(
     };
   }
 
+  // Merge: v10 engine compat defaults → v11 caller-supplied terms (caller wins)
   const terms: Record<string, unknown> = {
-    ...DEAL_TERMS_DEFAULTS,
+    ...V10_ENGINE_COMPAT_DEFAULTS,
     ...inputs.deal_terms,
+    // Enforce payment mode to satisfy v10 engine
+    realtor_commission_payment_mode: "PER_PAYMENT_EVENT",
   };
-
-  if (terms.realtor_commission_payment_mode !== "PER_PAYMENT_EVENT") {
-    terms.realtor_commission_payment_mode = "PER_PAYMENT_EVENT";
-  }
 
   const scenario: Record<string, unknown> = {
     ...SCENARIO_DEFAULTS,
     ...inputs.scenario,
   };
 
-  let dealResults: any;
+  let v10Raw: any;
   try {
-    dealResults = canonicalComputeDeal(terms as any, scenario as any);
+    v10Raw = canonicalComputeDeal(terms as any, scenario as any);
   } catch (e: any) {
     return { ok: false, code: "ERROR", error: e?.message ?? String(e) };
   }
 
+  // -----------------------------------------------------------------------
+  // Project v11 result shape from v10 engine output.
+  //
+  // The installed engine returns v10 fields (isa_settlement, invested_capital_total, etc.).
+  // We map them to the v11 semantic names so the app boundary is v11-clean.
+  // This translation layer will be replaced when the v11 engine is installed.
+  // -----------------------------------------------------------------------
+
+  const capitalTotal = safeNum(v10Raw.invested_capital_total);
+  const settlement = safeNum(v10Raw.isa_settlement);
+  const equity = safeNum(v10Raw.base_equity_value);
+  const gainAbove = safeNum(v10Raw.gain_above_capital);
+  const realtorFee = safeNum(v10Raw.realtor_fee_total_projected);
+  const computeVersion: string =
+    typeof v10Raw.compute_version === "string"
+      ? v10Raw.compute_version
+      : COMPUTE_VERSION;
+
   const results: Record<string, unknown> = {
-    invested_capital_total: dealResults.invested_capital_total,
-    projected_fmv: dealResults.projected_fmv,
-    isa_settlement: dealResults.isa_settlement,
-    investor_profit: dealResults.investor_profit,
-    investor_multiple: dealResults.investor_multiple,
-    investor_irr_annual: dealResults.investor_irr_annual,
-    investor_irr_annual_net: dealResults.investor_irr_annual_net,
+    // Funding
+    total_scheduled_buyer_funding: capitalTotal,
+    actual_buyer_funding_to_date: capitalTotal,
+    funding_completion_factor: capitalTotal > 0 ? 1.0 : 0,
 
-    vested_equity_percentage: dealResults.vested_equity_percentage,
-    vested_equity_pct: dealResults.vested_equity_percentage,
+    // Appreciation shares
+    scheduled_buyer_appreciation_share: equity,
+    effective_buyer_appreciation_share: equity,
+    buyer_base_capital_component: capitalTotal,
+    buyer_appreciation_claim: gainAbove,
 
-    base_equity_value: dealResults.base_equity_value,
-    floor_amount: dealResults.floor_amount,
-    ceiling_amount: dealResults.ceiling_amount,
-    isa_pre_floor_cap: dealResults.isa_pre_floor_cap,
-    gain_above_capital: dealResults.gain_above_capital,
-    timing_factor_applied: dealResults.timing_factor_applied,
+    // Valuation
+    current_contract_value: settlement,
+    current_participation_value: equity,
 
-    isa_standard_pre_dyf: dealResults.isa_standard_pre_dyf,
-    dyf_floor_amount: dealResults.dyf_floor_amount,
-    dyf_applied: dealResults.dyf_applied,
+    // Buyout amounts
+    base_buyout_amount: settlement,
+    extension_adjusted_buyout_amount: settlement,
+    partial_buyout_amount_25: Math.round(settlement * 0.25 * 100) / 100,
+    partial_buyout_amount_50: Math.round(settlement * 0.50 * 100) / 100,
+    partial_buyout_amount_75: Math.round(settlement * 0.75 * 100) / 100,
+    discount_purchase_price: settlement,
 
-    realtor_fee_total_projected: dealResults.realtor_fee_total_projected,
-    realtor_fee_upfront_projected: dealResults.realtor_fee_upfront_projected,
-    realtor_fee_installments_projected: dealResults.realtor_fee_installments_projected,
-    buyer_realtor_fee_total_projected: dealResults.buyer_realtor_fee_total_projected,
-    seller_realtor_fee_total_projected: dealResults.seller_realtor_fee_total_projected,
+    // Window (v10 engine has no window concept)
+    current_window: null,
 
+    // Fees
+    fractpath_setup_fee_amount: 0,
+    fractpath_revenue_to_date: 0,
+    realtor_fee_total_projected: realtorFee,
+
+    // Meta
     annual_appreciation: num(inputs.scenario.annual_appreciation) ?? 0.03,
-
-    compute_version: dealResults.compute_version ?? COMPUTE_VERSION,
+    compute_version: computeVersion,
   };
 
   return {
     ok: true,
     result: {
-      compute_version: dealResults.compute_version ?? COMPUTE_VERSION,
+      compute_version: computeVersion,
       results,
     },
   };
