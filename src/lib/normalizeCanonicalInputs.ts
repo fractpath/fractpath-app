@@ -1,4 +1,6 @@
 // src/lib/normalizeCanonicalInputs.ts
+// Extracts { deal_terms, scenario } from any of the supported payload shapes.
+// No specific field requirements on deal_terms — compatible with v11 shape.
 
 export type CanonicalInputs = {
   deal_terms: Record<string, unknown>;

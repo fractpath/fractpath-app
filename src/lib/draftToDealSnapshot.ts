@@ -12,6 +12,8 @@ function isRecord(v: unknown): v is AnyRecord {
  * Do NOT synthesize outputs/results here.
  * Do NOT set contract_version/schema_version here.
  * Canonical snapshot assembly happens at the boundary where we call compute + insertDealSnapshot.
+ *
+ * Compatible with v11 deal_terms shape — no specific field requirements on deal_terms or scenario.
  */
 
 export type DraftSnapshotV1 = {

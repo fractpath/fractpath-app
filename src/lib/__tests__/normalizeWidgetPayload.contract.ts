@@ -55,8 +55,8 @@ test("{ inputs: { deal_terms, scenario } } shape extracts correctly", () => {
 
 test("full snapshot shape { snapshot_json: { inputs: { ... } } } extracts", () => {
   const r = normalizeWidgetPayload({
-    contract_version: "10.0.0",
-    schema_version: "1",
+    contract_version: "11.0.0",
+    schema_version: "11",
     snapshot_json: {
       inputs: {
         deal_terms: { property_value: 800000 },
@@ -101,15 +101,15 @@ test("legacy aliases: appreciation_rate -> annual_appreciation", () => {
   assert(r.scenario.annual_appreciation === 0.06, "alias mapped");
 });
 
-test("missing deal_terms fields get defaults", () => {
+test("missing deal_terms fields get v11 defaults", () => {
   const r = normalizeWidgetPayload({
     deal_terms: { property_value: 999000 },
     scenario: {},
   });
   assert(r.deal_terms.property_value === 999000, "provided value kept");
-  assert(r.deal_terms.floor_multiple === 1.0, "default floor_multiple");
-  assert(r.deal_terms.ceiling_multiple === 3.0, "default ceiling_multiple");
-  assert(r.deal_terms.downside_mode === "HARD_FLOOR", "default downside_mode");
+  assert(r.deal_terms.minimum_hold_years === 2, "default minimum_hold_years");
+  assert(r.deal_terms.long_stop_year === 13, "default long_stop_year");
+  assert(r.deal_terms.servicing_fee_monthly === 0, "default servicing_fee_monthly");
 });
 
 test("missing scenario fields get defaults", () => {
