@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { createServiceClient } from "@/lib/supabase/service";
+import {
+  resolveWorkflowContacts,
+  sendWorkflowEmail,
+  formatPropertyAddress,
+  propertyActionUrl,
+  dealActionUrl,
+} from "@/lib/workflow/sendWorkflowEmail";
 
 // TODO(manual-appraisal): Replace this simulation route with a real licensed appraiser
 // order + result ingestion flow. The `action` field maps to future appraisal lifecycle events:
@@ -61,7 +68,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const svc = createServiceClient();
 
   const { data: prop, error: fetchErr } = await (svc.from("properties") as any)
-    .select("id, manual_appraisal_status, escalation_avm_status")
+    .select("id, manual_appraisal_status, escalation_avm_status, address_line1, city, state, postal_code")
     .eq("id", propertyId)
     .maybeSingle();
 
@@ -179,6 +186,47 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         propertyId,
         `Manual appraisal challenge completed (sim). New controlling FMV basis: $${Math.round(fmvAmount).toLocaleString()}. Prior escalated AVM preserved in property_review_summary history. Admin should retriage linked deal.`,
       );
+
+      // ── Notify owner + buyer (non-blocking) ──────────────────────────────
+      void (async () => {
+        try {
+          const address = formatPropertyAddress(prop);
+          const contacts = await resolveWorkflowContacts(svc, { propertyId });
+
+          if (contacts.owner) {
+            const r = await sendWorkflowEmail({
+              audience: "owner",
+              eventKey: "PROPERTY_MANUAL_REVIEW_COMPLETED",
+              to: contacts.owner.email,
+              recipientName: contacts.owner.name,
+              propertyAddress: address,
+              actionUrl: propertyActionUrl(propertyId),
+            });
+            console.log("MANUAL_APPRAISAL_OWNER_NOTIFICATION", {
+              propertyId,
+              ok: r.ok,
+              error: r.error ?? null,
+            });
+          }
+
+          if (contacts.buyer) {
+            const r = await sendWorkflowEmail({
+              audience: "buyer",
+              eventKey: "DEAL_VERIFICATION_REVIEW_COMPLETED",
+              to: contacts.buyer.email,
+              recipientName: contacts.buyer.name,
+              actionUrl: contacts.dealId ? dealActionUrl(contacts.dealId) : null,
+            });
+            console.log("MANUAL_APPRAISAL_BUYER_NOTIFICATION", {
+              propertyId,
+              ok: r.ok,
+              error: r.error ?? null,
+            });
+          }
+        } catch (err) {
+          console.error("MANUAL_APPRAISAL_NOTIFICATION_ERROR", { propertyId, err });
+        }
+      })();
 
       return NextResponse.json(
         {

@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { createServiceClient } from "@/lib/supabase/service";
 import {
+  resolveWorkflowContacts,
+  sendWorkflowEmail,
+  dealActionUrl,
+} from "@/lib/workflow/sendWorkflowEmail";
+import {
   computeAvmEligibility,
   extractAvmDealTerms,
   HARD_BLOCKED_AVM_RESULTS,
@@ -182,6 +187,50 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     created_by: admin.user.id,
     created_at: now,
   });
+
+  // ── Notify owner + buyer on ineligible transitions (non-blocking) ────────
+  // Other state transitions (triage_in_progress, ready_for_signatures) are
+  // admin-internal workflow changes; customers are not notified here.
+  if (state === "ineligible") {
+    void (async () => {
+      try {
+        const contacts = await resolveWorkflowContacts(svc, { dealId });
+
+        if (contacts.owner) {
+          const r = await sendWorkflowEmail({
+            audience: "owner",
+            eventKey: "DEAL_TERMS_INELIGIBLE_OWNER",
+            to: contacts.owner.email,
+            recipientName: contacts.owner.name,
+            actionUrl: dealActionUrl(dealId),
+            note: note?.trim() || null,
+          });
+          console.log("INELIGIBLE_OWNER_NOTIFICATION", {
+            dealId,
+            ok: r.ok,
+            error: r.error ?? null,
+          });
+        }
+
+        if (contacts.buyer) {
+          const r = await sendWorkflowEmail({
+            audience: "buyer",
+            eventKey: "DEAL_TERMS_NO_LONGER_ELIGIBLE_BUYER",
+            to: contacts.buyer.email,
+            recipientName: contacts.buyer.name,
+            actionUrl: dealActionUrl(dealId),
+          });
+          console.log("INELIGIBLE_BUYER_NOTIFICATION", {
+            dealId,
+            ok: r.ok,
+            error: r.error ?? null,
+          });
+        }
+      } catch (err) {
+        console.error("INELIGIBLE_NOTIFICATION_ERROR", { dealId, err });
+      }
+    })();
+  }
 
   return NextResponse.json({ ok: true, triage_status: STATE_TO_TRIAGE[state] });
 }

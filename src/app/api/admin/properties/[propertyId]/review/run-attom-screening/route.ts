@@ -23,10 +23,105 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
+import { createServiceClient } from "@/lib/supabase/service";
 import { runAttomScreening } from "@/lib/property-review/attomScreeningService";
+import type { NormalizedScreeningResult } from "@/lib/property/screening";
+import {
+  resolveWorkflowContacts,
+  sendWorkflowEmail,
+  formatPropertyAddress,
+  propertyActionUrl,
+  dealActionUrl,
+  type WorkflowEmailEvent,
+} from "@/lib/workflow/sendWorkflowEmail";
 
 function jsonError(msg: string, status: number) {
   return NextResponse.json({ ok: false, error: msg }, { status });
+}
+
+// ── Material-change notification (non-blocking) ───────────────────────────
+//
+// A rerun is "silent" (no email) when:
+//   - ATTOM did not become controlling, AND
+//   - There are no review-flag limiting factors.
+//
+// Otherwise we determine the appropriate owner + buyer event and send.
+
+async function notifyAttomCompletion(opts: {
+  svc: ReturnType<typeof createServiceClient>;
+  propertyId: string;
+  result: NormalizedScreeningResult;
+  prevFmv: number | null;
+  address: string | null;
+  adminId: string;
+}): Promise<void> {
+  const { svc, propertyId, result, prevFmv, address, adminId } = opts;
+
+  const hasReviewFlags = result.limitingFactors.some(
+    (f) => f.severity === "review_required" || f.severity === "blocking",
+  );
+  const fmvChanged =
+    result.becameControlling &&
+    result.controllingFmvCandidate != null &&
+    result.controllingFmvCandidate !== prevFmv;
+
+  if (!fmvChanged && !hasReviewFlags) {
+    console.log("ATTOM_NOTIFICATION_SILENT_RERUN", { propertyId, adminId });
+    return;
+  }
+
+  const contacts = await resolveWorkflowContacts(svc, { propertyId });
+
+  // Owner event selection
+  let ownerEvent: WorkflowEmailEvent;
+  if (fmvChanged && !hasReviewFlags) {
+    ownerEvent = "PROPERTY_VERIFIED_APPRAISAL_READY";
+  } else if (fmvChanged) {
+    ownerEvent = "PROPERTY_VERIFICATION_UPDATED";
+  } else {
+    ownerEvent = "PROPERTY_VERIFICATION_REVIEW_REQUIRED";
+  }
+
+  // Buyer event selection
+  const buyerEvent: WorkflowEmailEvent =
+    fmvChanged && !hasReviewFlags
+      ? "DEAL_VERIFICATION_REVIEW_COMPLETED"
+      : "DEAL_UNDER_VERIFICATION_REVIEW";
+
+  if (contacts.owner) {
+    const r = await sendWorkflowEmail({
+      audience: "owner",
+      eventKey: ownerEvent,
+      to: contacts.owner.email,
+      recipientName: contacts.owner.name,
+      propertyAddress: address,
+      actionUrl: propertyActionUrl(propertyId),
+    });
+    console.log("ATTOM_OWNER_NOTIFICATION", {
+      propertyId,
+      event: ownerEvent,
+      ok: r.ok,
+      skipped: r.skipped ?? null,
+      error: r.error ?? null,
+    });
+  }
+
+  if (contacts.buyer) {
+    const r = await sendWorkflowEmail({
+      audience: "buyer",
+      eventKey: buyerEvent,
+      to: contacts.buyer.email,
+      recipientName: contacts.buyer.name,
+      actionUrl: contacts.dealId ? dealActionUrl(contacts.dealId) : null,
+    });
+    console.log("ATTOM_BUYER_NOTIFICATION", {
+      propertyId,
+      event: buyerEvent,
+      ok: r.ok,
+      skipped: r.skipped ?? null,
+      error: r.error ?? null,
+    });
+  }
 }
 
 export async function POST(
@@ -40,10 +135,33 @@ export async function POST(
   if (!propertyId) return jsonError("Missing propertyId", 400);
 
   try {
+    const svc = createServiceClient();
+
+    // Fetch pre-screening state for material-change detection.
+    const { data: prevProp } = await (svc.from("properties") as any)
+      .select("latest_verified_fmv, address_line1, city, state, postal_code")
+      .eq("id", propertyId)
+      .maybeSingle();
+
+    const prevFmv: number | null = prevProp?.latest_verified_fmv ?? null;
+    const address = formatPropertyAddress(prevProp ?? {});
+
     const { runId, result } = await runAttomScreening({
       propertyId,
       requestedBy: admin.user.id,
     });
+
+    // Fire-and-forget notifications. Errors are logged, not propagated.
+    void notifyAttomCompletion({
+      svc,
+      propertyId,
+      result,
+      prevFmv,
+      address,
+      adminId: admin.user.id,
+    }).catch((err) =>
+      console.error("ATTOM_NOTIFICATION_UNEXPECTED_ERROR", { propertyId, err }),
+    );
 
     return NextResponse.json(
       {

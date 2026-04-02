@@ -1,6 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { createServiceClient } from "@/lib/supabase/service";
+import {
+  resolveWorkflowContacts,
+  sendWorkflowEmail,
+  formatPropertyAddress,
+  propertyActionUrl,
+} from "@/lib/workflow/sendWorkflowEmail";
+
+// Actions that constitute a material debt-basis decision (notify owner).
+// Informational/pending actions (request_*,  mark_attom_stale, escalate_title) do not notify.
+const MATERIAL_DEBT_ACTIONS = new Set(["adopt_owner_verified", "keep_attom"]);
 
 // ─── Policy actions for admin debt basis management ───────────────────────────
 // FractPath policy: debt discrepancy is a review signal, not an auto-blocker.
@@ -80,7 +90,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const svc = createServiceClient();
 
   const { data: prop, error: fetchErr } = await (svc.from("properties") as any)
-    .select("id")
+    .select("id, address_line1, city, state, postal_code")
     .eq("id", propertyId)
     .maybeSingle();
 
@@ -130,6 +140,39 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     new_value: action,
     notes: [auditLabel[action], reason].filter(Boolean).join(" — ") || null,
   });
+
+  // ── Notify owner on material debt basis decisions (non-blocking) ──────────
+  // Only `adopt_owner_verified` and `keep_attom` represent a resolved basis —
+  // informational / pending actions (request_*, mark_attom_stale, escalate_title)
+  // do not trigger a notification.
+  // Buyers are NOT notified for debt-basis updates (provider details must stay internal).
+  if (MATERIAL_DEBT_ACTIONS.has(action)) {
+    void (async () => {
+      try {
+        const address = formatPropertyAddress(prop);
+        const contacts = await resolveWorkflowContacts(svc, { propertyId });
+
+        if (contacts.owner) {
+          const r = await sendWorkflowEmail({
+            audience: "owner",
+            eventKey: "PROPERTY_DEBT_VERIFICATION_UPDATED",
+            to: contacts.owner.email,
+            recipientName: contacts.owner.name,
+            propertyAddress: address,
+            actionUrl: propertyActionUrl(propertyId),
+          });
+          console.log("DEBT_BASIS_OWNER_NOTIFICATION", {
+            propertyId,
+            action,
+            ok: r.ok,
+            error: r.error ?? null,
+          });
+        }
+      } catch (err) {
+        console.error("DEBT_BASIS_NOTIFICATION_ERROR", { propertyId, action, err });
+      }
+    })();
+  }
 
   return NextResponse.json(
     {

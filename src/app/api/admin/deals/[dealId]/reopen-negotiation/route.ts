@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { createServiceClient } from "@/lib/supabase/service";
+import {
+  resolveWorkflowContacts,
+  sendWorkflowEmail,
+  dealActionUrl,
+} from "@/lib/workflow/sendWorkflowEmail";
 
 type Ctx = { params: Promise<{ dealId: string }> };
 
@@ -53,6 +58,45 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
     console.error("REOPEN_NEGOTIATION_EVENT_FAILED", { dealId, evErr });
     // Non-fatal
   }
+
+  // ── Notify owner + buyer (non-blocking) ───────────────────────────────────
+  void (async () => {
+    try {
+      const contacts = await resolveWorkflowContacts(svc, { dealId });
+
+      if (contacts.owner) {
+        const r = await sendWorkflowEmail({
+          audience: "owner",
+          eventKey: "NEGOTIATION_REENGAGEMENT_REQUIRED_OWNER",
+          to: contacts.owner.email,
+          recipientName: contacts.owner.name,
+          actionUrl: dealActionUrl(dealId),
+        });
+        console.log("REOPEN_OWNER_NOTIFICATION", {
+          dealId,
+          ok: r.ok,
+          error: r.error ?? null,
+        });
+      }
+
+      if (contacts.buyer) {
+        const r = await sendWorkflowEmail({
+          audience: "buyer",
+          eventKey: "NEGOTIATION_REENGAGEMENT_REQUIRED_BUYER",
+          to: contacts.buyer.email,
+          recipientName: contacts.buyer.name,
+          actionUrl: dealActionUrl(dealId),
+        });
+        console.log("REOPEN_BUYER_NOTIFICATION", {
+          dealId,
+          ok: r.ok,
+          error: r.error ?? null,
+        });
+      }
+    } catch (err) {
+      console.error("REOPEN_NOTIFICATION_ERROR", { dealId, err });
+    }
+  })();
 
   return NextResponse.json({ ok: true, dealId });
 }
