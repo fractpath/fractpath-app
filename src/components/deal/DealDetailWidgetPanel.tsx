@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DealSnapshotView } from "fractpath-calculator-widget";
 import { normalizeDealTermsForWidget } from "@/lib/normalizeDealTermsForWidget";
+import { normalizeResultsForWidget } from "@/components/deal/widgetNormalization";
 import { DealWidgetShell } from "@/components/deal/DealWidgetShell";
 import { usePageLoading } from "@/components/ui/PageLoadingOverlay";
 
@@ -152,7 +153,7 @@ export function DealDetailWidgetPanel({
 
     return {
       inputs: normalizedInputs ?? null,
-      outputs: { results: outRec ?? null },
+      outputs: { results: outRec ? normalizeResultsForWidget(outRec) : null },
       compute_version: computeVersion ?? null,
       schema_version: (initialSnapshot as any)?.schema_version ?? null,
     } as AnyRecord;
