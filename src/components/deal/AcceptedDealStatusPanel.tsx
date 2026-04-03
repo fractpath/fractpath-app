@@ -17,6 +17,7 @@ import {
   computeRealtorProjectedTotal,
   computeSetupFee,
   interpolateBuyoutAtMonth,
+  type ExtensionWindowConfig,
 } from "@/lib/deal/buyoutProjection";
 import { BuyoutProjectionChart } from "@/components/deal/BuyoutProjectionChart";
 
@@ -344,6 +345,16 @@ export function AcceptedDealStatusPanel({
     safeNumber((dealTerms as any)?.target_exit_window_start_year) ?? CANONICAL_DEAL_TERM_DEFAULTS.target_exit_window_start_year;
   const exitWindowEnd =
     safeNumber((dealTerms as any)?.target_exit_window_end_year) ?? CANONICAL_DEAL_TERM_DEFAULTS.target_exit_window_end_year;
+  const firstExtStartMain = safeNumber((dealTerms as any)?.first_extension_start_year);
+  const firstExtEndMain = safeNumber((dealTerms as any)?.first_extension_end_year);
+  const firstExtPremiumPct =
+    safeNumber((dealTerms as any)?.first_extension_premium_pct) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.first_extension_premium_pct;
+  const secondExtStartMain = safeNumber((dealTerms as any)?.second_extension_start_year);
+  const secondExtEndMain = safeNumber((dealTerms as any)?.second_extension_end_year);
+  const secondExtPremiumPct =
+    safeNumber((dealTerms as any)?.second_extension_premium_pct) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.second_extension_premium_pct;
   const servicingFeeMonthly =
     safeNumber((dealTerms as any)?.servicing_fee_monthly) ?? CANONICAL_DEAL_TERM_DEFAULTS.servicing_fee_monthly;
   const exitAdminFee =
@@ -385,8 +396,10 @@ export function AcceptedDealStatusPanel({
     safeNumber((dealTerms as any)?.setup_fee_floor) ?? CANONICAL_DEAL_TERM_DEFAULTS.setup_fee_floor;
   const setupFeeCap =
     safeNumber((dealTerms as any)?.setup_fee_cap) ?? CANONICAL_DEAL_TERM_DEFAULTS.setup_fee_cap;
+  // Priority: engine result when present and > 0 (guard against stale-zero engine output);
+  // fallback to app-side formula using contracted deal size whenever contractedDealSize > 0.
   const setupFee =
-    setupFeeFromEngine !== null
+    setupFeeFromEngine !== null && setupFeeFromEngine > 0
       ? setupFeeFromEngine
       : contractedDealSize > 0
         ? computeSetupFee(contractedDealSize, setupFeePct, setupFeeFloor, setupFeeCap)
@@ -420,23 +433,42 @@ export function AcceptedDealStatusPanel({
   const cYear = contractYear(acceptedAt);
   const statusLabel = resolveAcceptedStatus(canonicalStage ?? null, elapsed, dealTerms);
 
+  // Extension window config — built from deal term primitives for stable identity.
+  const extensionConfig = useMemo((): ExtensionWindowConfig => ({
+    minimumHoldYears,
+    targetExitStart: exitWindowStart,
+    targetExitEnd: exitWindowEnd,
+    firstExtStart: firstExtStartMain,
+    firstExtEnd: firstExtEndMain,
+    firstExtPremiumPct,
+    secondExtStart: secondExtStartMain,
+    secondExtEnd: secondExtEndMain,
+    secondExtPremiumPct,
+    longStopYear,
+  }), [
+    minimumHoldYears, exitWindowStart, exitWindowEnd,
+    firstExtStartMain, firstExtEndMain, firstExtPremiumPct,
+    secondExtStartMain, secondExtEndMain, secondExtPremiumPct,
+    longStopYear,
+  ]);
+
   // Current modeled buyout at elapsed months — from monthly series via interpolation
   const currentModeledBuyout = useMemo(() => {
     if (!renderable || appreciationShare === null || elapsedMonths === null) {
       return null;
     }
     const series = buildMonthlyBuyoutSeries(
-      propertyValue, annualAppreciation, upfrontPayment, monthlyPayment, numberOfPayments, appreciationShare, longStopYear,
+      propertyValue, annualAppreciation, upfrontPayment, monthlyPayment, numberOfPayments, appreciationShare, longStopYear, extensionConfig,
     );
     return interpolateBuyoutAtMonth(series, elapsedMonths);
-  }, [renderable, upfrontPayment, monthlyPayment, numberOfPayments, appreciationShare, elapsedMonths, propertyValue, annualAppreciation, longStopYear]);
+  }, [renderable, upfrontPayment, monthlyPayment, numberOfPayments, appreciationShare, elapsedMonths, propertyValue, annualAppreciation, longStopYear, extensionConfig]);
 
   // Monthly chart data
   const chartData = useMemo(() => {
     if (!renderable || appreciationShare === null) return null;
 
     const series = buildMonthlyBuyoutSeries(
-      propertyValue, annualAppreciation, upfrontPayment, monthlyPayment, numberOfPayments, appreciationShare, longStopYear,
+      propertyValue, annualAppreciation, upfrontPayment, monthlyPayment, numberOfPayments, appreciationShare, longStopYear, extensionConfig,
     );
     if (series.length < 2) return null;
 
@@ -446,7 +478,7 @@ export function AcceptedDealStatusPanel({
       series[Math.min(exitMonthRounded, series.length - 1)];
 
     return { series, exitBuyout: exitPoint.buyout };
-  }, [renderable, propertyValue, annualAppreciation, upfrontPayment, monthlyPayment, numberOfPayments, appreciationShare, longStopYear, exitYear]);
+  }, [renderable, propertyValue, annualAppreciation, upfrontPayment, monthlyPayment, numberOfPayments, appreciationShare, longStopYear, exitYear, extensionConfig]);
 
   // Timeline milestones
   const timelineMilestones = useMemo((): TimelineMilestone[] => [
@@ -559,8 +591,9 @@ export function AcceptedDealStatusPanel({
               exitBuyout={chartData.exitBuyout}
               elapsedMonths={elapsedMonths}
               chartLabel="Projected buyout by contract month"
-              chartSubLabel={`Blue = projected buyout. Amber = current modeled position. Green = Year ${exitYear} (modeled exit). Hover any point to see buyout options.`}
+              chartSubLabel={`Blue = projected buyout. Amber = current position. Green = Year ${exitYear} (modeled exit). Shaded bands show contract windows. Hover any point for details.`}
               chartFootnote="Values are modeled projections based on scheduled payments, not actual payment history."
+              extensionConfig={extensionConfig}
             />
           </div>
 
@@ -621,7 +654,7 @@ export function AcceptedDealStatusPanel({
                 </div>
               </dl>
               <p className="text-[10px] text-muted-foreground pt-1">
-                Setup fee is a one-time payment. Monthly servicing and exit admin fees are ongoing agreement costs.
+                Setup fee is collected once at closing from total deal cash (contracted deal size), subject to a floor and cap. Monthly servicing and payment admin fees are recurring. Exit admin fee is charged at settlement.
               </p>
             </div>
           </div>

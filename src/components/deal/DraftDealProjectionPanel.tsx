@@ -17,6 +17,7 @@ import {
   computeContractedDealSize,
   computeRealtorProjectedTotal,
   computeSetupFee,
+  type ExtensionWindowConfig,
 } from "@/lib/deal/buyoutProjection";
 import { BuyoutProjectionChart } from "@/components/deal/BuyoutProjectionChart";
 
@@ -218,6 +219,25 @@ export function DraftDealProjectionPanel({
   const longStopYear =
     safeNumber((dealTerms as any)?.long_stop_year) ??
     CANONICAL_DEAL_TERM_DEFAULTS.long_stop_year;
+  const minimumHoldYears =
+    safeNumber((dealTerms as any)?.minimum_hold_years) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.minimum_hold_years;
+  const exitWindowStart =
+    safeNumber((dealTerms as any)?.target_exit_window_start_year) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.target_exit_window_start_year;
+  const exitWindowEnd =
+    safeNumber((dealTerms as any)?.target_exit_window_end_year) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.target_exit_window_end_year;
+  const firstExtStart = safeNumber((dealTerms as any)?.first_extension_start_year);
+  const firstExtEnd = safeNumber((dealTerms as any)?.first_extension_end_year);
+  const firstExtPremiumPct =
+    safeNumber((dealTerms as any)?.first_extension_premium_pct) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.first_extension_premium_pct;
+  const secondExtStart = safeNumber((dealTerms as any)?.second_extension_start_year);
+  const secondExtEnd = safeNumber((dealTerms as any)?.second_extension_end_year);
+  const secondExtPremiumPct =
+    safeNumber((dealTerms as any)?.second_extension_premium_pct) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.second_extension_premium_pct;
   const servicingFeeMonthly =
     safeNumber((dealTerms as any)?.servicing_fee_monthly) ??
     CANONICAL_DEAL_TERM_DEFAULTS.servicing_fee_monthly;
@@ -270,8 +290,10 @@ export function DraftDealProjectionPanel({
   const setupFeeCap =
     safeNumber((dealTerms as any)?.setup_fee_cap) ??
     CANONICAL_DEAL_TERM_DEFAULTS.setup_fee_cap;
+  // Priority: engine result when present and > 0 (guard against stale-zero engine output);
+  // fallback to app-side formula using contracted deal size whenever renderable.
   const setupFee =
-    setupFeeFromEngine !== null
+    setupFeeFromEngine !== null && setupFeeFromEngine > 0
       ? setupFeeFromEngine
       : renderable || contractedDealSize > 0
         ? computeSetupFee(contractedDealSize, setupFeePct, setupFeeFloor, setupFeeCap)
@@ -297,6 +319,25 @@ export function DraftDealProjectionPanel({
   const projectedFmv =
     propertyValue * Math.pow(1 + annualAppreciation, exitYear);
 
+  // Extension window config — built from deal term primitives for stable identity.
+  const extensionConfig = useMemo((): ExtensionWindowConfig => ({
+    minimumHoldYears,
+    targetExitStart: exitWindowStart,
+    targetExitEnd: exitWindowEnd,
+    firstExtStart,
+    firstExtEnd,
+    firstExtPremiumPct,
+    secondExtStart,
+    secondExtEnd,
+    secondExtPremiumPct,
+    longStopYear,
+  }), [
+    minimumHoldYears, exitWindowStart, exitWindowEnd,
+    firstExtStart, firstExtEnd, firstExtPremiumPct,
+    secondExtStart, secondExtEnd, secondExtPremiumPct,
+    longStopYear,
+  ]);
+
   // Monthly buyout series and chart data
   const chartData = useMemo(() => {
     if (!renderable || appreciationShare === null) {
@@ -311,6 +352,7 @@ export function DraftDealProjectionPanel({
       numberOfPayments,
       appreciationShare,
       longStopYear,
+      extensionConfig,
     );
 
     if (series.length < 2) return null;
@@ -331,6 +373,7 @@ export function DraftDealProjectionPanel({
     appreciationShare,
     longStopYear,
     exitYear,
+    extensionConfig,
   ]);
 
   const handleSave = useCallback(
@@ -447,8 +490,9 @@ export function DraftDealProjectionPanel({
                 exitYear={exitYear}
                 exitBuyout={chartData.exitBuyout}
                 chartLabel="Projected exit cost by month"
-                chartSubLabel={`Blue line = projected buyout. Green marker = Year ${exitYear} (your modeled exit). Hover any point to see buyout options.`}
+                chartSubLabel={`Blue line = projected buyout. Green marker = Year ${exitYear} (modeled exit). Shaded bands show contract windows. Hover any point for details.`}
                 chartFootnote={`Assumes ${fmtPercent(annualAppreciation)} annual appreciation. Adjust deal terms above to model different scenarios.`}
+                extensionConfig={extensionConfig}
               />
             </div>
           ) : null}
@@ -506,7 +550,7 @@ export function DraftDealProjectionPanel({
                 </div>
               </dl>
               <p className="text-[10px] text-muted-foreground pt-1">
-                Setup fee is a one-time payment. Monthly servicing and exit admin fees are ongoing agreement costs.
+                Setup fee is collected once at closing from total deal cash (contracted deal size), subject to a floor and cap. Monthly servicing and payment admin fees are recurring. Exit admin fee is charged at settlement.
               </p>
             </div>
           </div>

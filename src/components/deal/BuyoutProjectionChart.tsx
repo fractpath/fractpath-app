@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, useCallback } from "react";
-import type { BuyoutPoint } from "@/lib/deal/buyoutProjection";
+import type { BuyoutPoint, ExtensionWindowConfig } from "@/lib/deal/buyoutProjection";
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
 
@@ -30,37 +30,106 @@ function fmtCurrencyCompact(v: number): string {
   return `$${Math.round(v)}`;
 }
 
+function fmtPct(v: number): string {
+  return `${(v * 100).toFixed(1).replace(".0", "")}%`;
+}
+
 // ─── Hover state ─────────────────────────────────────────────────────────────
 
 type HoverState = {
-  /** x position in SVG user units (0–SVG_W) */
   svgX: number;
-  /** y position of the hovered point in SVG user units */
   svgY: number;
   month: number;
+  baseBuyout: number;
+  extensionPremiumPct: number;
   buyout: number;
+  windowLabel: string;
 };
+
+// ─── Extension band descriptors ──────────────────────────────────────────────
+
+type BandDescriptor = {
+  startYear: number;
+  endYear: number;
+  label: string;
+  fillColor: string;
+};
+
+function buildBands(
+  cfg: ExtensionWindowConfig,
+  maxYear: number,
+): BandDescriptor[] {
+  const bands: BandDescriptor[] = [];
+
+  // Minimum hold (pre-exit) band
+  if (cfg.minimumHoldYears > 0) {
+    bands.push({
+      startYear: 0,
+      endYear: Math.min(cfg.minimumHoldYears, maxYear),
+      label: "Hold",
+      fillColor: "rgba(148,163,184,0.15)",
+    });
+  }
+
+  // Target exit window (no premium) — green tint
+  const targetStart = Math.max(cfg.targetExitStart, 0);
+  const targetEnd = Math.min(cfg.targetExitEnd, maxYear);
+  if (targetEnd > targetStart) {
+    bands.push({
+      startYear: targetStart,
+      endYear: targetEnd,
+      label: "Exit window",
+      fillColor: "rgba(134,239,172,0.18)",
+    });
+  }
+
+  // First extension — amber tint
+  if (cfg.firstExtStart !== null && cfg.firstExtEnd !== null) {
+    const s = Math.max(cfg.firstExtStart, 0);
+    const e = Math.min(cfg.firstExtEnd, maxYear);
+    if (e > s) {
+      bands.push({
+        startYear: s,
+        endYear: e,
+        label: `+${fmtPct(cfg.firstExtPremiumPct)}`,
+        fillColor: "rgba(253,224,71,0.18)",
+      });
+    }
+  }
+
+  // Second extension — orange tint
+  if (cfg.secondExtStart !== null && cfg.secondExtEnd !== null) {
+    const s = Math.max(cfg.secondExtStart, 0);
+    const e = Math.min(cfg.secondExtEnd, maxYear);
+    if (e > s) {
+      bands.push({
+        startYear: s,
+        endYear: e,
+        label: `+${fmtPct(cfg.secondExtPremiumPct)}`,
+        fillColor: "rgba(251,146,60,0.18)",
+      });
+    }
+  }
+
+  return bands;
+}
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 export type BuyoutProjectionChartProps = {
-  /** Monthly series from buildMonthlyBuyoutSeries() */
   series: BuyoutPoint[];
-  /** Modeled exit year (for green marker) */
   exitYear: number;
-  /** Buyout at modeled exit year (for green marker y-position) */
   exitBuyout: number;
-  /**
-   * Elapsed months since agreement acceptance (for amber "Now" marker).
-   * Pass null/undefined to suppress the current-position marker.
-   */
   elapsedMonths?: number | null;
-  /** Label shown above the chart */
   chartLabel?: string;
-  /** Subtitle shown below the chart label */
   chartSubLabel?: string;
-  /** Footnote shown below the chart */
   chartFootnote?: string;
+  /**
+   * Extension window configuration.
+   * When provided, shaded bands and boundary markers are rendered
+   * and the tooltip shows window label + premium breakdown.
+   */
+  extensionConfig?: ExtensionWindowConfig;
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -73,6 +142,7 @@ export function BuyoutProjectionChart({
   chartLabel = "Projected buyout by month",
   chartSubLabel,
   chartFootnote,
+  extensionConfig,
 }: BuyoutProjectionChartProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [hover, setHover] = useState<HoverState | null>(null);
@@ -80,6 +150,7 @@ export function BuyoutProjectionChart({
   if (series.length < 2) return null;
 
   const maxMonth = series[series.length - 1].month;
+  const maxYear = maxMonth / 12;
   const values = series.map((p) => p.buyout);
   const minVal = Math.min(...values);
   const maxVal = Math.max(...values);
@@ -92,8 +163,7 @@ export function BuyoutProjectionChart({
     return PAD_T + PLOT_H - ((val - minVal) / valRange) * PLOT_H;
   }
 
-  // Reduce polyline to at most one point per ~2px of plotted width to keep
-  // the SVG element small without visible quality loss.
+  // Reduced series for the polyline
   const stride = Math.max(1, Math.floor(maxMonth / (PLOT_W / 2)));
   const reducedSeries: BuyoutPoint[] = [];
   for (let i = 0; i < series.length; i += stride) reducedSeries.push(series[i]);
@@ -113,7 +183,7 @@ export function BuyoutProjectionChart({
   });
 
   // X-axis year ticks
-  const totalYears = maxMonth / 12;
+  const totalYears = maxYear;
   const xTickInterval = totalYears <= 8 ? 1 : totalYears <= 15 ? 2 : 3;
   const xTicks: number[] = [];
   for (let y = 0; y <= totalYears; y += xTickInterval) xTicks.push(y);
@@ -128,11 +198,8 @@ export function BuyoutProjectionChart({
   // Current position marker
   const elapsedM = elapsedMonths ?? null;
   const currentMonthClamped =
-    elapsedM !== null
-      ? Math.min(Math.max(elapsedM, 0), maxMonth)
-      : null;
-  const currentX =
-    currentMonthClamped !== null ? toX(currentMonthClamped) : null;
+    elapsedM !== null ? Math.min(Math.max(elapsedM, 0), maxMonth) : null;
+  const currentX = currentMonthClamped !== null ? toX(currentMonthClamped) : null;
   const currentBuyout: number | null = (() => {
     if (currentMonthClamped === null) return null;
     const frac = currentMonthClamped;
@@ -145,6 +212,9 @@ export function BuyoutProjectionChart({
   const currentYpx =
     currentX !== null && currentBuyout !== null ? toY(currentBuyout) : null;
 
+  // Extension bands
+  const bands = extensionConfig ? buildBands(extensionConfig, maxYear) : [];
+
   // ─── Hover handler ────────────────────────────────────────────────────────
 
   const handleMouseMove = useCallback(
@@ -152,9 +222,7 @@ export function BuyoutProjectionChart({
       const svg = svgRef.current;
       if (!svg) return;
       const rect = svg.getBoundingClientRect();
-      // Map client x → SVG user units
       const svgX = ((e.clientX - rect.left) / rect.width) * SVG_W;
-      // Map to month index
       const rawMonth = ((svgX - PAD_L) / PLOT_W) * maxMonth;
       const month = Math.round(Math.min(Math.max(rawMonth, 0), maxMonth));
       const pt = series[month];
@@ -163,7 +231,10 @@ export function BuyoutProjectionChart({
         svgX: toX(month),
         svgY: toY(pt.buyout),
         month,
+        baseBuyout: pt.baseBuyout,
+        extensionPremiumPct: pt.extensionPremiumPct,
         buyout: pt.buyout,
+        windowLabel: pt.windowLabel,
       });
     },
     [series, maxMonth],
@@ -171,11 +242,8 @@ export function BuyoutProjectionChart({
 
   const handleMouseLeave = useCallback(() => setHover(null), []);
 
-  // Tooltip anchor logic: if hovered point is in the right half of the chart,
-  // show tooltip to the left of the marker; otherwise to the right.
   const tooltipRight = hover ? hover.svgX > SVG_W * 0.55 : false;
 
-  // Tooltip partial buyout fractions
   const FRACTIONS = [1.0, 0.75, 0.5, 0.25] as const;
   const FRACTION_LABELS = ["Full exit (100%)", "75%", "50%", "25%"] as const;
 
@@ -188,7 +256,6 @@ export function BuyoutProjectionChart({
         <p className="text-[10px] text-muted-foreground mb-3">{chartSubLabel}</p>
       )}
 
-      {/* SVG chart */}
       <svg
         ref={svgRef}
         viewBox={`0 0 ${SVG_W} ${SVG_H}`}
@@ -198,6 +265,63 @@ export function BuyoutProjectionChart({
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
       >
+        {/* Extension window bands — rendered first so they appear behind everything */}
+        {bands.map((band) => {
+          const bx1 = toX(band.startYear * 12);
+          const bx2 = toX(band.endYear * 12);
+          const bw = bx2 - bx1;
+          if (bw < 1) return null;
+          const labelX = bx1 + bw / 2;
+          return (
+            <g key={band.label + band.startYear}>
+              <rect
+                x={bx1}
+                y={PAD_T}
+                width={bw}
+                height={PLOT_H}
+                fill={band.fillColor}
+              />
+              {bw > 20 && (
+                <text
+                  x={labelX}
+                  y={PAD_T + 7}
+                  textAnchor="middle"
+                  fontSize="7.5"
+                  fill="#6b7280"
+                  fontFamily="system-ui, sans-serif"
+                  opacity="0.9"
+                >
+                  {band.label}
+                </text>
+              )}
+            </g>
+          );
+        })}
+
+        {/* Extension boundary vertical ticks (extension start/end years) */}
+        {extensionConfig && (() => {
+          const boundaries: number[] = [];
+          if (extensionConfig.firstExtStart !== null) boundaries.push(extensionConfig.firstExtStart);
+          if (extensionConfig.firstExtEnd !== null) boundaries.push(extensionConfig.firstExtEnd);
+          if (extensionConfig.secondExtStart !== null) boundaries.push(extensionConfig.secondExtStart);
+          if (extensionConfig.secondExtEnd !== null) boundaries.push(extensionConfig.secondExtEnd);
+          return boundaries
+            .filter((yr) => yr > 0 && yr < maxYear)
+            .map((yr) => (
+              <line
+                key={`ext-boundary-${yr}`}
+                x1={toX(yr * 12)}
+                x2={toX(yr * 12)}
+                y1={PAD_T}
+                y2={PAD_T + PLOT_H}
+                stroke="#d1d5db"
+                strokeWidth="1"
+                strokeDasharray="2 2"
+                opacity="0.8"
+              />
+            ));
+        })()}
+
         {/* Y-axis grid */}
         {yGridLines.map(({ val, y }) => (
           <g key={val}>
@@ -344,10 +468,10 @@ export function BuyoutProjectionChart({
         )}
       </svg>
 
-      {/* Hover tooltip — rendered outside SVG for full CSS styling */}
+      {/* Hover tooltip */}
       {hover && (
         <div
-          className={`pointer-events-none absolute z-10 rounded-lg border bg-popover/95 backdrop-blur-sm shadow-lg px-3 py-2.5 text-xs min-w-[170px] ${
+          className={`pointer-events-none absolute z-10 rounded-lg border bg-popover/95 backdrop-blur-sm shadow-lg px-3 py-2.5 text-xs min-w-[188px] ${
             tooltipRight ? "right-0" : "left-0"
           }`}
           style={{
@@ -356,12 +480,53 @@ export function BuyoutProjectionChart({
           }}
           aria-live="polite"
         >
-          <p className="font-semibold text-foreground mb-1.5 leading-tight">
+          {/* Month / year */}
+          <p className="font-semibold text-foreground mb-0.5 leading-tight">
             Month {hover.month}{" "}
             <span className="font-normal text-muted-foreground">
               (Yr {(hover.month / 12).toFixed(1).replace(".0", "")})
             </span>
           </p>
+
+          {/* Window label */}
+          {hover.windowLabel ? (
+            <p className="text-[10px] text-muted-foreground mb-1.5 leading-tight">
+              {hover.windowLabel}
+            </p>
+          ) : (
+            <div className="mb-1.5" />
+          )}
+
+          {/* Base / premium / adjusted breakdown */}
+          {hover.extensionPremiumPct > 0 ? (
+            <div className="space-y-0.5 mb-1.5 pb-1.5 border-b">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">Base buyout</span>
+                <span className="tabular-nums">{fmtCurrency(hover.baseBuyout)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">
+                  Extension premium ({fmtPct(hover.extensionPremiumPct)})
+                </span>
+                <span className="tabular-nums text-amber-600">
+                  +{fmtCurrency(hover.buyout - hover.baseBuyout)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3 font-medium">
+                <span>Adjusted buyout</span>
+                <span className="tabular-nums">{fmtCurrency(hover.buyout)}</span>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-0.5 mb-1.5 pb-1.5 border-b">
+              <div className="flex items-center justify-between gap-3 font-medium">
+                <span>Buyout</span>
+                <span className="tabular-nums">{fmtCurrency(hover.buyout)}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Partial exit options */}
           <div className="space-y-1">
             {FRACTIONS.map((frac, i) => (
               <div key={frac} className="flex items-center justify-between gap-3">
@@ -370,12 +535,15 @@ export function BuyoutProjectionChart({
                 >
                   {FRACTION_LABELS[i]}
                 </span>
-                <span className={`tabular-nums font-medium ${frac === 1.0 ? "text-foreground" : "text-muted-foreground"}`}>
+                <span
+                  className={`tabular-nums font-medium ${frac === 1.0 ? "text-foreground" : "text-muted-foreground"}`}
+                >
                   {fmtCurrency(frac * hover.buyout)}
                 </span>
               </div>
             ))}
           </div>
+
           <p className="text-[10px] text-muted-foreground mt-2 leading-tight border-t pt-1.5">
             Projected — not actual payment history
           </p>

@@ -36,9 +36,9 @@ export function computeContractedDealSize(
  *
  * Used as an app-side derivation when the engine result field
  * `fractpath_setup_fee_amount` is not populated (e.g. pre-compute drafts).
- * When the engine result IS available, prefer that value.
+ * When the engine result IS available and > 0, prefer that value.
  *
- * NOTE: The base is contracted deal size, NOT property value.
+ * NOTE: The base is contracted deal size (total deal cash), NOT property value.
  */
 export function computeSetupFee(
   contractedDealSize: number,
@@ -72,28 +72,90 @@ export function modeledFundingToDate(
   return upfrontPayment + monthlyPayment * Math.min(month, numberOfPayments);
 }
 
+// ─── Extension window identification ─────────────────────────────────────────
+
+/**
+ * Extension window configuration — all year values are fractional.
+ * null start/end means that extension period is not explicitly configured.
+ */
+export type ExtensionWindowConfig = {
+  minimumHoldYears: number;
+  targetExitStart: number;
+  targetExitEnd: number;
+  firstExtStart: number | null;
+  firstExtEnd: number | null;
+  firstExtPremiumPct: number;
+  secondExtStart: number | null;
+  secondExtEnd: number | null;
+  secondExtPremiumPct: number;
+  longStopYear: number;
+};
+
+/** Identifies which contract window a given year falls in and the applicable premium. */
+function identifyContractWindow(
+  yearF: number,
+  cfg: ExtensionWindowConfig,
+): { label: string; premiumPct: number } {
+  if (yearF < cfg.minimumHoldYears) {
+    return { label: "Minimum hold", premiumPct: 0 };
+  }
+  if (yearF >= cfg.targetExitStart && yearF <= cfg.targetExitEnd) {
+    return { label: "Target exit window", premiumPct: 0 };
+  }
+  if (
+    cfg.firstExtStart !== null &&
+    cfg.firstExtEnd !== null &&
+    yearF > cfg.firstExtStart &&
+    yearF <= cfg.firstExtEnd
+  ) {
+    return { label: "First extension", premiumPct: cfg.firstExtPremiumPct };
+  }
+  if (
+    cfg.secondExtStart !== null &&
+    cfg.secondExtEnd !== null &&
+    yearF > cfg.secondExtStart &&
+    yearF <= cfg.secondExtEnd
+  ) {
+    return { label: "Second extension", premiumPct: cfg.secondExtPremiumPct };
+  }
+  return { label: "Outside exit window", premiumPct: 0 };
+}
+
 // ─── Monthly buyout series ────────────────────────────────────────────────────
 
-export type BuyoutPoint = { month: number; buyout: number };
+export type BuyoutPoint = {
+  month: number;
+  /** Base buyout before any extension premium. */
+  baseBuyout: number;
+  /** Extension premium fraction at this month (0 when no premium applies). */
+  extensionPremiumPct: number;
+  /**
+   * Adjusted buyout = baseBuyout × (1 + extensionPremiumPct).
+   * Equals baseBuyout when no premium applies.
+   */
+  buyout: number;
+  /** Human-readable contract window label for this month. */
+  windowLabel: string;
+};
 
 /**
  * Build a monthly projected buyout series from month 0 through
  * `longStopYear × 12`, using month-by-month funding progression.
  *
- * Formula for month m:
- *   fundedToDate(m)     = upfront_payment + monthly_payment × min(m, number_of_payments)
- *   years               = m / 12
- *   FMV(m)              = property_value × (1 + annual_appreciation)^years
- *   appreciationGain(m) = max(0, FMV(m) − property_value)
- *   buyout(m)           = fundedToDate(m) + appreciationShare × appreciationGain(m)
+ * Formula for each month m:
+ *   fundedToDate(m)      = upfront_payment + monthly_payment × min(m, number_of_payments)
+ *   years                = m / 12
+ *   FMV(m)               = property_value × (1 + annual_appreciation)^years
+ *   appreciationGain(m)  = max(0, FMV(m) − property_value)
+ *   baseBuyout(m)        = fundedToDate(m) + appreciationShare × appreciationGain(m)
+ *   premiumPct(m)        = extension premium for the window at year m/12 (0 if no extension config)
+ *   adjustedBuyout(m)    = baseBuyout(m) × (1 + premiumPct(m))
  *
  * appreciationShare ← scheduled_buyer_appreciation_share (v11 results, 0–1).
  * This fraction is fixed at the contracted level and does not change monthly.
  *
- * Correction vs. previous implementation:
- *   - Old: used a constant baseFunding (= total_scheduled_buyer_funding) at every month.
- *   - New: uses fundedToDate(m) so the principal component grows as installments
- *     are paid, reflecting the modeled payment schedule correctly.
+ * The optional `extensionConfig` enables extension-adjusted buyout values.
+ * Without it, baseBuyout = adjustedBuyout (no premium at any month).
  */
 export function buildMonthlyBuyoutSeries(
   propertyValue: number,
@@ -103,6 +165,7 @@ export function buildMonthlyBuyoutSeries(
   numberOfPayments: number,
   appreciationShare: number,
   longStopYear: number,
+  extensionConfig?: ExtensionWindowConfig,
 ): BuyoutPoint[] {
   const totalMonths = Math.max(Math.round(longStopYear * 12), 12);
   const pts: BuyoutPoint[] = [];
@@ -116,7 +179,23 @@ export function buildMonthlyBuyoutSeries(
     const years = m / 12;
     const fmv = propertyValue * Math.pow(1 + annualAppreciation, years);
     const gain = Math.max(0, fmv - propertyValue);
-    pts.push({ month: m, buyout: funded + appreciationShare * gain });
+    const baseBuyout = funded + appreciationShare * gain;
+
+    let extensionPremiumPct = 0;
+    let windowLabel = "";
+    if (extensionConfig) {
+      const win = identifyContractWindow(years, extensionConfig);
+      extensionPremiumPct = win.premiumPct;
+      windowLabel = win.label;
+    }
+
+    pts.push({
+      month: m,
+      baseBuyout,
+      extensionPremiumPct,
+      buyout: baseBuyout * (1 + extensionPremiumPct),
+      windowLabel,
+    });
   }
   return pts;
 }
