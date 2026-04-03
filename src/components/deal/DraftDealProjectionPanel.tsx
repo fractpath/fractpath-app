@@ -223,6 +223,18 @@ export function DraftDealProjectionPanel({
   const exitAdminFee =
     safeNumber((dealTerms as any)?.exit_admin_fee_amount) ??
     CANONICAL_DEAL_TERM_DEFAULTS.exit_admin_fee_amount;
+  const paymentAdminFee =
+    safeNumber((dealTerms as any)?.payment_admin_fee) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.payment_admin_fee;
+
+  // Realtor representation — read from deal terms; hidden when mode is NONE.
+  const realtorMode =
+    ((dealTerms as any)?.realtor_representation_mode as string | undefined) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.realtor_representation_mode;
+  const realtorCommissionPct =
+    safeNumber((dealTerms as any)?.realtor_commission_pct) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.realtor_commission_pct;
+  const showRealtor = realtorMode !== "NONE";
 
   // Deal payment terms — needed for contracted deal size and funding progression.
   const upfrontPayment =
@@ -272,6 +284,10 @@ export function DraftDealProjectionPanel({
   );
   const appreciationShare = safeNumber(
     (currentResults as any)?.scheduled_buyer_appreciation_share,
+  );
+  // Projected realtor fee from engine results — only shown when > 0.
+  const realtorFeeProjected = safeNumber(
+    (currentResults as any)?.realtor_fee_total_projected,
   );
 
   const projectedFmv =
@@ -475,15 +491,55 @@ export function DraftDealProjectionPanel({
                   </dd>
                 </div>
                 <div className="flex justify-between text-xs">
+                  <dt className="text-muted-foreground">Payment admin fee</dt>
+                  <dd className="font-medium">
+                    {fmtCurrency(paymentAdminFee)}/payment
+                  </dd>
+                </div>
+                <div className="flex justify-between text-xs">
                   <dt className="text-muted-foreground">Exit admin fee</dt>
                   <dd className="font-medium">{fmtCurrency(exitAdminFee)}</dd>
                 </div>
               </dl>
               <p className="text-[10px] text-muted-foreground pt-1">
-                Fees are included in the Projected Exit Cost above.
+                Setup fee is a one-time payment. Monthly servicing and exit admin fees are ongoing agreement costs.
               </p>
             </div>
           </div>
+
+          {/* Realtor representation — only rendered when a realtor mode is active */}
+          {showRealtor ? (
+            <div className="rounded-lg border bg-muted/20 px-4 py-3 space-y-2">
+              <p className="text-xs font-semibold">Realtor representation</p>
+              <dl className="space-y-1">
+                <div className="flex justify-between text-xs">
+                  <dt className="text-muted-foreground">Representation</dt>
+                  <dd className="font-medium">
+                    {realtorMode === "BUYER"
+                      ? "Buyer's agent"
+                      : realtorMode === "SELLER"
+                        ? "Seller's agent"
+                        : realtorMode === "DUAL"
+                          ? "Dual agency"
+                          : realtorMode}
+                  </dd>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <dt className="text-muted-foreground">Commission</dt>
+                  <dd className="font-medium">{fmtPercent(realtorCommissionPct)}</dd>
+                </div>
+                {realtorFeeProjected !== null && realtorFeeProjected > 0 ? (
+                  <div className="flex justify-between text-xs">
+                    <dt className="text-muted-foreground">Projected realtor fee</dt>
+                    <dd className="font-medium">{fmtCurrency(realtorFeeProjected)}</dd>
+                  </div>
+                ) : null}
+              </dl>
+              <p className="text-[10px] text-muted-foreground pt-1">
+                Realtor commission terms as entered. Projected fee shown when available from deal calculation.
+              </p>
+            </div>
+          ) : null}
         </>
       ) : null}
     </div>
