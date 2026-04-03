@@ -14,6 +14,7 @@ import {
 } from "@/lib/canonicalDefaults";
 import {
   buildMonthlyBuyoutSeries,
+  computeContractedDealSize,
   computeSetupFee,
 } from "@/lib/deal/buyoutProjection";
 import { BuyoutProjectionChart } from "@/components/deal/BuyoutProjectionChart";
@@ -223,8 +224,27 @@ export function DraftDealProjectionPanel({
     safeNumber((dealTerms as any)?.exit_admin_fee_amount) ??
     CANONICAL_DEAL_TERM_DEFAULTS.exit_admin_fee_amount;
 
+  // Deal payment terms — needed for contracted deal size and funding progression.
+  const upfrontPayment =
+    safeNumber((dealTerms as any)?.upfront_payment) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.upfront_payment;
+  const monthlyPayment =
+    safeNumber((dealTerms as any)?.monthly_payment) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.monthly_payment;
+  const numberOfPayments =
+    safeNumber((dealTerms as any)?.number_of_payments) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.number_of_payments;
+
+  // Contracted deal size: upfront + (monthly × num_payments).
+  // This is the correct base for setup fee — NOT property value.
+  const contractedDealSize = computeContractedDealSize(
+    upfrontPayment,
+    monthlyPayment,
+    numberOfPayments,
+  );
+
   // Setup fee: prefer engine-computed result; derive from formula as fallback.
-  // Formula: clamp(propertyValue × feePct, feeFloor, feeCap)
+  // Formula: clamp(contractedDealSize × feePct, feeFloor, feeCap)
   const setupFeeFromEngine = safeNumber(
     (currentResults as any)?.fractpath_setup_fee_amount,
   );
@@ -240,8 +260,8 @@ export function DraftDealProjectionPanel({
   const setupFee =
     setupFeeFromEngine !== null
       ? setupFeeFromEngine
-      : renderable || propertyValue > 0
-        ? computeSetupFee(propertyValue, setupFeePct, setupFeeFloor, setupFeeCap)
+      : renderable || contractedDealSize > 0
+        ? computeSetupFee(contractedDealSize, setupFeePct, setupFeeFloor, setupFeeCap)
         : null;
 
   const projectedExitCost = safeNumber(
@@ -259,14 +279,16 @@ export function DraftDealProjectionPanel({
 
   // Monthly buyout series and chart data
   const chartData = useMemo(() => {
-    if (!renderable || totalBuyerFunding === null || appreciationShare === null) {
+    if (!renderable || appreciationShare === null) {
       return null;
     }
 
     const series = buildMonthlyBuyoutSeries(
       propertyValue,
       annualAppreciation,
-      totalBuyerFunding,
+      upfrontPayment,
+      monthlyPayment,
+      numberOfPayments,
       appreciationShare,
       longStopYear,
     );
@@ -283,7 +305,9 @@ export function DraftDealProjectionPanel({
     renderable,
     propertyValue,
     annualAppreciation,
-    totalBuyerFunding,
+    upfrontPayment,
+    monthlyPayment,
+    numberOfPayments,
     appreciationShare,
     longStopYear,
     exitYear,

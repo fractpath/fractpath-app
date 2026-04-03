@@ -12,6 +12,7 @@ import {
 } from "@/lib/canonicalDefaults";
 import {
   buildMonthlyBuyoutSeries,
+  computeContractedDealSize,
   computeSetupFee,
   interpolateBuyoutAtMonth,
 } from "@/lib/deal/buyoutProjection";
@@ -346,7 +347,24 @@ export function AcceptedDealStatusPanel({
   const exitAdminFee =
     safeNumber((dealTerms as any)?.exit_admin_fee_amount) ?? CANONICAL_DEAL_TERM_DEFAULTS.exit_admin_fee_amount;
 
+  // Deal payment terms — needed for contracted deal size and funding progression.
+  const upfrontPayment =
+    safeNumber((dealTerms as any)?.upfront_payment) ?? CANONICAL_DEAL_TERM_DEFAULTS.upfront_payment;
+  const monthlyPayment =
+    safeNumber((dealTerms as any)?.monthly_payment) ?? CANONICAL_DEAL_TERM_DEFAULTS.monthly_payment;
+  const numberOfPayments =
+    safeNumber((dealTerms as any)?.number_of_payments) ?? CANONICAL_DEAL_TERM_DEFAULTS.number_of_payments;
+
+  // Contracted deal size: upfront + (monthly × num_payments).
+  // This is the correct base for setup fee — NOT property value.
+  const contractedDealSize = computeContractedDealSize(
+    upfrontPayment,
+    monthlyPayment,
+    numberOfPayments,
+  );
+
   // Setup fee: prefer engine result; derive from formula as fallback.
+  // Formula: clamp(contractedDealSize × feePct, feeFloor, feeCap)
   const setupFeeFromEngine = safeNumber((currentResults as any)?.fractpath_setup_fee_amount);
   const setupFeePct =
     safeNumber((dealTerms as any)?.setup_fee_pct) ?? CANONICAL_DEAL_TERM_DEFAULTS.setup_fee_pct;
@@ -357,8 +375,8 @@ export function AcceptedDealStatusPanel({
   const setupFee =
     setupFeeFromEngine !== null
       ? setupFeeFromEngine
-      : propertyValue > 0
-        ? computeSetupFee(propertyValue, setupFeePct, setupFeeFloor, setupFeeCap)
+      : contractedDealSize > 0
+        ? computeSetupFee(contractedDealSize, setupFeePct, setupFeeFloor, setupFeeCap)
         : null;
 
   // Result values
@@ -374,21 +392,21 @@ export function AcceptedDealStatusPanel({
 
   // Current modeled buyout at elapsed months — from monthly series via interpolation
   const currentModeledBuyout = useMemo(() => {
-    if (!renderable || totalBuyerFunding === null || appreciationShare === null || elapsedMonths === null) {
+    if (!renderable || appreciationShare === null || elapsedMonths === null) {
       return null;
     }
     const series = buildMonthlyBuyoutSeries(
-      propertyValue, annualAppreciation, totalBuyerFunding, appreciationShare, longStopYear,
+      propertyValue, annualAppreciation, upfrontPayment, monthlyPayment, numberOfPayments, appreciationShare, longStopYear,
     );
     return interpolateBuyoutAtMonth(series, elapsedMonths);
-  }, [renderable, totalBuyerFunding, appreciationShare, elapsedMonths, propertyValue, annualAppreciation, longStopYear]);
+  }, [renderable, upfrontPayment, monthlyPayment, numberOfPayments, appreciationShare, elapsedMonths, propertyValue, annualAppreciation, longStopYear]);
 
   // Monthly chart data
   const chartData = useMemo(() => {
-    if (!renderable || totalBuyerFunding === null || appreciationShare === null) return null;
+    if (!renderable || appreciationShare === null) return null;
 
     const series = buildMonthlyBuyoutSeries(
-      propertyValue, annualAppreciation, totalBuyerFunding, appreciationShare, longStopYear,
+      propertyValue, annualAppreciation, upfrontPayment, monthlyPayment, numberOfPayments, appreciationShare, longStopYear,
     );
     if (series.length < 2) return null;
 
@@ -398,7 +416,7 @@ export function AcceptedDealStatusPanel({
       series[Math.min(exitMonthRounded, series.length - 1)];
 
     return { series, exitBuyout: exitPoint.buyout };
-  }, [renderable, propertyValue, annualAppreciation, totalBuyerFunding, appreciationShare, longStopYear, exitYear]);
+  }, [renderable, propertyValue, annualAppreciation, upfrontPayment, monthlyPayment, numberOfPayments, appreciationShare, longStopYear, exitYear]);
 
   // Timeline milestones
   const timelineMilestones = useMemo((): TimelineMilestone[] => [
