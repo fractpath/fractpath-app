@@ -45,10 +45,12 @@ export function normalizeDealTermsForWidget(raw: DealTerms): DealTerms {
     buyer_purchase_option_enabled: r.buyer_purchase_option_enabled ?? D.buyer_purchase_option_enabled,
     buyer_purchase_notice_days: r.buyer_purchase_notice_days ?? D.buyer_purchase_notice_days,
     buyer_purchase_closing_days: r.buyer_purchase_closing_days ?? D.buyer_purchase_closing_days,
-    // Fees — use pos() so stale-zero snapshots get the canonical default, not 0.
+    // Fees — use pos() for fields where 0 is nonsensical (stale-zero must fall back).
+    // setup_fee_floor uses ?? only — a 0 floor is a valid "no minimum" configuration.
+    // setup_fee_cap uses pos() — a 0 cap means "fee cannot exceed $0", which is never intended.
     setup_fee_pct: pos(r.setup_fee_pct, D.setup_fee_pct),
     setup_fee_floor: r.setup_fee_floor ?? D.setup_fee_floor,
-    setup_fee_cap: r.setup_fee_cap ?? D.setup_fee_cap,
+    setup_fee_cap: pos(r.setup_fee_cap, D.setup_fee_cap),
     servicing_fee_monthly: pos(r.servicing_fee_monthly, D.servicing_fee_monthly),
     payment_admin_fee: pos(r.payment_admin_fee, D.payment_admin_fee),
     exit_admin_fee_amount: pos(r.exit_admin_fee_amount, D.exit_admin_fee_amount),

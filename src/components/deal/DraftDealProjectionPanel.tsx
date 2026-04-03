@@ -281,14 +281,20 @@ export function DraftDealProjectionPanel({
   const setupFeeFromEngine = safeNumber(
     (currentResults as any)?.fractpath_setup_fee_amount,
   );
+  // setup_fee_pct and setup_fee_cap: use || so stale-zero values stored in raw
+  // snapshot deal_terms fall back to canonical defaults. The normalization helpers
+  // (normalizeDealTermsForWidget) use pos() for the same reason, but dealTerms here
+  // comes from the raw snapshot inputs — not the normalized output — so the panel
+  // must re-apply the same stale-zero protection inline.
+  // setup_fee_floor uses ?? only — a 0 floor ("no minimum") is a valid configuration.
   const setupFeePct =
-    safeNumber((dealTerms as any)?.setup_fee_pct) ??
+    safeNumber((dealTerms as any)?.setup_fee_pct) ||
     CANONICAL_DEAL_TERM_DEFAULTS.setup_fee_pct;
   const setupFeeFloor =
     safeNumber((dealTerms as any)?.setup_fee_floor) ??
     CANONICAL_DEAL_TERM_DEFAULTS.setup_fee_floor;
   const setupFeeCap =
-    safeNumber((dealTerms as any)?.setup_fee_cap) ??
+    safeNumber((dealTerms as any)?.setup_fee_cap) ||
     CANONICAL_DEAL_TERM_DEFAULTS.setup_fee_cap;
   // Priority: engine result when present and > 0 (guard against stale-zero engine output);
   // fallback to app-side formula using contracted deal size whenever renderable.

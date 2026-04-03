@@ -501,26 +501,31 @@ export function BuyoutProjectionChart({
           {hover.extensionPremiumPct > 0 ? (
             <div className="space-y-0.5 mb-1.5 pb-1.5 border-b">
               <div className="flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">Base buyout</span>
+                <span className="text-muted-foreground">Base exit cost</span>
                 <span className="tabular-nums">{fmtCurrency(hover.baseBuyout)}</span>
               </div>
               <div className="flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">
-                  Extension premium ({fmtPct(hover.extensionPremiumPct)})
+                <span className="text-amber-600 font-medium">
+                  Past exit window (+{fmtPct(hover.extensionPremiumPct)})
                 </span>
-                <span className="tabular-nums text-amber-600">
+                <span className="tabular-nums text-amber-600 font-medium">
                   +{fmtCurrency(hover.buyout - hover.baseBuyout)}
                 </span>
               </div>
               <div className="flex items-center justify-between gap-3 font-medium">
-                <span>Adjusted buyout</span>
+                <span>Total exit cost</span>
                 <span className="tabular-nums">{fmtCurrency(hover.buyout)}</span>
               </div>
+              {extensionConfig && (
+                <p className="text-[10px] text-muted-foreground leading-tight pt-0.5">
+                  {`Exiting in Yr ${extensionConfig.targetExitStart}–${extensionConfig.targetExitEnd} avoids this cost`}
+                </p>
+              )}
             </div>
           ) : (
             <div className="space-y-0.5 mb-1.5 pb-1.5 border-b">
               <div className="flex items-center justify-between gap-3 font-medium">
-                <span>Buyout</span>
+                <span>Exit cost</span>
                 <span className="tabular-nums">{fmtCurrency(hover.buyout)}</span>
               </div>
             </div>
