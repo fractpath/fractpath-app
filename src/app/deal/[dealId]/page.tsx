@@ -501,6 +501,19 @@ export default async function DealPage(ctx: PageProps) {
       .order("created_at", { ascending: false })
       .limit(50);
 
+    // Derive the acceptance timestamp from deal_events.
+    // Preferred: OFFER_ACCEPTED (written by /api/proposals/[id]/owner-decision).
+    // Fallback: DEAL_ACCEPTED (written by /api/deals/[id]/accept).
+    // If neither exists: null — panel renders without time-based contract year/status.
+    const primaryAcceptedAt: string | null =
+      (events as any[] | null)?.find(
+        (e: any) => e.event_type === "OFFER_ACCEPTED",
+      )?.created_at ??
+      (events as any[] | null)?.find(
+        (e: any) => e.event_type === "DEAL_ACCEPTED",
+      )?.created_at ??
+      null;
+
     const [sigData, adminResult] = await Promise.all([
       loadSignatureData(svc, dealId),
       requireAdmin(),
@@ -755,6 +768,7 @@ export default async function DealPage(ctx: PageProps) {
               threadStatusForMilestone ?? "",
             )}
             canonicalStage={currentStage}
+            acceptedAt={primaryAcceptedAt}
           />
 
           {isOwner && !editingLocked && snapJson && (
@@ -1172,6 +1186,16 @@ export default async function DealPage(ctx: PageProps) {
       .order("created_at", { ascending: false })
       .limit(50);
 
+    // Same derivation as primary path — OFFER_ACCEPTED preferred, DEAL_ACCEPTED fallback.
+    const fallbackAcceptedAt: string | null =
+      (events as any[] | null)?.find(
+        (e: any) => e.event_type === "OFFER_ACCEPTED",
+      )?.created_at ??
+      (events as any[] | null)?.find(
+        (e: any) => e.event_type === "DEAL_ACCEPTED",
+      )?.created_at ??
+      null;
+
     const fallbackIsOwner =
       directOwnerMatches || threadOwnerMatches || grantMatches;
 
@@ -1417,6 +1441,7 @@ export default async function DealPage(ctx: PageProps) {
               thread?.status ?? "",
             )}
             canonicalStage={canonicalResult.stage}
+            acceptedAt={fallbackAcceptedAt}
           />
 
           {fallbackIsOwner && !editingLocked && snapJson && (

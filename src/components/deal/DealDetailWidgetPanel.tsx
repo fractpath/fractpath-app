@@ -23,6 +23,13 @@ type DealDetailWidgetPanelProps = {
    * Forwarded to AcceptedDealStatusPanel for plain-language status labeling.
    */
   canonicalStage?: string | null;
+  /**
+   * ISO timestamp of the acceptance event.
+   * Derived server-side from deal_events (OFFER_ACCEPTED → DEAL_ACCEPTED).
+   * Null when no acceptance event is recorded.
+   * Forwarded to AcceptedDealStatusPanel for contract year / time-based status.
+   */
+  acceptedAt?: string | null;
 };
 
 /**
@@ -45,6 +52,7 @@ export function DealDetailWidgetPanel({
   persona = "homeowner",
   isAccepted = false,
   canonicalStage = null,
+  acceptedAt = null,
 }: DealDetailWidgetPanelProps) {
   if (isAccepted) {
     return (
@@ -56,6 +64,7 @@ export function DealDetailWidgetPanel({
         computeVersion={computeVersion}
         persona={persona}
         canonicalStage={canonicalStage}
+        acceptedAt={acceptedAt}
       />
     );
   }
