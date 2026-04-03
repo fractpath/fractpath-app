@@ -751,6 +751,10 @@ export default async function DealPage(ctx: PageProps) {
             }
             canEdit={isOwner && !editingLocked}
             persona="homeowner"
+            isAccepted={["accepted", "closed"].includes(
+              threadStatusForMilestone ?? "",
+            )}
+            canonicalStage={currentStage}
           />
 
           {isOwner && !editingLocked && snapJson && (
@@ -1409,6 +1413,10 @@ export default async function DealPage(ctx: PageProps) {
             }
             canEdit={fallbackCanEdit}
             persona="homeowner"
+            isAccepted={["accepted", "closed"].includes(
+              thread?.status ?? "",
+            )}
+            canonicalStage={canonicalResult.stage}
           />
 
           {fallbackIsOwner && !editingLocked && snapJson && (
