@@ -2,14 +2,16 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { DealSnapshotView } from "fractpath-calculator-widget";
 import { normalizeDealTermsForWidget } from "@/lib/normalizeDealTermsForWidget";
 import {
   normalizeResultsForWidget,
 } from "@/components/deal/widgetNormalization";
 import { DealWidgetShell } from "@/components/deal/DealWidgetShell";
 import { usePageLoading } from "@/components/ui/PageLoadingOverlay";
-import { CANONICAL_SCENARIO_DEFAULTS } from "@/lib/canonicalDefaults";
+import {
+  CANONICAL_DEAL_TERM_DEFAULTS,
+  CANONICAL_SCENARIO_DEFAULTS,
+} from "@/lib/canonicalDefaults";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -27,6 +29,34 @@ function safeRecord(v: unknown): AnyRecord | null {
   return v !== null && typeof v === "object" && !Array.isArray(v)
     ? (v as AnyRecord)
     : null;
+}
+
+function safeNumber(v: unknown): number | null {
+  if (v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function fmtCurrency(v: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(v);
+}
+
+function fmtCurrencyCompact(v: number): string {
+  if (Math.abs(v) >= 1_000_000) {
+    return `$${(v / 1_000_000).toFixed(1)}M`;
+  }
+  if (Math.abs(v) >= 1_000) {
+    return `$${Math.round(v / 1_000)}k`;
+  }
+  return `$${Math.round(v)}`;
+}
+
+function fmtPercent(v: number): string {
+  return `${(v * 100).toFixed(1)}%`;
 }
 
 function hasSubstantiveData(snap: AnyRecord | null): boolean {
@@ -48,36 +78,16 @@ function hasRenderableComputedSnapshot(
   if (!dealTerms || !scenario) return false;
 
   const requiredResultKeys = [
-    "current_contract_value",
-    "current_participation_value",
-    "extension_adjusted_buyout_amount",
     "total_scheduled_buyer_funding",
-    "actual_buyer_funding_to_date",
-    "funding_completion_factor",
     "scheduled_buyer_appreciation_share",
-    "effective_buyer_appreciation_share",
+    "extension_adjusted_buyout_amount",
     "base_buyout_amount",
     "fractpath_setup_fee_amount",
-    "fractpath_revenue_to_date",
   ];
 
   for (const key of requiredResultKeys) {
     const v = (results as any)?.[key];
     if (typeof v !== "number" || !Number.isFinite(v)) return false;
-  }
-
-  const requiredDealTermKeys = [
-    "minimum_hold_years",
-    "contract_maturity_years",
-    "target_exit_window_start_year",
-    "target_exit_window_end_year",
-    "long_stop_year",
-    "servicing_fee_monthly",
-    "exit_admin_fee_amount",
-  ];
-
-  for (const key of requiredDealTermKeys) {
-    if ((dealTerms as any)?.[key] == null) return false;
   }
 
   if (
@@ -89,6 +99,217 @@ function hasRenderableComputedSnapshot(
 
   return true;
 }
+
+// ─── Year-by-year buyout series ───────────────────────────────────────────────
+//
+// For year y (0 … longStopYear):
+//   FMV(y)           = propertyValue × (1 + annualAppreciation)^y
+//   appreciationGain = max(0, FMV(y) − propertyValue)
+//   projectedBuyout  = baseFunding + appreciationShare × appreciationGain
+//
+// baseFunding       = total_scheduled_buyer_funding   (v11 result)
+// appreciationShare = scheduled_buyer_appreciation_share  (v11 result, fraction)
+//
+// This series is a linear projection; the actual v11 engine result at the
+// modeled exit year (base_buyout_amount) may differ by rounding and fee
+// allocation. The chart is labelled as a projection.
+
+type BuyoutPoint = { year: number; buyout: number };
+
+function buildYearlyBuyoutSeries(
+  propertyValue: number,
+  annualAppreciation: number,
+  baseFunding: number,
+  appreciationShare: number,
+  longStopYear: number,
+): BuyoutPoint[] {
+  const pts: BuyoutPoint[] = [];
+  const years = Math.max(longStopYear, 1);
+  for (let y = 0; y <= years; y++) {
+    const fmv = propertyValue * Math.pow(1 + annualAppreciation, y);
+    const appreciationGain = Math.max(0, fmv - propertyValue);
+    const buyout = baseFunding + appreciationShare * appreciationGain;
+    pts.push({ year: y, buyout });
+  }
+  return pts;
+}
+
+// ─── Chart rendering ──────────────────────────────────────────────────────────
+//
+// Pure SVG rendering — no React hooks. All layout constants are module-level
+// so they are shared across renders without allocation.
+
+const SVG_W = 480;
+const SVG_H = 170;
+const PAD_L = 52;
+const PAD_R = 18;
+const PAD_T = 12;
+const PAD_B = 32;
+const PLOT_W = SVG_W - PAD_L - PAD_R;
+const PLOT_H = SVG_H - PAD_T - PAD_B;
+
+type ChartProps = {
+  series: BuyoutPoint[];
+  exitYear: number;
+  exitBuyout: number;
+};
+
+function ProjectedBuyoutLineChart({ series, exitYear, exitBuyout }: ChartProps) {
+  if (series.length < 2) return null;
+
+  const maxYear = series[series.length - 1].year;
+  const values = series.map((p) => p.buyout);
+  const minVal = Math.min(...values);
+  const maxVal = Math.max(...values);
+  const valRange = maxVal - minVal || 1;
+
+  function toX(year: number): number {
+    return PAD_L + (year / maxYear) * PLOT_W;
+  }
+  function toY(val: number): number {
+    return PAD_T + PLOT_H - ((val - minVal) / valRange) * PLOT_H;
+  }
+
+  // Polyline points string
+  const polylinePoints = series
+    .map((p) => `${toX(p.year).toFixed(1)},${toY(p.buyout).toFixed(1)}`)
+    .join(" ");
+
+  // Y-axis: 4 evenly-spaced grid labels
+  const yGridCount = 3;
+  const yGridLines = Array.from({ length: yGridCount + 1 }, (_, i) => {
+    const val = minVal + (valRange * i) / yGridCount;
+    return { val, y: toY(val) };
+  });
+
+  // X-axis ticks: every 2 years, always include 0 and maxYear
+  const xTickInterval = maxYear <= 8 ? 1 : maxYear <= 15 ? 2 : 3;
+  const xTicks: number[] = [];
+  for (let y = 0; y <= maxYear; y += xTickInterval) xTicks.push(y);
+  if (xTicks[xTicks.length - 1] !== maxYear) xTicks.push(maxYear);
+
+  // Exit year marker
+  const exitX = toX(exitYear);
+  const exitY = toY(exitBuyout);
+
+  return (
+    <svg
+      viewBox={`0 0 ${SVG_W} ${SVG_H}`}
+      className="w-full"
+      aria-label={`Projected exit cost by year, ${series.length} data points`}
+      role="img"
+    >
+      {/* Y-axis grid lines + labels */}
+      {yGridLines.map(({ val, y }) => (
+        <g key={val}>
+          <line
+            x1={PAD_L}
+            x2={SVG_W - PAD_R}
+            y1={y}
+            y2={y}
+            stroke="#e5e7eb"
+            strokeWidth="1"
+          />
+          <text
+            x={PAD_L - 5}
+            y={y + 3.5}
+            textAnchor="end"
+            fontSize="9"
+            fill="#9ca3af"
+            fontFamily="system-ui, sans-serif"
+          >
+            {fmtCurrencyCompact(val)}
+          </text>
+        </g>
+      ))}
+
+      {/* X-axis ticks + labels */}
+      {xTicks.map((y) => (
+        <g key={y}>
+          <line
+            x1={toX(y)}
+            x2={toX(y)}
+            y1={PAD_T + PLOT_H}
+            y2={PAD_T + PLOT_H + 4}
+            stroke="#d1d5db"
+            strokeWidth="1"
+          />
+          <text
+            x={toX(y)}
+            y={SVG_H - PAD_B + 16}
+            textAnchor="middle"
+            fontSize="9"
+            fill="#9ca3af"
+            fontFamily="system-ui, sans-serif"
+          >
+            {y === 0 ? "Yr 0" : `Yr ${y}`}
+          </text>
+        </g>
+      ))}
+
+      {/* Exit year dashed vertical guide */}
+      <line
+        x1={exitX}
+        x2={exitX}
+        y1={PAD_T}
+        y2={PAD_T + PLOT_H}
+        stroke="#16a34a"
+        strokeWidth="1"
+        strokeDasharray="4 3"
+        opacity="0.7"
+      />
+
+      {/* Projected buyout polyline */}
+      <polyline
+        points={polylinePoints}
+        fill="none"
+        stroke="#2563eb"
+        strokeWidth="2"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+
+      {/* Exit year dot */}
+      <circle cx={exitX} cy={exitY} r="4.5" fill="#16a34a" />
+      <circle cx={exitX} cy={exitY} r="2.5" fill="white" />
+
+      {/* Exit year label — positioned above or below based on available space */}
+      <text
+        x={exitX + (exitX > SVG_W - PAD_R - 48 ? -6 : 6)}
+        y={exitY - 8}
+        textAnchor={exitX > SVG_W - PAD_R - 48 ? "end" : "start"}
+        fontSize="9"
+        fill="#15803d"
+        fontWeight="600"
+        fontFamily="system-ui, sans-serif"
+      >
+        {`Yr ${exitYear}`}
+      </text>
+    </svg>
+  );
+}
+
+// ─── Metric card ──────────────────────────────────────────────────────────────
+
+type MetricCardProps = {
+  label: string;
+  value: string;
+  sub?: string;
+};
+
+function MetricCard({ label, value, sub }: MetricCardProps) {
+  return (
+    <div className="rounded-lg border bg-muted/30 px-4 py-3 flex flex-col gap-0.5">
+      <span className="text-xs text-muted-foreground leading-tight">{label}</span>
+      <span className="text-lg font-semibold tabular-nums leading-tight">{value}</span>
+      {sub ? (
+        <span className="text-xs text-muted-foreground leading-tight">{sub}</span>
+      ) : null}
+    </div>
+  );
+}
+
+// ─── Main panel ───────────────────────────────────────────────────────────────
 
 export function DraftDealProjectionPanel({
   dealId,
@@ -151,11 +372,9 @@ export function DraftDealProjectionPanel({
       safeRecord((inRec as any).scenario)
     ) {
       const dealTerms = (inRec as any).deal_terms as AnyRecord;
-      const scenario = (inRec as any).scenario as AnyRecord;
       normalizedInputs = {
         ...(inRec as any),
         deal_terms: normalizeDealTermsForWidget(dealTerms),
-        scenario,
       };
     }
 
@@ -180,6 +399,87 @@ export function DraftDealProjectionPanel({
   const currentInputs = safeRecord((seedSnapshot as any)?.inputs);
   const currentResults = safeRecord((seedSnapshot as any)?.outputs?.results);
   const renderable = hasRenderableComputedSnapshot(currentInputs, currentResults);
+
+  const dealTerms = safeRecord((currentInputs as any)?.deal_terms);
+  const scenario = safeRecord((currentInputs as any)?.scenario);
+
+  const propertyValue =
+    safeNumber((dealTerms as any)?.property_value) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.property_value;
+  const annualAppreciation =
+    safeNumber((scenario as any)?.annual_appreciation) ??
+    CANONICAL_SCENARIO_DEFAULTS.annual_appreciation;
+  const exitYear =
+    safeNumber((scenario as any)?.exit_year) ??
+    CANONICAL_SCENARIO_DEFAULTS.exit_year;
+  const longStopYear =
+    safeNumber((dealTerms as any)?.long_stop_year) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.long_stop_year;
+  const servicingFeeMonthly =
+    safeNumber((dealTerms as any)?.servicing_fee_monthly) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.servicing_fee_monthly;
+  const exitAdminFee =
+    safeNumber((dealTerms as any)?.exit_admin_fee_amount) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.exit_admin_fee_amount;
+
+  const projectedExitCost = safeNumber(
+    (currentResults as any)?.extension_adjusted_buyout_amount,
+  );
+  const totalBuyerFunding = safeNumber(
+    (currentResults as any)?.total_scheduled_buyer_funding,
+  );
+  const appreciationShare = safeNumber(
+    (currentResults as any)?.scheduled_buyer_appreciation_share,
+  );
+  const setupFee = safeNumber(
+    (currentResults as any)?.fractpath_setup_fee_amount,
+  );
+
+  const projectedFmv =
+    propertyValue * Math.pow(1 + annualAppreciation, exitYear);
+
+  // Year-by-year projected buyout series — built from v11 economics.
+  // Only computed when all required inputs are available.
+  const yearlyChartData = useMemo((): {
+    series: BuyoutPoint[];
+    exitBuyout: number;
+  } | null => {
+    if (
+      !renderable ||
+      totalBuyerFunding === null ||
+      appreciationShare === null
+    ) {
+      return null;
+    }
+
+    const series = buildYearlyBuyoutSeries(
+      propertyValue,
+      annualAppreciation,
+      totalBuyerFunding,
+      appreciationShare,
+      longStopYear,
+    );
+
+    if (series.length < 2) return null;
+
+    // Use the formula-projected buyout at the modeled exit year as the marker
+    // value. For exit years that are integers, this picks the exact point; for
+    // fractional exit years we round to the nearest year.
+    const exitYearRounded = Math.round(exitYear);
+    const exitPoint =
+      series.find((p) => p.year === exitYearRounded) ??
+      series[Math.min(exitYearRounded, series.length - 1)];
+
+    return { series, exitBuyout: exitPoint.buyout };
+  }, [
+    renderable,
+    propertyValue,
+    annualAppreciation,
+    totalBuyerFunding,
+    appreciationShare,
+    longStopYear,
+    exitYear,
+  ]);
 
   const handleSave = useCallback(
     async (parsed: { deal_terms: AnyRecord; scenario: AnyRecord }) => {
@@ -210,30 +510,11 @@ export function DraftDealProjectionPanel({
     [dealId, router, pageLoading],
   );
 
-  const openHeaderPropertyModal = useCallback(() => {
-    const btn = document.querySelector(
-      '[data-testid="deal-add-property-btn"]',
-    ) as HTMLButtonElement | null;
-
-    if (btn) {
-      btn.click();
-      return;
-    }
-
-    const empty = document.querySelector(
-      '[data-testid="deal-property-empty"]',
-    ) as HTMLElement | null;
-
-    if (empty) {
-      empty.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
-  }, []);
-
   if (!showWidget) {
     return (
       <div className="border-t pt-6">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold">Scenario Details</h2>
+          <h2 className="text-sm font-semibold">Projected Deal Summary</h2>
         </div>
 
         <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-muted-foreground/25 p-8">
@@ -261,17 +542,18 @@ export function DraftDealProjectionPanel({
   }
 
   return (
-    <div className="border-t pt-6 space-y-4">
-      <div className="mb-1 flex items-center justify-between">
-        <h2 className="text-sm font-semibold">Scenario Details</h2>
+    <div className="border-t pt-6 space-y-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold">Projected Deal Summary</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Projection only — not an active deal status.
+          </p>
+        </div>
         {!canEdit ? (
           <span className="text-xs text-muted-foreground">View only</span>
         ) : null}
       </div>
-
-      <p className="text-xs text-muted-foreground">
-        Projection only — not an active deal status.
-      </p>
 
       <DealWidgetShell
         initialSnapshot={seedSnapshot ?? defaultSeed}
@@ -281,13 +563,104 @@ export function DraftDealProjectionPanel({
         initiallyOpenEditor={openEditorImmediately}
       />
 
-      {renderable && currentResults ? (
-        <DealSnapshotView
-          persona={persona as any}
-          status={"draft" as any}
-          inputs={currentInputs as any}
-          results={currentResults as any}
-        />
+      {renderable &&
+        projectedExitCost !== null &&
+        totalBuyerFunding !== null &&
+        appreciationShare !== null ? (
+        <>
+          {/* Metric cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <MetricCard
+              label="Projected Exit Cost"
+              value={fmtCurrency(projectedExitCost)}
+              sub={`at Year ${exitYear}`}
+            />
+            <MetricCard
+              label="Total Buyer Funding"
+              value={fmtCurrency(totalBuyerFunding)}
+              sub="upfront + scheduled payments"
+            />
+            <MetricCard
+              label="Projected Appreciation Share"
+              value={fmtPercent(appreciationShare)}
+              sub="of home value growth"
+            />
+          </div>
+
+          {/* Year-by-year projected buyout chart */}
+          {yearlyChartData ? (
+            <div className="rounded-lg border bg-card px-4 pt-4 pb-2">
+              <p className="text-xs font-medium mb-1">
+                Projected exit cost by year
+              </p>
+              <p className="text-[10px] text-muted-foreground mb-3">
+                Blue line shows projected buyout amount each year. Green marker
+                = Year {exitYear} (your modeled exit).
+              </p>
+              <ProjectedBuyoutLineChart
+                series={yearlyChartData.series}
+                exitYear={Math.round(exitYear)}
+                exitBuyout={yearlyChartData.exitBuyout}
+              />
+              <p className="text-[10px] text-muted-foreground mt-2">
+                Assumes {fmtPercent(annualAppreciation)} annual appreciation.
+                Adjust deal terms above to model different scenarios.
+              </p>
+            </div>
+          ) : null}
+
+          {/* Assumptions and fee summary */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="rounded-lg border bg-muted/20 px-4 py-3 space-y-2">
+              <p className="text-xs font-semibold">Assumptions</p>
+              <dl className="space-y-1">
+                <div className="flex justify-between text-xs">
+                  <dt className="text-muted-foreground">Annual appreciation</dt>
+                  <dd className="font-medium">{fmtPercent(annualAppreciation)}</dd>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <dt className="text-muted-foreground">Modeled exit year</dt>
+                  <dd className="font-medium">Year {exitYear}</dd>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <dt className="text-muted-foreground">Current home value</dt>
+                  <dd className="font-medium">{fmtCurrency(propertyValue)}</dd>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <dt className="text-muted-foreground">
+                    Projected home value at exit
+                  </dt>
+                  <dd className="font-medium">{fmtCurrency(projectedFmv)}</dd>
+                </div>
+              </dl>
+            </div>
+
+            <div className="rounded-lg border bg-muted/20 px-4 py-3 space-y-2">
+              <p className="text-xs font-semibold">Fee summary</p>
+              <dl className="space-y-1">
+                {setupFee !== null ? (
+                  <div className="flex justify-between text-xs">
+                    <dt className="text-muted-foreground">One-time setup fee</dt>
+                    <dd className="font-medium">{fmtCurrency(setupFee)}</dd>
+                  </div>
+                ) : null}
+                <div className="flex justify-between text-xs">
+                  <dt className="text-muted-foreground">Monthly servicing fee</dt>
+                  <dd className="font-medium">
+                    {fmtCurrency(servicingFeeMonthly)}/mo
+                  </dd>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <dt className="text-muted-foreground">Exit admin fee</dt>
+                  <dd className="font-medium">{fmtCurrency(exitAdminFee)}</dd>
+                </div>
+              </dl>
+              <p className="text-[10px] text-muted-foreground pt-1">
+                Fees are included in the Projected Exit Cost above.
+              </p>
+            </div>
+          </div>
+        </>
       ) : null}
     </div>
   );
