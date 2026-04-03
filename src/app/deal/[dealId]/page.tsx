@@ -11,7 +11,10 @@ import { AcceptedPendingReviewBanner } from "@/components/deal/AcceptedPendingRe
 import { WaitingBanner } from "@/components/deal/WaitingBanner";
 import { RecomputeSnapshotButton } from "@/components/deal/RecomputeSnapshotButton";
 import { SignatureCard } from "@/components/deal/SignatureCard";
-import type { SignaturePacketView, SignatureRecipientView } from "@/components/deal/SignatureCard";
+import type {
+  SignaturePacketView,
+  SignatureRecipientView,
+} from "@/components/deal/SignatureCard";
 import { DealMilestoneTracker } from "@/components/deal/DealMilestoneTracker";
 import {
   resolveCanonicalLifecycle,
@@ -163,27 +166,37 @@ async function loadSignatureData(
     const { data: packet } = await (svc.from("deal_signature_packets") as any)
       .select(
         "id, status, provider, sent_at, completed_at, voided_at, declined_at, " +
-        "executed_document_path, certificate_document_path"
+          "executed_document_path, certificate_document_path",
       )
       .eq("deal_id", dealId)
       .order("packet_version", { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    if (!packet) return { packet: null, recipients: [], execAgreementUrl: null, certificateUrl: null };
+    if (!packet)
+      return {
+        packet: null,
+        recipients: [],
+        execAgreementUrl: null,
+        certificateUrl: null,
+      };
 
-    const { data: recipRows } = await (svc.from("deal_signature_recipients") as any)
+    const { data: recipRows } = await (
+      svc.from("deal_signature_recipients") as any
+    )
       .select("role, display_name, email, provider_status, signed_at")
       .eq("packet_id", packet.id)
       .order("routing_order", { ascending: true });
 
-    const recipients: SignatureRecipientView[] = (recipRows ?? []).map((r: any) => ({
-      role: r.role,
-      display_name: r.display_name ?? null,
-      email: r.email ?? null,
-      provider_status: r.provider_status ?? null,
-      signed_at: r.signed_at ?? null,
-    }));
+    const recipients: SignatureRecipientView[] = (recipRows ?? []).map(
+      (r: any) => ({
+        role: r.role,
+        display_name: r.display_name ?? null,
+        email: r.email ?? null,
+        provider_status: r.provider_status ?? null,
+        signed_at: r.signed_at ?? null,
+      }),
+    );
 
     let execAgreementUrl: string | null = null;
     let certificateUrl: string | null = null;
@@ -218,7 +231,12 @@ async function loadSignatureData(
       certificateUrl,
     };
   } catch {
-    return { packet: null, recipients: [], execAgreementUrl: null, certificateUrl: null };
+    return {
+      packet: null,
+      recipients: [],
+      execAgreementUrl: null,
+      certificateUrl: null,
+    };
   }
 }
 
@@ -339,7 +357,9 @@ export default async function DealPage(ctx: PageProps) {
 
     if (resolvedPropertyId) {
       const { data: liveProp } = await (svc.from("properties") as any)
-        .select("status, ownership_status, closing_review_status, escalation_deposit_status, escalation_avm_status, property_review_status, manual_appraisal_status, manual_appraisal_fmv, latest_verified_fmv, fmv_verification_source, secured_property_debt_amount")
+        .select(
+          "status, ownership_status, closing_review_status, escalation_deposit_status, escalation_avm_status, property_review_status, manual_appraisal_status, manual_appraisal_fmv, latest_verified_fmv, fmv_verification_source, secured_property_debt_amount",
+        )
         .eq("id", resolvedPropertyId)
         .maybeSingle();
 
@@ -347,7 +367,8 @@ export default async function DealPage(ctx: PageProps) {
         livePropertyStatus = liveProp.status ?? null;
         liveOwnershipStatus = liveProp.ownership_status ?? null;
         liveClosingReviewStatus = liveProp.closing_review_status ?? null;
-        liveEscalationDepositStatus = liveProp.escalation_deposit_status ?? null;
+        liveEscalationDepositStatus =
+          liveProp.escalation_deposit_status ?? null;
         liveEscalationAvmStatus = liveProp.escalation_avm_status ?? null;
         livePropertyReviewStatus = liveProp.property_review_status ?? null;
         liveManualAppraisalStatus = liveProp.manual_appraisal_status ?? null;
@@ -436,7 +457,9 @@ export default async function DealPage(ctx: PageProps) {
       controllingFmvValue = cFmv;
       controllingFmvSource = cSrc;
       if (cFmv != null) {
-        const { upfront_payment, property_value } = extractAvmDealTerms(effectiveSnapshotRecord);
+        const { upfront_payment, property_value } = extractAvmDealTerms(
+          effectiveSnapshotRecord,
+        );
         const card = computeAvmEligibility({
           verifiedFmv: cFmv,
           fmvProvider: cSrc,
@@ -457,7 +480,8 @@ export default async function DealPage(ctx: PageProps) {
     // so the void/ineligible informational copy is stale — the negotiation flow takes over.
     const showIneligibleBlock =
       rawTriageIneligible &&
-      (liveEligibilityResult === null || liveEligibilityResult !== "eligible") &&
+      (liveEligibilityResult === null ||
+        liveEligibilityResult !== "eligible") &&
       effectiveThread?.status !== "negotiating";
     // When the deal is live-ineligible, it is void/non-executable.
     // Unlock editing so the owner can counter or revise terms — no admin reopen needed.
@@ -529,8 +553,17 @@ export default async function DealPage(ctx: PageProps) {
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950">
               <div className="flex items-start gap-3">
                 <span className="mt-0.5 text-amber-600 dark:text-amber-400 flex-shrink-0">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                    <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    className="w-4 h-4"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z"
+                      clipRule="evenodd"
+                    />
                   </svg>
                 </span>
                 <div className="space-y-1">
@@ -554,27 +587,37 @@ export default async function DealPage(ctx: PageProps) {
               <AcceptedPendingReviewBanner />
             )}
 
-          {!canonicalResult.isExceptionState && canonicalResult.customerHeroLabel && (
-            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950">
-              <div className="flex items-start gap-3">
-                <span className="mt-0.5 text-blue-600 dark:text-blue-400 flex-shrink-0">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clipRule="evenodd" />
-                  </svg>
-                </span>
-                <div className="space-y-1">
-                  <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">
-                    {canonicalResult.customerHeroLabel}
-                  </p>
-                  {canonicalResult.customerHeroDescription && (
-                    <p className="text-xs text-blue-800 dark:text-blue-200">
-                      {canonicalResult.customerHeroDescription}
+          {!canonicalResult.isExceptionState &&
+            canonicalResult.customerHeroLabel && (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950">
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 text-blue-600 dark:text-blue-400 flex-shrink-0">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      className="w-4 h-4"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  </span>
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">
+                      {canonicalResult.customerHeroLabel}
                     </p>
-                  )}
+                    {canonicalResult.customerHeroDescription && (
+                      <p className="text-xs text-blue-800 dark:text-blue-200">
+                        {canonicalResult.customerHeroDescription}
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
           {/* Property review blocked-state cue — primary path.
               Shown when an accepted deal is waiting on property-side information
@@ -587,7 +630,9 @@ export default async function DealPage(ctx: PageProps) {
             effectiveThread?.status === "accepted" &&
             resolvedPropertyId &&
             livePropertyReviewStatus === "information_requested" && (
-              <PropertyReviewBlockedOwnerBanner propertyId={resolvedPropertyId} />
+              <PropertyReviewBlockedOwnerBanner
+                propertyId={resolvedPropertyId}
+              />
             )}
 
           {/* Ineligible deal action block — primary path.
@@ -595,30 +640,41 @@ export default async function DealPage(ctx: PageProps) {
               Block type is dispatched on canonicalResult.stage:
                 attom_required → ATTOM-first blocks (renegotiation not yet available)
                 else            → Standard ineligible blocks (ATTOM complete; renegotiate/challenge) */}
-          {showIneligibleBlock && isOwner && currentStage === "attom_required" && (
-            <AttomRequiredDealOwnerBlock propertyId={resolvedPropertyId} />
-          )}
-          {showIneligibleBlock && isOwner && currentStage !== "attom_required" && (
-            <IneligibleDealOwnerBlock
-              dealId={dealId}
-              propertyId={resolvedPropertyId}
-              manualAppraisalStatus={liveManualAppraisalStatus}
-              exceptionDescription={ineligibleDescription}
-              renegotiationAlreadyRequested={currentStage === "renegotiation_requested"}
-              proposalId={negState.currentProposal?.id}
-              currentTerms={negState.currentProposal?.terms_snapshot ?? null}
-            />
-          )}
+          {showIneligibleBlock &&
+            isOwner &&
+            currentStage === "attom_required" && (
+              <AttomRequiredDealOwnerBlock propertyId={resolvedPropertyId} />
+            )}
+          {showIneligibleBlock &&
+            isOwner &&
+            currentStage !== "attom_required" && (
+              <IneligibleDealOwnerBlock
+                dealId={dealId}
+                propertyId={resolvedPropertyId}
+                manualAppraisalStatus={liveManualAppraisalStatus}
+                exceptionDescription={ineligibleDescription}
+                renegotiationAlreadyRequested={
+                  currentStage === "renegotiation_requested"
+                }
+                proposalId={negState.currentProposal?.id}
+                currentTerms={negState.currentProposal?.terms_snapshot ?? null}
+              />
+            )}
 
-          {showIneligibleBlock && !isOwner && currentStage === "attom_required" && (
-            <AttomRequiredDealBuyerBlock />
-          )}
-          {showIneligibleBlock && !isOwner && currentStage !== "attom_required" && currentStage !== "renegotiation_requested" && (
-            <IneligibleDealBuyerBlock
-              manualAppraisalStatus={liveManualAppraisalStatus}
-              renegotiationRequested={false}
-            />
-          )}
+          {showIneligibleBlock &&
+            !isOwner &&
+            currentStage === "attom_required" && (
+              <AttomRequiredDealBuyerBlock />
+            )}
+          {showIneligibleBlock &&
+            !isOwner &&
+            currentStage !== "attom_required" &&
+            currentStage !== "renegotiation_requested" && (
+              <IneligibleDealBuyerBlock
+                manualAppraisalStatus={liveManualAppraisalStatus}
+                renegotiationRequested={false}
+              />
+            )}
 
           {showNegotiationUi && negState.isSender && effectiveThread && (
             <WaitingBanner
@@ -659,10 +715,13 @@ export default async function DealPage(ctx: PageProps) {
             <div className="rounded-lg border bg-emerald-50/50 p-4">
               <div className="flex items-center gap-2">
                 <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
-                <span className="text-sm font-semibold text-emerald-800">Deal active</span>
+                <span className="text-sm font-semibold text-emerald-800">
+                  Deal active
+                </span>
               </div>
               <p className="mt-2 text-sm text-emerald-700">
-                Your agreement is complete and active. Signed documents are available for reference in the section above.
+                Your agreement is complete and active. Signed documents are
+                available for reference in the section above.
               </p>
             </div>
           ) : currentStageMeta.customerLabel ? (
@@ -930,7 +989,9 @@ export default async function DealPage(ctx: PageProps) {
     let fallbackDeal: any = null;
 
     const { data: fallbackDealRow } = await (svc.from("deals") as any)
-      .select("id, owner_user_id, status, triage_status, servicing_status, renegotiation_status, created_at, archived_at")
+      .select(
+        "id, owner_user_id, status, triage_status, servicing_status, renegotiation_status, created_at, archived_at",
+      )
       .eq("id", dealId)
       .maybeSingle();
 
@@ -959,7 +1020,10 @@ export default async function DealPage(ctx: PageProps) {
     // Thread property_id fallback: if no property_id in the header event or snapshot,
     // use the already-resolved thread's property_id as the final fallback.
     const resolvedPropertyId: string | null =
-      headerPayload.property_id ?? snapHeader.property_id ?? (thread as any)?.property_id ?? null;
+      headerPayload.property_id ??
+      snapHeader.property_id ??
+      (thread as any)?.property_id ??
+      null;
 
     let livePropertyStatus: string | null = null;
     let liveOwnershipStatus: string | null = null;
@@ -976,7 +1040,9 @@ export default async function DealPage(ctx: PageProps) {
 
     if (resolvedPropertyId) {
       const { data: liveProp } = await (svc.from("properties") as any)
-        .select("status, ownership_status, closing_review_status, escalation_deposit_status, escalation_avm_status, property_review_status, manual_appraisal_status, manual_appraisal_fmv, latest_verified_fmv, fmv_verification_source, secured_property_debt_amount")
+        .select(
+          "status, ownership_status, closing_review_status, escalation_deposit_status, escalation_avm_status, property_review_status, manual_appraisal_status, manual_appraisal_fmv, latest_verified_fmv, fmv_verification_source, secured_property_debt_amount",
+        )
         .eq("id", resolvedPropertyId)
         .maybeSingle();
 
@@ -984,7 +1050,8 @@ export default async function DealPage(ctx: PageProps) {
         livePropertyStatus = liveProp.status ?? null;
         liveOwnershipStatus = liveProp.ownership_status ?? null;
         liveClosingReviewStatus = liveProp.closing_review_status ?? null;
-        liveEscalationDepositStatus = liveProp.escalation_deposit_status ?? null;
+        liveEscalationDepositStatus =
+          liveProp.escalation_deposit_status ?? null;
         liveEscalationAvmStatus = liveProp.escalation_avm_status ?? null;
         livePropertyReviewStatus = liveProp.property_review_status ?? null;
         liveManualAppraisalStatus = liveProp.manual_appraisal_status ?? null;
@@ -1045,7 +1112,8 @@ export default async function DealPage(ctx: PageProps) {
     const results = safeRecord((effectiveOutputs as any)?.results);
 
     // ── Live eligibility recomputation from controlling FMV basis (fallback path) ─
-    const fallbackRawTriageIneligible = fallbackDeal?.triage_status === "ineligible";
+    const fallbackRawTriageIneligible =
+      fallbackDeal?.triage_status === "ineligible";
     let fallbackLiveEligibilityResult: AvmEligibilityResult | null = null;
     let fallbackControllingFmvValue: number | null = null;
     let fallbackControllingFmvSource: string | null = null;
@@ -1059,7 +1127,9 @@ export default async function DealPage(ctx: PageProps) {
       fallbackControllingFmvValue = cFmv;
       fallbackControllingFmvSource = cSrc;
       if (cFmv != null) {
-        const { upfront_payment, property_value } = extractAvmDealTerms(effectiveSnapshotRecord);
+        const { upfront_payment, property_value } = extractAvmDealTerms(
+          effectiveSnapshotRecord,
+        );
         const card = computeAvmEligibility({
           verifiedFmv: cFmv,
           fmvProvider: cSrc,
@@ -1077,7 +1147,8 @@ export default async function DealPage(ctx: PageProps) {
     // submitted, so the void/ineligible informational copy is stale.
     const fallbackShowIneligibleBlock =
       fallbackRawTriageIneligible &&
-      (fallbackLiveEligibilityResult === null || fallbackLiveEligibilityResult !== "eligible") &&
+      (fallbackLiveEligibilityResult === null ||
+        fallbackLiveEligibilityResult !== "eligible") &&
       effectiveThread?.status !== "negotiating";
     // When the deal is live-ineligible, it is void/non-executable.
     // Unlock editing so the owner can counter or revise terms — no admin reopen needed.
@@ -1131,7 +1202,8 @@ export default async function DealPage(ctx: PageProps) {
     const fallbackCanEdit = fallbackIsOwner && !editingLocked;
     // Fallback description: use canonical exception copy when not manual-appraisal basis.
     if (fallbackShowIneligibleBlock && fallbackIneligibleDescription === null) {
-      fallbackIneligibleDescription = canonicalResult.exceptionDescription ?? null;
+      fallbackIneligibleDescription =
+        canonicalResult.exceptionDescription ?? null;
     }
 
     return (
@@ -1152,8 +1224,17 @@ export default async function DealPage(ctx: PageProps) {
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950">
               <div className="flex items-start gap-3">
                 <span className="mt-0.5 text-amber-600 dark:text-amber-400 flex-shrink-0">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                    <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    className="w-4 h-4"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z"
+                      clipRule="evenodd"
+                    />
                   </svg>
                 </span>
                 <div className="space-y-1">
@@ -1177,34 +1258,46 @@ export default async function DealPage(ctx: PageProps) {
               <AcceptedPendingReviewBanner />
             )}
 
-          {!canonicalResult.isExceptionState && canonicalResult.customerHeroLabel && (
-            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950">
-              <div className="flex items-start gap-3">
-                <span className="mt-0.5 text-blue-600 dark:text-blue-400 flex-shrink-0">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clipRule="evenodd" />
-                  </svg>
-                </span>
-                <div className="space-y-1">
-                  <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">
-                    {canonicalResult.customerHeroLabel}
-                  </p>
-                  {canonicalResult.customerHeroDescription && (
-                    <p className="text-xs text-blue-800 dark:text-blue-200">
-                      {canonicalResult.customerHeroDescription}
+          {!canonicalResult.isExceptionState &&
+            canonicalResult.customerHeroLabel && (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950">
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 text-blue-600 dark:text-blue-400 flex-shrink-0">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      className="w-4 h-4"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  </span>
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">
+                      {canonicalResult.customerHeroLabel}
                     </p>
-                  )}
+                    {canonicalResult.customerHeroDescription && (
+                      <p className="text-xs text-blue-800 dark:text-blue-200">
+                        {canonicalResult.customerHeroDescription}
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
           {/* Property review blocked-state cue — fallback path. */}
           {fallbackIsOwner &&
             effectiveThread?.status === "accepted" &&
             resolvedPropertyId &&
             livePropertyReviewStatus === "information_requested" && (
-              <PropertyReviewBlockedOwnerBanner propertyId={resolvedPropertyId} />
+              <PropertyReviewBlockedOwnerBanner
+                propertyId={resolvedPropertyId}
+              />
             )}
 
           {/* Ineligible deal action block — fallback path.
@@ -1212,30 +1305,41 @@ export default async function DealPage(ctx: PageProps) {
               Block type is dispatched on canonicalResult.stage:
                 attom_required → ATTOM-first blocks (renegotiation not yet available)
                 else            → Standard ineligible blocks (ATTOM complete; renegotiate/challenge) */}
-          {fallbackShowIneligibleBlock && fallbackIsOwner && canonicalResult.stage === "attom_required" && (
-            <AttomRequiredDealOwnerBlock propertyId={resolvedPropertyId} />
-          )}
-          {fallbackShowIneligibleBlock && fallbackIsOwner && canonicalResult.stage !== "attom_required" && (
-            <IneligibleDealOwnerBlock
-              dealId={dealId}
-              propertyId={resolvedPropertyId}
-              manualAppraisalStatus={liveManualAppraisalStatus}
-              exceptionDescription={fallbackIneligibleDescription}
-              renegotiationAlreadyRequested={canonicalResult.stage === "renegotiation_requested"}
-              proposalId={negState.currentProposal?.id}
-              currentTerms={negState.currentProposal?.terms_snapshot ?? null}
-            />
-          )}
+          {fallbackShowIneligibleBlock &&
+            fallbackIsOwner &&
+            canonicalResult.stage === "attom_required" && (
+              <AttomRequiredDealOwnerBlock propertyId={resolvedPropertyId} />
+            )}
+          {fallbackShowIneligibleBlock &&
+            fallbackIsOwner &&
+            canonicalResult.stage !== "attom_required" && (
+              <IneligibleDealOwnerBlock
+                dealId={dealId}
+                propertyId={resolvedPropertyId}
+                manualAppraisalStatus={liveManualAppraisalStatus}
+                exceptionDescription={fallbackIneligibleDescription}
+                renegotiationAlreadyRequested={
+                  canonicalResult.stage === "renegotiation_requested"
+                }
+                proposalId={negState.currentProposal?.id}
+                currentTerms={negState.currentProposal?.terms_snapshot ?? null}
+              />
+            )}
 
-          {fallbackShowIneligibleBlock && !fallbackIsOwner && canonicalResult.stage === "attom_required" && (
-            <AttomRequiredDealBuyerBlock />
-          )}
-          {fallbackShowIneligibleBlock && !fallbackIsOwner && canonicalResult.stage !== "attom_required" && canonicalResult.stage !== "renegotiation_requested" && (
-            <IneligibleDealBuyerBlock
-              manualAppraisalStatus={liveManualAppraisalStatus}
-              renegotiationRequested={false}
-            />
-          )}
+          {fallbackShowIneligibleBlock &&
+            !fallbackIsOwner &&
+            canonicalResult.stage === "attom_required" && (
+              <AttomRequiredDealBuyerBlock />
+            )}
+          {fallbackShowIneligibleBlock &&
+            !fallbackIsOwner &&
+            canonicalResult.stage !== "attom_required" &&
+            canonicalResult.stage !== "renegotiation_requested" && (
+              <IneligibleDealBuyerBlock
+                manualAppraisalStatus={liveManualAppraisalStatus}
+                renegotiationRequested={false}
+              />
+            )}
 
           {showNegotiationUi && negState.isSender && effectiveThread && (
             <WaitingBanner
@@ -1276,10 +1380,13 @@ export default async function DealPage(ctx: PageProps) {
             <div className="rounded-lg border bg-emerald-50/50 p-4">
               <div className="flex items-center gap-2">
                 <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
-                <span className="text-sm font-semibold text-emerald-800">Deal active</span>
+                <span className="text-sm font-semibold text-emerald-800">
+                  Deal active
+                </span>
               </div>
               <p className="mt-2 text-sm text-emerald-700">
-                Your agreement is complete and active. Signed documents are available for reference in the section above.
+                Your agreement is complete and active. Signed documents are
+                available for reference in the section above.
               </p>
             </div>
           ) : canonicalResult.meta.customerLabel ? (

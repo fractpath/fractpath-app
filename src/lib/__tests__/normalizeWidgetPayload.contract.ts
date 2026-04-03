@@ -109,7 +109,7 @@ test("missing deal_terms fields get v11 defaults", () => {
   assert(r.deal_terms.property_value === 999000, "provided value kept");
   assert(r.deal_terms.minimum_hold_years === 2, "default minimum_hold_years");
   assert(r.deal_terms.long_stop_year === 13, "default long_stop_year");
-  assert(r.deal_terms.servicing_fee_monthly === 0, "default servicing_fee_monthly");
+  assert(r.deal_terms.servicing_fee_monthly === 59, "default servicing_fee_monthly");
 });
 
 test("missing scenario fields get defaults", () => {
@@ -118,7 +118,7 @@ test("missing scenario fields get defaults", () => {
     scenario: { exit_year: 10 },
   });
   assert(r.scenario.exit_year === 10, "provided exit_year");
-  assert(r.scenario.annual_appreciation === 0.03, "default annual_appreciation");
+  assert(r.scenario.annual_appreciation === 0.04, "default annual_appreciation");
   assert(r.scenario.closing_cost_pct === 0.06, "default closing_cost_pct");
 });
 

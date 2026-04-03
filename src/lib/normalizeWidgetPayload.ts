@@ -1,3 +1,8 @@
+import {
+  CANONICAL_DEAL_TERM_DEFAULTS,
+  CANONICAL_SCENARIO_DEFAULTS,
+} from "@/lib/canonicalDefaults";
+
 type AnyRecord = Record<string, unknown>;
 
 function isRecord(v: unknown): v is AnyRecord {
@@ -20,45 +25,9 @@ function pickStr(obj: AnyRecord, ...keys: string[]): string | undefined {
   return undefined;
 }
 
-// v11 deal term defaults
-const DEFAULT_DEAL_TERMS: AnyRecord = {
-  property_value: 500000,
-  upfront_payment: 50000,
-  monthly_payment: 0,
-  number_of_payments: 0,
-  minimum_hold_years: 2,
-  contract_maturity_years: 30,
-  target_exit_year: null,
-  target_exit_window_start_year: 3,
-  target_exit_window_end_year: 7,
-  long_stop_year: 13,
-  first_extension_start_year: null,
-  first_extension_end_year: null,
-  first_extension_premium_pct: null,
-  second_extension_start_year: null,
-  second_extension_end_year: null,
-  second_extension_premium_pct: null,
-  partial_buyout_allowed: false,
-  partial_buyout_min_fraction: null,
-  partial_buyout_increment_fraction: null,
-  buyer_purchase_option_enabled: false,
-  buyer_purchase_notice_days: null,
-  buyer_purchase_closing_days: null,
-  setup_fee_pct: null,
-  setup_fee_floor: null,
-  setup_fee_cap: null,
-  servicing_fee_monthly: 0,
-  payment_admin_fee: null,
-  exit_admin_fee_amount: 0,
-  realtor_representation_mode: "NONE",
-  realtor_commission_pct: 0,
-};
+const DEFAULT_DEAL_TERMS: AnyRecord = { ...CANONICAL_DEAL_TERM_DEFAULTS };
 
-const DEFAULT_SCENARIO: AnyRecord = {
-  annual_appreciation: 0.03,
-  closing_cost_pct: 0.06,
-  exit_year: 5,
-};
+const DEFAULT_SCENARIO: AnyRecord = { ...CANONICAL_SCENARIO_DEFAULTS };
 
 export type NormalizedInputs = {
   deal_terms: AnyRecord;

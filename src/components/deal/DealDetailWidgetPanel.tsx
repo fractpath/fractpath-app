@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { DealSnapshotView } from "fractpath-calculator-widget";
 import { normalizeDealTermsForWidget } from "@/lib/normalizeDealTermsForWidget";
 import { normalizeResultsForWidget } from "@/components/deal/widgetNormalization";
+import { CANONICAL_SCENARIO_DEFAULTS } from "@/lib/canonicalDefaults";
 import { DealWidgetShell } from "@/components/deal/DealWidgetShell";
 import { usePageLoading } from "@/components/ui/PageLoadingOverlay";
 
@@ -118,16 +119,25 @@ export function DealDetailWidgetPanel({
       const snapScenario = safeRecord((snapInputs as any)?.scenario);
       const snapResults = safeRecord((snap as any)?.outputs?.results);
 
+      const annualAppreciation =
+        typeof (snapScenario as any)?.annual_appreciation === "number" &&
+        Number.isFinite((snapScenario as any).annual_appreciation)
+          ? (snapScenario as any).annual_appreciation
+          : CANONICAL_SCENARIO_DEFAULTS.annual_appreciation;
+
       return {
         ...snap,
         inputs: {
           ...(snapInputs ?? {}),
           deal_terms: normalizeDealTermsForWidget(snapDealTerms ?? {}),
-          scenario: snapScenario ?? {},
+          scenario: {
+            ...(snapScenario ?? {}),
+            annual_appreciation: annualAppreciation,
+          },
         },
         outputs: {
           ...(safeRecord((snap as any)?.outputs) ?? {}),
-          results: snapResults ?? null,
+          results: snapResults ? normalizeResultsForWidget(snapResults) : null,
         },
       } as AnyRecord;
     }
@@ -171,6 +181,10 @@ export function DealDetailWidgetPanel({
 
   const currentInputs = safeRecord((seedSnapshot as any)?.inputs);
   const currentResults = safeRecord((seedSnapshot as any)?.outputs?.results);
+  const renderable = hasRenderableComputedSnapshot(
+    currentInputs,
+    currentResults,
+  );
 
   const handleSave = useCallback(
     async (parsed: { deal_terms: AnyRecord; scenario: AnyRecord }) => {
@@ -268,7 +282,8 @@ export function DealDetailWidgetPanel({
         initiallyOpenEditor={openEditorImmediately}
       />
 
-      {hasRenderableComputedSnapshot(currentInputs, currentResults) ? (
+  
+      {renderable && currentResults ? (
         <DealSnapshotView
           persona={persona as any}
           status={"draft" as any}

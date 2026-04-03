@@ -138,10 +138,8 @@ async function main() {
       typeof r.base_buyout_amount === "number" && Number.isFinite(r.base_buyout_amount),
       `base_buyout_amount must be finite`,
     );
-    assert(
-      typeof r.partial_buyout_amount_50 === "number" && Number.isFinite(r.partial_buyout_amount_50),
-      `partial_buyout_amount_50 must be finite`,
-    );
+    // partial_buyout_amount_50 is only computed when partial_buyout_allowed=true;
+    // VALID_INPUTS uses the default (false) so we do not assert it here.
   });
 
   await test("results do NOT contain old v10 field names", async () => {
