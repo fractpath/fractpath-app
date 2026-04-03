@@ -8,6 +8,15 @@ export type DealResults = AnyRecord;
 
 const D = CANONICAL_DEAL_TERM_DEFAULTS;
 
+/**
+ * Stale-zero guard for fee fields that must be positive.
+ * Old snapshots may store 0 for fee fields that were not yet seeded.
+ * `??` alone does not catch 0 (only null/undefined), so we treat 0 as stale.
+ */
+function pos(v: unknown, d: number): number {
+  return typeof v === "number" && v > 0 ? v : d;
+}
+
 // ---- v11 widget-compat normalization ----
 
 export function normalizeDealTermsForWidget(raw: DealTerms): DealTerms {
@@ -36,13 +45,13 @@ export function normalizeDealTermsForWidget(raw: DealTerms): DealTerms {
     buyer_purchase_option_enabled: r.buyer_purchase_option_enabled ?? D.buyer_purchase_option_enabled,
     buyer_purchase_notice_days: r.buyer_purchase_notice_days ?? D.buyer_purchase_notice_days,
     buyer_purchase_closing_days: r.buyer_purchase_closing_days ?? D.buyer_purchase_closing_days,
-    // Fees — canonical contract defaults (not zero)
-    setup_fee_pct: r.setup_fee_pct ?? D.setup_fee_pct,
+    // Fees — use pos() so stale-zero snapshots get the canonical default, not 0.
+    setup_fee_pct: pos(r.setup_fee_pct, D.setup_fee_pct),
     setup_fee_floor: r.setup_fee_floor ?? D.setup_fee_floor,
     setup_fee_cap: r.setup_fee_cap ?? D.setup_fee_cap,
-    servicing_fee_monthly: r.servicing_fee_monthly ?? D.servicing_fee_monthly,
-    payment_admin_fee: r.payment_admin_fee ?? D.payment_admin_fee,
-    exit_admin_fee_amount: r.exit_admin_fee_amount ?? D.exit_admin_fee_amount,
+    servicing_fee_monthly: pos(r.servicing_fee_monthly, D.servicing_fee_monthly),
+    payment_admin_fee: pos(r.payment_admin_fee, D.payment_admin_fee),
+    exit_admin_fee_amount: pos(r.exit_admin_fee_amount, D.exit_admin_fee_amount),
     // Realtor
     realtor_representation_mode: r.realtor_representation_mode ?? D.realtor_representation_mode,
     realtor_commission_pct: r.realtor_commission_pct ?? D.realtor_commission_pct,

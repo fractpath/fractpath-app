@@ -13,6 +13,8 @@ import {
 import {
   buildMonthlyBuyoutSeries,
   computeContractedDealSize,
+  computeRealtorPaidToDate,
+  computeRealtorProjectedTotal,
   computeSetupFee,
   interpolateBuyoutAtMonth,
 } from "@/lib/deal/buyoutProjection";
@@ -394,12 +396,27 @@ export function AcceptedDealStatusPanel({
   const totalBuyerFunding = safeNumber((currentResults as any)?.total_scheduled_buyer_funding);
   const appreciationShare = safeNumber((currentResults as any)?.scheduled_buyer_appreciation_share);
   const projectedExitCost = safeNumber((currentResults as any)?.extension_adjusted_buyout_amount);
-  // Projected realtor fee from engine results — only shown when > 0.
-  const realtorFeeProjected = safeNumber((currentResults as any)?.realtor_fee_total_projected);
-
   // Time-based computations
   const elapsed = elapsedYears(acceptedAt);
   const elapsedMonths = elapsed !== null ? elapsed * 12 : null;
+
+  // Model A realtor: contractedDealSize × commissionPct for projected total,
+  // fundedToDate(month) × commissionPct for modeled paid-to-date.
+  // Applied to each funding disbursement — not FMV or appreciation.
+  const realtorProjectedTotal =
+    showRealtor && realtorCommissionPct > 0
+      ? computeRealtorProjectedTotal(contractedDealSize, realtorCommissionPct)
+      : null;
+  const modeledRealtorPaidToDate =
+    showRealtor && realtorCommissionPct > 0 && elapsedMonths !== null
+      ? computeRealtorPaidToDate(
+          upfrontPayment,
+          monthlyPayment,
+          numberOfPayments,
+          Math.round(elapsedMonths),
+          realtorCommissionPct,
+        )
+      : null;
   const cYear = contractYear(acceptedAt);
   const statusLabel = resolveAcceptedStatus(canonicalStage ?? null, elapsed, dealTerms);
 
@@ -627,18 +644,24 @@ export function AcceptedDealStatusPanel({
                   </dd>
                 </div>
                 <div className="flex justify-between text-xs">
-                  <dt className="text-muted-foreground">Commission</dt>
+                  <dt className="text-muted-foreground">Commission rate</dt>
                   <dd className="font-medium">{fmtPercent(realtorCommissionPct)}</dd>
                 </div>
-                {realtorFeeProjected !== null && realtorFeeProjected > 0 ? (
+                {realtorProjectedTotal !== null ? (
                   <div className="flex justify-between text-xs">
-                    <dt className="text-muted-foreground">Projected realtor fee</dt>
-                    <dd className="font-medium">{fmtCurrency(realtorFeeProjected)}</dd>
+                    <dt className="text-muted-foreground">Projected total realtor fee</dt>
+                    <dd className="font-medium">{fmtCurrency(realtorProjectedTotal)}</dd>
+                  </div>
+                ) : null}
+                {modeledRealtorPaidToDate !== null ? (
+                  <div className="flex justify-between text-xs">
+                    <dt className="text-muted-foreground">Modeled realtor fee paid to date</dt>
+                    <dd className="font-medium">{fmtCurrency(modeledRealtorPaidToDate)}</dd>
                   </div>
                 ) : null}
               </dl>
               <p className="text-[10px] text-muted-foreground pt-1">
-                Realtor commission terms as accepted. Projected fee shown when available from deal calculation.
+                Applied to each funding disbursement. Paid-to-date is modeled from accepted agreement and scheduled payments — not actual servicer-posted payments.
               </p>
             </div>
           ) : null}

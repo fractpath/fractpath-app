@@ -15,6 +15,7 @@ import {
 import {
   buildMonthlyBuyoutSeries,
   computeContractedDealSize,
+  computeRealtorProjectedTotal,
   computeSetupFee,
 } from "@/lib/deal/buyoutProjection";
 import { BuyoutProjectionChart } from "@/components/deal/BuyoutProjectionChart";
@@ -285,10 +286,13 @@ export function DraftDealProjectionPanel({
   const appreciationShare = safeNumber(
     (currentResults as any)?.scheduled_buyer_appreciation_share,
   );
-  // Projected realtor fee from engine results — only shown when > 0.
-  const realtorFeeProjected = safeNumber(
-    (currentResults as any)?.realtor_fee_total_projected,
-  );
+  // Model A realtor projected total: contractedDealSize × commissionPct.
+  // Applied to each funding disbursement — not FMV or appreciation.
+  // Only meaningful when a realtor is active and commission rate is set.
+  const realtorProjectedTotal =
+    showRealtor && realtorCommissionPct > 0
+      ? computeRealtorProjectedTotal(contractedDealSize, realtorCommissionPct)
+      : null;
 
   const projectedFmv =
     propertyValue * Math.pow(1 + annualAppreciation, exitYear);
@@ -525,18 +529,18 @@ export function DraftDealProjectionPanel({
                   </dd>
                 </div>
                 <div className="flex justify-between text-xs">
-                  <dt className="text-muted-foreground">Commission</dt>
+                  <dt className="text-muted-foreground">Commission rate</dt>
                   <dd className="font-medium">{fmtPercent(realtorCommissionPct)}</dd>
                 </div>
-                {realtorFeeProjected !== null && realtorFeeProjected > 0 ? (
+                {realtorProjectedTotal !== null ? (
                   <div className="flex justify-between text-xs">
-                    <dt className="text-muted-foreground">Projected realtor fee</dt>
-                    <dd className="font-medium">{fmtCurrency(realtorFeeProjected)}</dd>
+                    <dt className="text-muted-foreground">Projected total realtor fee</dt>
+                    <dd className="font-medium">{fmtCurrency(realtorProjectedTotal)}</dd>
                   </div>
                 ) : null}
               </dl>
               <p className="text-[10px] text-muted-foreground pt-1">
-                Realtor commission terms as entered. Projected fee shown when available from deal calculation.
+                Applied to each funding disbursement based on contracted deal size.
               </p>
             </div>
           ) : null}

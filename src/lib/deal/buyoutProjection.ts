@@ -121,6 +121,52 @@ export function buildMonthlyBuyoutSeries(
   return pts;
 }
 
+// ─── Model A realtor fee helpers ─────────────────────────────────────────────
+
+/**
+ * Projected total realtor fee under Model A.
+ *
+ * Realtor commission is applied to each funding disbursement event, not to FMV
+ * or appreciation. The projected total is therefore:
+ *
+ *   projectedRealtorFeeTotal = contractedDealSize × realtor_commission_pct
+ *
+ * where contractedDealSize = upfront_payment + (monthly_payment × number_of_payments).
+ * This should be called with the result of computeContractedDealSize().
+ */
+export function computeRealtorProjectedTotal(
+  contractedDealSize: number,
+  commissionPct: number,
+): number {
+  return contractedDealSize * commissionPct;
+}
+
+/**
+ * Modeled realtor fee paid to date under Model A at a given month.
+ *
+ * The realtor is paid at each disbursement event proportional to the funding
+ * disbursed. The modeled fee paid to date at month m is:
+ *
+ *   modeledPaidToDate(m) = fundedToDate(m) × realtor_commission_pct
+ *
+ * This is modeled from accepted agreement and scheduled payments —
+ * not actual servicer-posted payment history.
+ */
+export function computeRealtorPaidToDate(
+  upfrontPayment: number,
+  monthlyPayment: number,
+  numberOfPayments: number,
+  month: number,
+  commissionPct: number,
+): number {
+  return (
+    modeledFundingToDate(upfrontPayment, monthlyPayment, numberOfPayments, month) *
+    commissionPct
+  );
+}
+
+// ─── Buyout interpolation ─────────────────────────────────────────────────────
+
 /**
  * Linear interpolation of buyout at a fractional month position.
  * Used for placing the "current position" marker on accepted-deal charts.
