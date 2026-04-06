@@ -27,9 +27,13 @@ type Props = {
   initialTitle: string | null;
   initialProperty: HeaderProperty | null;
   effectiveSnapshot: AnyRecord | null;
-  // Owner action context — only populated when current user is the homeowner
+  // Explicit role flags from negState — source of truth for CTA visibility
+  isPropertyOwner: boolean;
+  isBuyer: boolean;
+  // Owner action context (only when isPropertyOwner)
   ownerProposalId?: string | null;
   ownerProposalStatus?: string | null;
+  ownerTermsSnapshot?: AnyRecord | null;
 };
 
 export function DealPageShell({
@@ -40,8 +44,11 @@ export function DealPageShell({
   initialTitle,
   initialProperty,
   effectiveSnapshot,
+  isPropertyOwner,
+  isBuyer,
   ownerProposalId,
   ownerProposalStatus,
+  ownerTermsSnapshot,
 }: Props) {
   const [propertyId, setPropertyId] = useState<string | null>(
     initialProperty?.property_id ?? null,
@@ -56,8 +63,12 @@ export function DealPageShell({
           locked={locked}
           readOnly={!isOwner}
           effectiveSnapshot={effectiveSnapshot}
-          ownerProposalId={isOwner ? (ownerProposalId ?? null) : null}
-          ownerProposalStatus={isOwner ? (ownerProposalStatus ?? null) : null}
+          isPropertyOwner={isPropertyOwner}
+          isBuyer={isBuyer}
+          ownerProposalId={ownerProposalId ?? null}
+          ownerProposalStatus={ownerProposalStatus ?? null}
+          ownerTermsSnapshot={ownerTermsSnapshot ?? null}
+          activeThreadId={activeThread?.id ?? null}
           activeThreadStatus={activeThread?.status ?? null}
         />
       </div>

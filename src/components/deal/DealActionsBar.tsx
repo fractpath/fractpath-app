@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { SubmitOfferModal } from "@/components/deal/SubmitOfferModal";
 import { ShareDealModal } from "@/components/deal/ShareDealModal";
 import { ArchiveDealModal } from "@/components/deal/ArchiveDealModal";
+import { CounterOfferModal } from "@/components/deal/CounterOfferModal";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -13,9 +15,15 @@ type Props = {
   locked: boolean;
   readOnly: boolean;
   effectiveSnapshot: AnyRecord | null;
-  // Owner action context — passed when the current user is the homeowner
+  // Explicit role flags derived from negState — these are the source of truth for CTA visibility
+  isPropertyOwner: boolean;  // true only for the homeowner (negState.isOwnerSide)
+  isBuyer: boolean;          // true only for the deal buyer (negState.isBuyer)
+  // Owner action context
   ownerProposalId?: string | null;
   ownerProposalStatus?: string | null;
+  ownerTermsSnapshot?: AnyRecord | null;
+  // Thread context
+  activeThreadId?: string | null;
   activeThreadStatus?: string | null;
 };
 
@@ -25,25 +33,38 @@ export function DealActionsBar({
   locked,
   readOnly,
   effectiveSnapshot,
+  isPropertyOwner,
+  isBuyer,
   ownerProposalId,
   ownerProposalStatus,
+  ownerTermsSnapshot,
+  activeThreadId,
   activeThreadStatus,
 }: Props) {
+  const router = useRouter();
   const [openSubmit, setOpenSubmit] = useState(false);
   const [openShare, setOpenShare] = useState(false);
   const [openArchive, setOpenArchive] = useState(false);
+  const [openCounter, setOpenCounter] = useState(false);
+  const [withdrawBusy, setWithdrawBusy] = useState(false);
   const [ownerBusy, setOwnerBusy] = useState(false);
 
-  const isOwner = !readOnly;
   const canSubmit = !!propertyId && !readOnly && !locked;
 
-  // Owner can accept/decline when thread is waiting for their decision
+  // Owner can act when thread is waiting for their decision
   const canOwnerDecide =
-    isOwner &&
+    isPropertyOwner &&
     locked &&
     activeThreadStatus === "pending_owner" &&
     !!ownerProposalId &&
     ownerProposalStatus === "submitted";
+
+  // Buyer can withdraw when their offer is pending
+  const canBuyerWithdraw =
+    isBuyer &&
+    locked &&
+    activeThreadStatus === "pending_owner" &&
+    !!activeThreadId;
 
   async function handleOwnerDecision(decision: "accept" | "reject") {
     if (!ownerProposalId || ownerBusy) return;
@@ -59,16 +80,35 @@ export function DealActionsBar({
         window.location.href = "/dashboard";
       }
     } catch {
-      // Errors are handled by the full ThreadActionPanel below
+      // Errors are surfaced by the full ThreadActionPanel below on the page
     } finally {
       setOwnerBusy(false);
+    }
+  }
+
+  async function handleWithdraw() {
+    if (!activeThreadId || withdrawBusy) return;
+    setWithdrawBusy(true);
+    try {
+      const res = await fetch(`/api/threads/${activeThreadId}/withdraw`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (res.ok) {
+        router.refresh();
+      }
+    } catch {
+      // Errors are surfaced by the ActiveThreadBanner below on the page
+    } finally {
+      setWithdrawBusy(false);
     }
   }
 
   return (
     <>
       <div className="flex items-center gap-2">
-        {/* Owner accept/decline — shown in top bar when a proposal is awaiting decision */}
+        {/* ── Owner CTA: Accept / Counter / Reject ─────────────────────────── */}
         {canOwnerDecide && (
           <>
             <button
@@ -78,21 +118,47 @@ export function DealActionsBar({
               className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
               data-testid="deal-bar-accept-btn"
             >
-              Accept Offer
+              Accept
             </button>
+
+            {ownerTermsSnapshot && (
+              <button
+                type="button"
+                disabled={ownerBusy}
+                onClick={() => setOpenCounter(true)}
+                className="rounded-md border bg-white px-3 py-1.5 text-sm font-medium hover:bg-muted/40 disabled:opacity-50"
+                data-testid="deal-bar-counter-btn"
+              >
+                Counter
+              </button>
+            )}
+
             <button
               type="button"
               disabled={ownerBusy}
               onClick={() => handleOwnerDecision("reject")}
               className="rounded-md bg-red-100 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-200 disabled:opacity-50"
-              data-testid="deal-bar-decline-btn"
+              data-testid="deal-bar-reject-btn"
             >
-              Decline
+              Reject
             </button>
           </>
         )}
 
-        {/* Submit offer — hidden when deal is locked (offer already pending or thread closed) */}
+        {/* ── Buyer CTA: Withdraw ───────────────────────────────────────────── */}
+        {canBuyerWithdraw && (
+          <button
+            type="button"
+            disabled={withdrawBusy}
+            onClick={handleWithdraw}
+            className="rounded-md border border-amber-400 bg-white px-3 py-1.5 text-sm font-medium text-amber-800 hover:bg-amber-50 disabled:opacity-50"
+            data-testid="deal-bar-withdraw-btn"
+          >
+            {withdrawBusy ? "Withdrawing…" : "Withdraw Offer"}
+          </button>
+        )}
+
+        {/* ── Submit offer / Share — hidden when deal is locked ────────────── */}
         {!locked && (
           <button
             type="button"
@@ -106,7 +172,6 @@ export function DealActionsBar({
           </button>
         )}
 
-        {/* Share — hidden when deal is locked */}
         {!locked && (
           <button
             type="button"
@@ -129,6 +194,7 @@ export function DealActionsBar({
         </button>
       </div>
 
+      {/* ── Modals ──────────────────────────────────────────────────────────── */}
       {!locked && (
         <>
           <SubmitOfferModal
@@ -138,13 +204,23 @@ export function DealActionsBar({
             propertyId={propertyId}
             effectiveSnapshot={effectiveSnapshot}
           />
-
           <ShareDealModal
             open={openShare}
             onClose={() => setOpenShare(false)}
             dealId={dealId}
           />
         </>
+      )}
+
+      {canOwnerDecide && ownerTermsSnapshot && (
+        <div style={{ display: openCounter ? "block" : "none" }}>
+          <CounterOfferModal
+            open={openCounter}
+            onClose={() => setOpenCounter(false)}
+            proposalId={ownerProposalId!}
+            termsSnapshot={ownerTermsSnapshot}
+          />
+        </div>
       )}
 
       <ArchiveDealModal
