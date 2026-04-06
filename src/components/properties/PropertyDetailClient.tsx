@@ -27,6 +27,12 @@ import {
   EnrichedPropertyPreview,
   type EnrichedPreviewData,
 } from "@/components/property/EnrichedPropertyPreview";
+import { PropertyStatusLanes } from "@/components/properties/PropertyStatusLanes";
+import {
+  deriveParticipationLane,
+  deriveValuationLane,
+  deriveClosingReadinessLane,
+} from "@/lib/property/statusLanes";
 
 type LinkedDeal = {
   thread_id: string;
@@ -210,21 +216,33 @@ function PropertyWorkflowWidget({ state }: { state: PropertyWorkflowState }) {
   const {
     propertyStatus,
     propertyReviewStatus,
-    rentcastFmv,
     rentcastProvider,
     escalationAvmStatus,
     manualAppraisalStatus,
   } = state;
 
-  function fmtUsd(n: number | null | undefined): string | null {
-    if (n == null) return null;
-    return `$${Math.round(n).toLocaleString("en-US")}`;
-  }
-
   // Once ATTOM or manual appraisal has reached a resolved state, the rentcast-level
   // "Review in progress" card is superseded. PropertyValuationSections handles those states.
   const escalationResolved =
     escalationAvmStatus === "completed" || manualAppraisalStatus === "complete";
+
+  // Verified check must come FIRST — property.status is the authoritative participation
+  // state.  A stale property_review_status must not override it with "under review".
+  if (propertyStatus === "verified") {
+    return (
+      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 space-y-1.5">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-semibold text-emerald-900">Property verified</span>
+          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">
+            Verified
+          </span>
+        </div>
+        <p className="text-xs text-emerald-800">
+          Your property has been verified. Our team is continuing to review your file.
+        </p>
+      </div>
+    );
+  }
 
   if (
     !escalationResolved &&
@@ -260,22 +278,6 @@ function PropertyWorkflowWidget({ state }: { state: PropertyWorkflowState }) {
         </div>
         <p className="text-xs text-blue-800">
           Your property is currently being reviewed by our team. We will contact you if additional information is needed.
-        </p>
-      </div>
-    );
-  }
-
-  if (propertyStatus === "verified") {
-    return (
-      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 space-y-1.5">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-semibold text-emerald-900">Property verified</span>
-          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">
-            Verified
-          </span>
-        </div>
-        <p className="text-xs text-emerald-800">
-          Your property has been verified. Our team is continuing to review your file.
         </p>
       </div>
     );
@@ -322,6 +324,26 @@ export function PropertyDetailClient({
     property.title_claims_known ||
     property.owner_stated_fmv != null ||
     property.willing_to_proceed_formal_review;
+
+  // Three-lane status derivation
+  const ownerParticipationLane = deriveParticipationLane(property.status);
+  const ownerValuationLane = workflowState
+    ? deriveValuationLane({
+        manualAppraisalStatus: workflowState.manualAppraisalStatus,
+        escalationAvmStatus: workflowState.escalationAvmStatus,
+        fmvVerificationSource: workflowState.fmvVerificationSource,
+        latestVerifiedFmv: workflowState.latestVerifiedFmv,
+      })
+    : deriveValuationLane({
+        manualAppraisalStatus: null,
+        escalationAvmStatus: null,
+        fmvVerificationSource: null,
+        latestVerifiedFmv: null,
+      });
+  const ownerClosingReadinessLane = deriveClosingReadinessLane({
+    hasAcceptedDeal: linkedDeal?.thread_status === "accepted",
+    propertyReviewStatus: workflowState?.propertyReviewStatus ?? null,
+  });
 
   return (
     <div className="space-y-6">
@@ -438,6 +460,13 @@ export function PropertyDetailClient({
           </div>
         )}
       </div>
+
+      {/* Three-lane status block */}
+      <PropertyStatusLanes
+        participation={ownerParticipationLane}
+        valuation={ownerValuationLane}
+        closingReadiness={ownerClosingReadinessLane}
+      />
 
       {/* Enriched property preview — shown to owner when enrichment is available */}
       {enrichment && (

@@ -36,6 +36,12 @@ import {
   DEVIATION_ESCALATION_THRESHOLD_PCT,
   type AvmEligibilityCard,
 } from "@/lib/avmEligibility";
+import { PropertyStatusLanes } from "@/components/properties/PropertyStatusLanes";
+import {
+  deriveParticipationLane,
+  deriveValuationLane,
+  deriveClosingReadinessLane,
+} from "@/lib/property/statusLanes";
 
 function requirePreviewSecret(): string {
   const v = process.env.ADMIN_DOC_PREVIEW_SECRET;
@@ -446,6 +452,20 @@ export default async function AdminPropertyAuditPage({
     external_partner: "External partner",
   };
 
+  // ── Three-lane status derivation ──────────────────────────────────────────
+  const adminParticipationLane = deriveParticipationLane(p.status ?? null);
+  const adminValuationLane = deriveValuationLane({
+    manualAppraisalStatus: (p.manual_appraisal_status as string | null) ?? null,
+    escalationAvmStatus: (p.escalation_avm_status as string | null) ?? null,
+    fmvVerificationSource: (p.fmv_verification_source as string | null) ?? null,
+    latestVerifiedFmv: (p.latest_verified_fmv as number | null) ?? null,
+  });
+  const adminClosingReadinessLane = deriveClosingReadinessLane({
+    hasAcceptedDeal: !!linkedThreadRes.data?.id,
+    propertyReviewStatus: (p.property_review_status as string | null) ?? null,
+    closingReviewStatus: (p.closing_review_status as string | null) ?? null,
+  });
+
   return (
     <main className="mx-auto max-w-4xl p-6 space-y-6">
 
@@ -493,16 +513,13 @@ export default async function AdminPropertyAuditPage({
 
       {/* ── Property overview ── */}
       <div className="rounded-lg border p-4 text-sm space-y-1">
-        <div className="flex items-center gap-2 flex-wrap mb-2">
-          <span className="font-medium">Verification status:</span>
-          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-muted text-foreground">
-            {String(p.status).replace(/_/g, " ")}
-          </span>
-          {reviewStatusMeta && (
-            <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${reviewStatusMeta.badgeCls}`}>
-              {reviewStatusMeta.label}
-            </span>
-          )}
+        {/* Three-lane status block */}
+        <div className="mb-3">
+          <PropertyStatusLanes
+            participation={adminParticipationLane}
+            valuation={adminValuationLane}
+            closingReadiness={adminClosingReadinessLane}
+          />
         </div>
         <div>
           <span className="text-muted-foreground">Owner:</span>{" "}

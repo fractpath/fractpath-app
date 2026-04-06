@@ -8,6 +8,11 @@ import type {
 } from "@/lib/mashvisor/types";
 import type { EnrichedPreviewData } from "@/components/property/EnrichedPropertyPreview";
 import Link from "next/link";
+import { PropertyStatusLanes } from "@/components/properties/PropertyStatusLanes";
+import {
+  deriveParticipationLane,
+  deriveValuationLane,
+} from "@/lib/property/statusLanes";
 
 export const runtime = "nodejs";
 
@@ -90,6 +95,15 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
   const occupancyLabel = humanizeOccupancy(row.occupancy_use);
   const ownershipLabel = humanizeOwnership(row.ownership_type);
 
+  // Public-safe status lanes — no admin/AVM/appraisal fields exposed to buyers
+  const publicParticipationLane = deriveParticipationLane("verified");
+  const publicValuationLane = deriveValuationLane({
+    manualAppraisalStatus: null,
+    escalationAvmStatus: null,
+    fmvVerificationSource: null,
+    latestVerifiedFmv: null,
+  });
+
   // Fetch current enrichment (non-fatal, audience=buyer — hides provider IDs)
   let enrichment: EnrichedPreviewData | null = null;
   try {
@@ -171,6 +185,13 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
           </div>
           <h1 className="text-xl font-semibold leading-snug">{fullAddress}</h1>
         </div>
+
+        {/* Property status lanes — public-safe: participation + valuation only */}
+        <PropertyStatusLanes
+          participation={publicParticipationLane}
+          valuation={publicValuationLane}
+          showClosingReadiness={false}
+        />
 
         {/* Enriched preview if available — buyer audience (no provider IDs, no admin metadata) */}
         {enrichment ? (
