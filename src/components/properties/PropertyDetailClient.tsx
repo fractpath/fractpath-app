@@ -558,6 +558,51 @@ export function PropertyDetailClient({
         </div>
       )}
 
+      {/* Proposal preferences */}
+      <div className="rounded-lg border p-5 space-y-1">
+        <h2 className="text-sm font-semibold mb-3">Proposal preferences</h2>
+        {property.proposal_interest_status === "interested_after_verification" ? (
+          <>
+            <Row
+              fieldLabel="Proposals"
+              value="Enabled after verification"
+            />
+            <Row
+              fieldLabel="Visibility"
+              value={
+                property.visibility_preference === "public"
+                  ? "Public"
+                  : property.visibility_preference === "matched"
+                    ? "Matched buyers only"
+                    : "Private"
+              }
+            />
+            <Row
+              fieldLabel="Terms acknowledgment"
+              value={
+                property.proposal_preferences_acknowledged_at
+                  ? "Accepted"
+                  : "Pending"
+              }
+            />
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            You have not enabled proposals for this property.{" "}
+            {canEdit(property.status) && (
+              <button
+                type="button"
+                onClick={() => setEditOpen(true)}
+                className="underline hover:text-foreground"
+              >
+                Edit property
+              </button>
+            )}{" "}
+            to update your preferences.
+          </p>
+        )}
+      </div>
+
       {/* Review request panel */}
       {reviewRequest && (reviewRequest.status === "open" || reviewRequest.status === "submitted") && (
         <ReviewRequestPanel
