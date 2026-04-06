@@ -139,7 +139,7 @@ export default async function AdminPropertyAuditPage({
 
   const propRes = await (supabase.from("properties") as any)
     .select(
-      "id, owner_user_id, address_line1, address_line2, city, state, postal_code, status, created_at, updated_at, reviewed_at, reviewed_by, verified_at, verified_by, review_notes, has_secured_property_debt, secured_property_debt_amount, secured_debt_certified_at, secured_debt_last_verified_at, secured_debt_fresh_until, secured_debt_verification_status, latest_verified_fmv, fmv_verified_at, fmv_verification_source, ltv_policy_ratio, max_accessible_cash_current, ownership_type, occupancy_use, occupancy_use_other, major_condition_issue, major_condition_issue_details, known_liens_and_claims, total_known_debt_amount, total_known_debt_confidence, debt_statement_availability, title_claims_known, title_claims_details, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, owner_stated_fmv_source_other, willing_to_proceed_formal_review, property_review_status, property_review_status_updated_at, property_review_note, property_review_expires_at, property_review_completed_at, escalation_deposit_status, escalation_avm_status, closing_review_status, closing_review_note, manual_appraisal_status, manual_appraisal_fmv, verification_state, owner_verification_removed_at, owner_verification_removed_reason, verified_appraisal_value_status, verified_appraisal_value_context_owner_id, current_fractpath_eligible_cash_cap, current_eligibility_posture, current_limiting_factors_json, current_controlling_secured_debt_basis, current_controlling_secured_debt_amount, secured_debt_basis_reason, secured_debt_basis_updated_at",
+      "id, owner_user_id, address_line1, address_line2, city, state, postal_code, status, created_at, updated_at, reviewed_at, reviewed_by, verified_at, verified_by, review_notes, has_secured_property_debt, secured_property_debt_amount, secured_debt_certified_at, secured_debt_last_verified_at, secured_debt_fresh_until, secured_debt_verification_status, latest_verified_fmv, fmv_verified_at, fmv_verification_source, ltv_policy_ratio, max_accessible_cash_current, ownership_type, occupancy_use, occupancy_use_other, major_condition_issue, major_condition_issue_details, known_liens_and_claims, total_known_debt_amount, total_known_debt_confidence, debt_statement_availability, title_claims_known, title_claims_details, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, owner_stated_fmv_source_other, willing_to_proceed_formal_review, proposal_interest_status, visibility_preference, proposal_preferences_acknowledged_at, property_review_status, property_review_status_updated_at, property_review_note, property_review_expires_at, property_review_completed_at, escalation_deposit_status, escalation_avm_status, closing_review_status, closing_review_note, manual_appraisal_status, manual_appraisal_fmv, verification_state, owner_verification_removed_at, owner_verification_removed_reason, verified_appraisal_value_status, verified_appraisal_value_context_owner_id, current_fractpath_eligible_cash_cap, current_eligibility_posture, current_limiting_factors_json, current_controlling_secured_debt_basis, current_controlling_secured_debt_amount, secured_debt_basis_reason, secured_debt_basis_updated_at",
     )
     .eq("id", propertyId)
     .maybeSingle();
@@ -685,6 +685,50 @@ export default async function AdminPropertyAuditPage({
           </div>
         </div>
       )}
+
+      {/* ── Proposal Preferences ── */}
+      <div className="rounded-lg border overflow-hidden">
+        <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b">
+          Proposal Preferences
+        </div>
+        <div className="p-4 text-sm">
+          <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+            <div>
+              <div className="text-muted-foreground text-xs">Proposals</div>
+              <div className="font-medium">
+                {p.proposal_interest_status === "interested_after_verification"
+                  ? "Enabled after verification"
+                  : "Off"}
+              </div>
+            </div>
+            <div>
+              <div className="text-muted-foreground text-xs">Visibility</div>
+              <div className="font-medium capitalize">
+                {p.visibility_preference
+                  ? p.visibility_preference.charAt(0).toUpperCase() +
+                    p.visibility_preference.slice(1)
+                  : "Private"}
+              </div>
+            </div>
+            <div>
+              <div className="text-muted-foreground text-xs">Acknowledgment</div>
+              <div className="font-medium">
+                {p.proposal_preferences_acknowledged_at
+                  ? `Accepted — ${formatDate(p.proposal_preferences_acknowledged_at)}`
+                  : p.proposal_interest_status === "interested_after_verification"
+                    ? "Missing"
+                    : "Not required"}
+              </div>
+            </div>
+          </div>
+          {p.visibility_preference === "public" && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Public preference does not make this property buyer-visible until verification
+              succeeds and downstream product visibility rules allow it.
+            </p>
+          )}
+        </div>
+      </div>
 
       {/* ── Verification + Supporting documents (two sections rendered by component) ── */}
       <PropertyDocumentsPreview propertyId={propertyId} docs={docs} />
