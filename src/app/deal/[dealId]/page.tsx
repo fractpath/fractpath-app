@@ -594,6 +594,8 @@ export default async function DealPage(ctx: PageProps) {
             initialTitle={headerTitle}
             initialProperty={headerProperty}
             effectiveSnapshot={effectiveSnapshotRecord}
+            ownerProposalId={isOwner ? (negState.currentProposal?.id ?? null) : null}
+            ownerProposalStatus={isOwner ? (negState.currentProposal?.status ?? null) : null}
           />
 
           {/* Enriched property preview — audience-gated, only when enrichment is available */}
@@ -1323,6 +1325,8 @@ export default async function DealPage(ctx: PageProps) {
             initialTitle={headerTitle}
             initialProperty={headerProperty}
             effectiveSnapshot={effectiveSnapshotRecord}
+            ownerProposalId={fallbackIsOwner ? (negState.currentProposal?.id ?? null) : null}
+            ownerProposalStatus={fallbackIsOwner ? (negState.currentProposal?.status ?? null) : null}
           />
 
           {/* Enriched property preview — audience-gated, only when enrichment is available */}

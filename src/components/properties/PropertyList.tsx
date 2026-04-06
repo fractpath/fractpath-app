@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useToast } from "@/components/ui/Toast";
 import { LoadingButton } from "@/components/ui/LoadingButton";
 import { Modal } from "@/components/ui/Modal";
@@ -24,6 +25,8 @@ type Property = {
   claim_thread_id?: string | null;
   claim_deal_id?: string | null;
   claim_thread_status?: string | null;
+  // Enrichment thumbnail — merged in by API from property_enrichments
+  cover_image_url?: string | null;
   // Review request status — set when an open/submitted request exists for a linked deal
   review_request_status?: "open" | "submitted" | null;
   // Proposal preferences
@@ -50,7 +53,7 @@ type Property = {
 
 const STATUS_BADGE: Record<
   PropertyStatus,
-  { label: string; className: string; hint: string }
+  { label: string; className: string; hint: string; icon?: "check" }
 > = {
   unverified: {
     label: "Unverified",
@@ -63,9 +66,10 @@ const STATUS_BADGE: Record<
     hint: "Being reviewed",
   },
   verified: {
-    label: "Verified \u2713",
-    className: "bg-green-100 text-green-800",
+    label: "Verified",
+    className: "bg-emerald-100 text-emerald-800 border border-emerald-200",
     hint: "Approved for participation",
+    icon: "check",
   },
   archived: {
     label: "Archived",
@@ -205,18 +209,48 @@ export function PropertyList() {
               : (STATUS_BADGE[p.status] ?? STATUS_BADGE.unverified);
 
             return (
-              <li key={p.id} className="rounded-md border p-3">
-                <div className="flex items-center justify-between gap-2">
+              <li key={p.id} className="rounded-md border overflow-hidden">
+                <div className="flex gap-3 p-3">
+                  {/* Thumbnail — only when enrichment image is available */}
+                  {p.cover_image_url && (
+                    <div className="relative h-16 w-24 flex-shrink-0 rounded overflow-hidden bg-muted/40">
+                      <Image
+                        src={p.cover_image_url}
+                        alt="Property thumbnail"
+                        fill
+                        className="object-cover"
+                        unoptimized
+                      />
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between gap-2 flex-1 min-w-0">
                   <div className="min-w-0">
                     <div className="text-sm font-medium">
                       {p.address_display || p.address_line1}
                     </div>
-                    <div className="mt-1 flex items-center gap-2 flex-wrap">
+                    <div className="mt-1 flex items-center gap-1.5 flex-wrap">
                       <span
-                        className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-medium ${badge.className}`}
+                        className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10px] font-semibold ${badge.className}`}
                       >
+                        {badge.icon === "check" && (
+                          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                            <path
+                              fillRule="evenodd"
+                              d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
+                              clipRule="evenodd"
+                            />
+                          </svg>
+                        )}
                         {badge.label}
                       </span>
+                      {!isClaimable &&
+                        p.status === "verified" &&
+                        p.proposal_interest_status === "interested_after_verification" && (
+                          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium bg-blue-100 text-blue-800 border border-blue-200">
+                            Open to Deals
+                          </span>
+                        )}
                       <span className="text-[11px] text-muted-foreground">
                         {badge.hint}
                       </span>
@@ -233,11 +267,10 @@ export function PropertyList() {
                     {!isClaimable &&
                       p.proposal_interest_status === "interested_after_verification" && (
                         <div className="mt-1 text-[11px] text-muted-foreground">
-                          Proposal preferences: Enabled after verification
-                          {p.visibility_preference === "matched" && " · Matched visibility"}
-                          {p.visibility_preference === "public" && " · Public visibility"}
+                          {p.visibility_preference === "matched" && "Matched visibility"}
+                          {p.visibility_preference === "public" && "Public visibility"}
                           {(p.visibility_preference === "private" || !p.visibility_preference) &&
-                            " · Private"}
+                            "Private visibility"}
                         </div>
                       )}
                   </div>
@@ -286,6 +319,7 @@ export function PropertyList() {
                       </>
                     )}
                   </div>
+                </div>
                 </div>
               </li>
             );

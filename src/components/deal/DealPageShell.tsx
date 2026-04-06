@@ -27,6 +27,9 @@ type Props = {
   initialTitle: string | null;
   initialProperty: HeaderProperty | null;
   effectiveSnapshot: AnyRecord | null;
+  // Owner action context — only populated when current user is the homeowner
+  ownerProposalId?: string | null;
+  ownerProposalStatus?: string | null;
 };
 
 export function DealPageShell({
@@ -37,6 +40,8 @@ export function DealPageShell({
   initialTitle,
   initialProperty,
   effectiveSnapshot,
+  ownerProposalId,
+  ownerProposalStatus,
 }: Props) {
   const [propertyId, setPropertyId] = useState<string | null>(
     initialProperty?.property_id ?? null,
@@ -51,6 +56,9 @@ export function DealPageShell({
           locked={locked}
           readOnly={!isOwner}
           effectiveSnapshot={effectiveSnapshot}
+          ownerProposalId={isOwner ? (ownerProposalId ?? null) : null}
+          ownerProposalStatus={isOwner ? (ownerProposalStatus ?? null) : null}
+          activeThreadStatus={activeThread?.status ?? null}
         />
       </div>
 

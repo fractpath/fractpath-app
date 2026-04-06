@@ -312,11 +312,41 @@ export async function GET() {
     }
   }
 
-  const rows = Array.from(byId.values()).sort((a: any, b: any) => {
+  let rows = Array.from(byId.values()).sort((a: any, b: any) => {
     const aTime = new Date(a.updated_at ?? a.created_at ?? 0).getTime();
     const bTime = new Date(b.updated_at ?? b.created_at ?? 0).getTime();
     return bTime - aTime;
   });
+
+  // Enrich properties with enrichment thumbnail — best-effort, non-fatal
+  {
+    const allIds = rows.map((r: any) => r.id).filter(Boolean);
+    if (allIds.length > 0) {
+      try {
+        const { data: enrichRows } = await (svc.from("property_enrichments") as any)
+          .select("property_id, images_payload")
+          .in("property_id", allIds)
+          .eq("is_current", true)
+          .eq("provider", "mashvisor")
+          .not("images_payload", "is", null);
+
+        const thumbnailMap = new Map<string, string | null>();
+        for (const e of enrichRows ?? []) {
+          const url = e?.images_payload?.cover_image_url ?? null;
+          thumbnailMap.set(e.property_id, url);
+        }
+
+        if (thumbnailMap.size > 0) {
+          rows = rows.map((r: any) => {
+            const thumb = thumbnailMap.get(r.id);
+            return thumb !== undefined ? { ...r, cover_image_url: thumb } : r;
+          });
+        }
+      } catch {
+        // best-effort — do not fail the response
+      }
+    }
+  }
 
   return NextResponse.json({ ok: true, properties: rows });
 }
