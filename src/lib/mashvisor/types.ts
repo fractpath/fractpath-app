@@ -15,61 +15,122 @@ export type MashvisorImagesPayload = {
 };
 
 function num(v: unknown): number | null {
+  if (v == null || v === "") return null;
   const n = Number(v);
-  return isNaN(n) || v == null || v === "" ? null : n;
+  return isNaN(n) ? null : n;
 }
 
 function str(v: unknown): string | null {
-  return v != null && String(v).trim() !== "" ? String(v).trim() : null;
+  if (v == null) return null;
+  const s = String(v).trim();
+  return s !== "" ? s : null;
 }
 
-function firstResult(raw: unknown): Record<string, unknown> {
+/**
+ * Extract the property data object from a raw Mashvisor response.
+ *
+ * The API for GET /v1.1/client/property returns:
+ *   { status: 200, content: { id, address, city, state, zip, beds, ... } }
+ *
+ * Some list endpoints wrap results in content.results[]; this helper handles both shapes.
+ */
+function extractContent(raw: unknown): Record<string, unknown> {
   if (!raw || typeof raw !== "object") return {};
   const r = raw as Record<string, unknown>;
-  const content = r["content"] as Record<string, unknown> | null | undefined;
-  const results = content?.["results"];
-  if (Array.isArray(results) && results.length > 0) {
-    return results[0] as Record<string, unknown>;
+
+  const content = r["content"];
+
+  if (content && typeof content === "object" && !Array.isArray(content)) {
+    const c = content as Record<string, unknown>;
+    // List endpoint: { content: { results: [...] } }
+    const results = c["results"];
+    if (Array.isArray(results) && results.length > 0) {
+      return results[0] as Record<string, unknown>;
+    }
+    // Single-property endpoint: { content: { id, address, ... } }
+    return c;
   }
+
+  // Fallback: treat root as the property object
   return r;
 }
 
 export function normalizeMashvisorResponse(raw: unknown): MashvisorNormalizedSummary {
   const now = new Date().toISOString();
-  const first = firstResult(raw);
+  const c = extractContent(raw);
+
+  // Build a formatted address from individual fields when a single-string address
+  // is not present or is just the street.
+  const rawAddress = str(c["address"]);
+  const city = str(c["city"]);
+  const state = str(c["state"]);
+  const zip = str(c["zip"] ?? c["zip_code"]);
+  const addressParts = [rawAddress, city, state, zip].filter(Boolean);
+  const formattedAddress =
+    addressParts.length > 0 ? addressParts.join(", ") : null;
+
+  // Valuation: prefer explicit estimate, fall back to list price
+  const valuation = c["valuation_batch"] as Record<string, unknown> | null | undefined;
+  const meta = c["meta"] as Record<string, unknown> | null | undefined;
+  const valueEstimate = num(
+    valuation?.["valuation_estimate"] ??
+    meta?.["value"] ??
+    c["listPrice"] ??
+    c["list_price"] ??
+    c["price"],
+  );
 
   return {
-    mashvisor_property_id: str(first["id"] ?? first["property_id"]),
-    address: str(first["address"] ?? first["formattedAddress"]),
-    property_type: str(first["type"] ?? first["propertyType"] ?? first["property_type"]),
-    beds: num(first["num_of_beds"] ?? first["bedrooms"]),
-    baths: num(first["num_of_baths"] ?? first["bathrooms"]),
-    sqft: num(first["sqft"] ?? first["squareFootage"]),
-    value_estimate: num(first["home_value"] ?? first["value"] ?? first["price"]),
+    mashvisor_property_id: str(c["id"] ?? c["property_id"]),
+    address: formattedAddress,
+    property_type: str(
+      c["homeType"] ??
+      c["home_type"] ??
+      c["property_type"] ??
+      c["property_sub_type"] ??
+      c["type"],
+    ),
+    beds: num(c["beds"] ?? c["num_of_beds"] ?? c["bedrooms"]),
+    baths: num(c["baths"] ?? c["num_of_baths"] ?? c["bathrooms"]),
+    sqft: num(c["sqft"] ?? c["squareFootage"] ?? c["square_footage"]),
+    value_estimate: valueEstimate,
     fetched_at: now,
   };
 }
 
 export function extractMashvisorImages(raw: unknown): MashvisorImagesPayload {
-  const first = firstResult(raw);
+  const c = extractContent(raw);
 
-  const imageUrls: string[] = [];
-  const coverRaw = first["image"] ?? first["cover_image"] ?? first["main_image"];
-  const coverUrl = str(coverRaw);
+  // Cover image: content.image.url or content.image.image
+  const imageObj = c["image"] as Record<string, unknown> | null | undefined;
+  const coverUrl =
+    str(imageObj?.["url"]) ??
+    str(imageObj?.["image"]) ??
+    null;
 
-  const gallery = first["images"] ?? first["image_urls"] ?? first["gallery"];
-  if (Array.isArray(gallery)) {
-    for (const item of gallery) {
-      const u = str(typeof item === "object" && item !== null ? (item as Record<string, unknown>)["url"] ?? item : item);
-      if (u) imageUrls.push(u);
+  // Gallery: content.extra_images array
+  const extraImages = c["extra_images"];
+  const galleryUrls: string[] = [];
+
+  if (Array.isArray(extraImages)) {
+    for (const item of extraImages) {
+      const u =
+        typeof item === "object" && item !== null
+          ? str((item as Record<string, unknown>)["url"] ?? (item as Record<string, unknown>)["image"] ?? item)
+          : str(item);
+      if (u) galleryUrls.push(u);
     }
   }
-  if (coverUrl && !imageUrls.includes(coverUrl)) {
-    imageUrls.unshift(coverUrl);
+
+  // Build final image_urls: cover first, then unique gallery entries
+  const allUrls: string[] = [];
+  if (coverUrl) allUrls.push(coverUrl);
+  for (const u of galleryUrls) {
+    if (!allUrls.includes(u)) allUrls.push(u);
   }
 
   return {
-    cover_image_url: coverUrl ?? imageUrls[0] ?? null,
-    image_urls: imageUrls,
+    cover_image_url: coverUrl ?? galleryUrls[0] ?? null,
+    image_urls: allUrls,
   };
 }
