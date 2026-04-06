@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { DealEditModal as EditModalMount } from "fractpath-calculator-widget";
+import { DealTermsModal } from "@/components/deal/DealTermsModal";
 import { normalizeDealTermsForWidget } from "@/lib/normalizeDealTermsForWidget";
 import { usePageLoading } from "@/components/ui/PageLoadingOverlay";
 
@@ -122,7 +122,7 @@ export function CounterOfferModal({
         </div>
       )}
 
-      <EditModalMount
+      <DealTermsModal
         initial={modalInitial as any}
         persona={"buyer" as any}
         onClose={onClose}

@@ -228,16 +228,22 @@ export function DraftDealProjectionPanel({
   const exitWindowEnd =
     safeNumber((dealTerms as any)?.target_exit_window_end_year) ??
     CANONICAL_DEAL_TERM_DEFAULTS.target_exit_window_end_year;
-  const firstExtStart = safeNumber((dealTerms as any)?.first_extension_start_year);
-  const firstExtEnd = safeNumber((dealTerms as any)?.first_extension_end_year);
   const firstExtPremiumPct =
     safeNumber((dealTerms as any)?.first_extension_premium_pct) ??
     CANONICAL_DEAL_TERM_DEFAULTS.first_extension_premium_pct;
-  const secondExtStart = safeNumber((dealTerms as any)?.second_extension_start_year);
-  const secondExtEnd = safeNumber((dealTerms as any)?.second_extension_end_year);
   const secondExtPremiumPct =
     safeNumber((dealTerms as any)?.second_extension_premium_pct) ??
     CANONICAL_DEAL_TERM_DEFAULTS.second_extension_premium_pct;
+  // Auto-derive fixed 12-month extension windows from exitWindowEnd when not explicitly stored.
+  // Extensions are fixed contract structure (not editable inputs) — derive from target exit window end.
+  const firstExtStart =
+    safeNumber((dealTerms as any)?.first_extension_start_year) ?? exitWindowEnd;
+  const firstExtEnd =
+    safeNumber((dealTerms as any)?.first_extension_end_year) ?? exitWindowEnd + 1;
+  const secondExtStart =
+    safeNumber((dealTerms as any)?.second_extension_start_year) ?? exitWindowEnd + 1;
+  const secondExtEnd =
+    safeNumber((dealTerms as any)?.second_extension_end_year) ?? exitWindowEnd + 2;
   const servicingFeeMonthly =
     safeNumber((dealTerms as any)?.servicing_fee_monthly) ??
     CANONICAL_DEAL_TERM_DEFAULTS.servicing_fee_monthly;

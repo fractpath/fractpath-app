@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { DealEditModal as EditModalMount } from "fractpath-calculator-widget";
+import { DealTermsModal } from "@/components/deal/DealTermsModal";
 import { extractDealDisplayModel } from "@/lib/dealSnapshotDisplay";
 import { normalizeDealTermsForWidget } from "@/lib/normalizeDealTermsForWidget";
 
@@ -196,7 +196,7 @@ export function DealWidgetShell({
       )}
 
       {editOpen && canEditSnapshot ? (
-        <EditModalMount
+        <DealTermsModal
           initial={modalInitial as any}
           persona={persona as any}
           onClose={() => setEditOpen(false)}

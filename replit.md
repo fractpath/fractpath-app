@@ -58,6 +58,7 @@ FractPath is built with Next.js, utilizing API routes for backend logic and Supa
 - **Thread Status Values:** Canonical values for `deal_threads.status` are `draft`, `pending_owner`, `negotiating`, `decision_pending`, `accepted`, `closed`.
 - **Proposal Status Values:** Canonical values for `deal_proposals.status` are: `draft`, `submitted`, `accepted`, `rejected`, `withdrawn`.
 - **Contract Versioning:** `CONTRACT_VERSION` and `SCHEMA_VERSION` are stamped at snapshot persistence boundaries.
+- **Deal Terms Modal (custom):** `src/components/deal/DealTermsModal.tsx` — custom 4-tab modal (Payments, Exit Terms, Assumptions, Fees) replacing the opaque `DealEditModal` from the `fractpath-calculator-widget` package. Exit Terms tab shows editable minimum hold (default 1 yr) and expected exit timing, plus static fixed extension structure (1st: 12 mo / 6%, 2nd: 12 mo / 12%), contract maturity language with explicit buyout alternative, and a dynamic "What this means" section. Both `DealWidgetShell` and `CounterOfferModal` use this modal. Extension windows are auto-derived from `target_exit_window_end_year` when not explicitly stored in deal terms.
 - **Calculator Widget Package:** Provides React UI components and utilities.
 - **Canonical Compute Package:** The core `@fractpath/compute` engine for deal calculations and versioning.
 - **ATTOM Enhanced Screening:** Orchestrates ATTOM API calls for property screening, normalizing results, and applying canonical fields to properties.

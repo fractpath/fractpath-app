@@ -157,33 +157,22 @@ function resolveAcceptedStatus(
     safeNumber((dealTerms as any)?.long_stop_year) ??
     CANONICAL_DEAL_TERM_DEFAULTS.long_stop_year;
 
-  const firstExtStart = safeNumber(
-    (dealTerms as any)?.first_extension_start_year,
-  );
-  const firstExtEnd = safeNumber((dealTerms as any)?.first_extension_end_year);
-  const secondExtStart = safeNumber(
-    (dealTerms as any)?.second_extension_start_year,
-  );
-  const secondExtEnd = safeNumber(
-    (dealTerms as any)?.second_extension_end_year,
-  );
+  // Auto-derive fixed extension windows from exitWindowEnd when not explicitly stored
+  const firstExtStart =
+    safeNumber((dealTerms as any)?.first_extension_start_year) ?? exitWindowEnd;
+  const firstExtEnd =
+    safeNumber((dealTerms as any)?.first_extension_end_year) ?? exitWindowEnd + 1;
+  const secondExtStart =
+    safeNumber((dealTerms as any)?.second_extension_start_year) ?? exitWindowEnd + 1;
+  const secondExtEnd =
+    safeNumber((dealTerms as any)?.second_extension_end_year) ?? exitWindowEnd + 2;
 
   if (elapsed < minHold) return "Active — before exit window";
   if (elapsed <= exitWindowEnd) return "In target exit window";
-  if (
-    firstExtStart !== null &&
-    firstExtEnd !== null &&
-    elapsed >= firstExtStart &&
-    elapsed <= firstExtEnd
-  ) {
+  if (elapsed > firstExtStart && elapsed <= firstExtEnd) {
     return "In first extension";
   }
-  if (
-    secondExtStart !== null &&
-    secondExtEnd !== null &&
-    elapsed >= secondExtStart &&
-    elapsed <= secondExtEnd
-  ) {
+  if (elapsed > secondExtStart && elapsed <= secondExtEnd) {
     return "In second extension";
   }
   if (elapsed <= longStop) return "In extension";
@@ -345,16 +334,22 @@ export function AcceptedDealStatusPanel({
     safeNumber((dealTerms as any)?.target_exit_window_start_year) ?? CANONICAL_DEAL_TERM_DEFAULTS.target_exit_window_start_year;
   const exitWindowEnd =
     safeNumber((dealTerms as any)?.target_exit_window_end_year) ?? CANONICAL_DEAL_TERM_DEFAULTS.target_exit_window_end_year;
-  const firstExtStartMain = safeNumber((dealTerms as any)?.first_extension_start_year);
-  const firstExtEndMain = safeNumber((dealTerms as any)?.first_extension_end_year);
   const firstExtPremiumPct =
     safeNumber((dealTerms as any)?.first_extension_premium_pct) ??
     CANONICAL_DEAL_TERM_DEFAULTS.first_extension_premium_pct;
-  const secondExtStartMain = safeNumber((dealTerms as any)?.second_extension_start_year);
-  const secondExtEndMain = safeNumber((dealTerms as any)?.second_extension_end_year);
   const secondExtPremiumPct =
     safeNumber((dealTerms as any)?.second_extension_premium_pct) ??
     CANONICAL_DEAL_TERM_DEFAULTS.second_extension_premium_pct;
+  // Auto-derive fixed 12-month extension windows from exitWindowEnd when not explicitly stored.
+  // Extensions are fixed contract structure (not editable inputs) — derive from target exit window end.
+  const firstExtStartMain =
+    safeNumber((dealTerms as any)?.first_extension_start_year) ?? exitWindowEnd;
+  const firstExtEndMain =
+    safeNumber((dealTerms as any)?.first_extension_end_year) ?? exitWindowEnd + 1;
+  const secondExtStartMain =
+    safeNumber((dealTerms as any)?.second_extension_start_year) ?? exitWindowEnd + 1;
+  const secondExtEndMain =
+    safeNumber((dealTerms as any)?.second_extension_end_year) ?? exitWindowEnd + 2;
   const servicingFeeMonthly =
     safeNumber((dealTerms as any)?.servicing_fee_monthly) ?? CANONICAL_DEAL_TERM_DEFAULTS.servicing_fee_monthly;
   const exitAdminFee =

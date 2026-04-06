@@ -506,7 +506,9 @@ export function BuyoutProjectionChart({
               </div>
               <div className="flex items-center justify-between gap-3">
                 <span className="text-amber-600 font-medium">
-                  Past exit window (+{fmtPct(hover.extensionPremiumPct)})
+                  {hover.windowLabel === "Second extension"
+                    ? `Extension premium (2nd) +${fmtPct(hover.extensionPremiumPct)}`
+                    : `Extension premium (1st) +${fmtPct(hover.extensionPremiumPct)}`}
                 </span>
                 <span className="tabular-nums text-amber-600 font-medium">
                   +{fmtCurrency(hover.buyout - hover.baseBuyout)}

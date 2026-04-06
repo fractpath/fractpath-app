@@ -12,7 +12,7 @@ export const CANONICAL_DEAL_TERM_DEFAULTS = {
   number_of_payments: 0,
 
   // Lifecycle
-  minimum_hold_years: 2,
+  minimum_hold_years: 1,
   contract_maturity_years: 30,
   target_exit_year: null as number | null,
   target_exit_window_start_year: 3,
