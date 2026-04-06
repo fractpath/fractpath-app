@@ -129,7 +129,7 @@ export function EnrichedPropertyPreview({ enrichment, audience }: Props) {
         )}
         {/* Show fetched timestamp to admin and owner, but NOT buyer */}
         {(isAdmin || audience === "owner") && fetchedAt && (
-          <p className="text-[11px] text-muted-foreground mt-1">
+          <p className="text-[11px] text-muted-foreground mt-1" suppressHydrationWarning>
             Fetched {fmtDate(fetchedAt)}
           </p>
         )}
@@ -198,9 +198,9 @@ export function EnrichedPropertyPreview({ enrichment, audience }: Props) {
               {enrichment.providerRecordId ?? summary.mashvisor_property_id ?? "—"}
             </span>
           </div>
-          <div className="flex justify-between px-3 py-2">
+          <div className="flex justify-between px-3 py-2" suppressHydrationWarning>
             <span className="text-muted-foreground">Last fetched</span>
-            <span className="font-medium">{fmtDate(fetchedAt)}</span>
+            <span className="font-medium" suppressHydrationWarning>{fmtDate(fetchedAt)}</span>
           </div>
           <div className="flex justify-between px-3 py-2">
             <span className="text-muted-foreground">Images stored</span>
