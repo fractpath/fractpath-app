@@ -8,6 +8,11 @@ import type { HomeownerReviewRequest } from "@/components/properties/ReviewReque
 import type { PropertyWorkflowState } from "@/components/properties/PropertyDetailClient";
 import type { LiveIneligiblePhase } from "@/components/properties/PropertyValuationSections";
 import type { PropertyAuditEntry } from "@/components/properties/PropertyActivityTimeline";
+import type {
+  MashvisorNormalizedSummary,
+  MashvisorImagesPayload,
+} from "@/lib/mashvisor/types";
+import type { EnrichedPreviewData } from "@/components/property/EnrichedPropertyPreview";
 
 export const runtime = "nodejs";
 
@@ -245,6 +250,32 @@ export default async function PropertyDetailPage({ params }: PageProps) {
     }
   }
 
+  // Fetch current enrichment for this property (non-fatal)
+  let ownerEnrichment: EnrichedPreviewData | null = null;
+  try {
+    const { data: enrichmentRow } = await (svc.from("property_enrichments") as any)
+      .select("summary_payload, images_payload, fetched_at")
+      .eq("property_id", propertyId)
+      .eq("provider", "mashvisor")
+      .eq("is_current", true)
+      .eq("status", "completed")
+      .maybeSingle();
+
+    if (enrichmentRow) {
+      const summary = enrichmentRow.summary_payload as MashvisorNormalizedSummary | null;
+      const images = enrichmentRow.images_payload as MashvisorImagesPayload | null;
+      if (summary && images) {
+        ownerEnrichment = {
+          summary,
+          images,
+          fetchedAt: enrichmentRow.fetched_at ?? summary.fetched_at ?? null,
+        };
+      }
+    }
+  } catch {
+    // non-fatal — proceed without enrichment
+  }
+
   return (
     <div>
       <AppHeader />
@@ -255,6 +286,7 @@ export default async function PropertyDetailPage({ params }: PageProps) {
           reviewRequest={reviewRequest}
           workflowState={workflowState}
           activityEntries={activityEntries}
+          enrichment={ownerEnrichment}
         />
       </main>
     </div>

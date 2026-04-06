@@ -23,6 +23,10 @@ import {
   isAppraisalBadgeExpired,
   isAppraisalBadgeUnderReview,
 } from "@/lib/property/badges";
+import {
+  EnrichedPropertyPreview,
+  type EnrichedPreviewData,
+} from "@/components/property/EnrichedPropertyPreview";
 
 type LinkedDeal = {
   thread_id: string;
@@ -82,6 +86,8 @@ type Props = {
   workflowState?: PropertyWorkflowState | null;
   /** Audit entries from property_status_audit for the activity timeline */
   activityEntries?: PropertyAuditEntry[];
+  /** Enriched property preview data — shown to owner when available */
+  enrichment?: EnrichedPreviewData | null;
 };
 
 // ── Status badge ─────────────────────────────────────────────────────────────
@@ -286,6 +292,7 @@ export function PropertyDetailClient({
   reviewRequest,
   workflowState,
   activityEntries = [],
+  enrichment = null,
 }: Props) {
   const [editOpen, setEditOpen] = useState(false);
 
@@ -431,6 +438,18 @@ export function PropertyDetailClient({
           </div>
         )}
       </div>
+
+      {/* Enriched property preview — shown to owner when enrichment is available */}
+      {enrichment && (
+        <div className="rounded-lg border overflow-hidden">
+          <div className="bg-muted/40 px-4 py-2 border-b">
+            <span className="text-sm font-medium">Property Preview</span>
+          </div>
+          <div className="p-4">
+            <EnrichedPropertyPreview audience="owner" enrichment={enrichment} />
+          </div>
+        </div>
+      )}
 
       {/* Valuation confirmed card — plain-language trust signal when appraisal badge is active */}
       {showVerifiedAppraisalBadge && !appraisalUnderReview && !appraisalExpired && (

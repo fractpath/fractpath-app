@@ -69,6 +69,9 @@ FractPath is built with Next.js, utilizing API routes for backend logic and Supa
 - **Owner Debt Challenge (T007):** Allows owners to submit a plain-text statement to the review team regarding debt discrepancies.
 - **`liveIneligiblePhase` fix:** Correctly derives `liveIneligiblePhase` when ATTOM or manual appraisal is the controlling basis.
 - **Notification Audit:** Documentation of all customer-facing notifications.
+- **Mashvisor Enrichment System:** `property_enrichments` table stores `raw_payload`, `summary_payload`, `images_payload` per property+provider. Admin-gated `POST /api/admin/properties/[propertyId]/review/fetch-mashvisor` writes current enrichment row (partial unique index on property+provider+is_current).
+- **Shared Enriched Property Preview:** `src/components/property/EnrichedPropertyPreview.tsx` — audience-aware (`"admin" | "owner" | "buyer"`) shared component rendering cover image, gallery strip, stats (beds/baths/sqft/source value), and address from stored enrichment. Admin sees provider ID, image count, fetched timestamp. Owner sees fetched timestamp. Buyer sees only the property preview — no provider branding, no internal IDs. `AdminMashvisorPanel` delegates its preview section to this shared component. Owner property page and deal page (both server paths) query enrichment non-fatally and render the shared preview. Falls back cleanly when no enrichment exists.
+- **Gallery Lightbox (prev/next):** `src/components/admin/Lightbox.tsx` extended with gallery mode (`images[]`, `index`, `onNavigate` props); keyboard ←/→ navigation and on-screen prev/next buttons. Original single-image API remains backward-compatible via discriminated union.
 
 ## External Dependencies
 - **Next.js:** Application framework.

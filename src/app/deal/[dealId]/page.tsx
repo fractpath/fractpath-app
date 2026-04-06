@@ -37,6 +37,12 @@ import {
   DEFAULT_LTV_RATIO,
   type AvmEligibilityResult,
 } from "@/lib/avmEligibility";
+import { EnrichedPropertyPreview } from "@/components/property/EnrichedPropertyPreview";
+import type { EnrichedPreviewData } from "@/components/property/EnrichedPropertyPreview";
+import type {
+  MashvisorNormalizedSummary,
+  MashvisorImagesPayload,
+} from "@/lib/mashvisor/types";
 
 type PageProps = {
   params: Promise<{ dealId: string }>;
@@ -397,6 +403,34 @@ export default async function DealPage(ctx: PageProps) {
         }
       : null;
 
+    // Enrichment for this deal's linked property — non-fatal, audience-gated in JSX
+    let dealPropertyEnrichment: EnrichedPreviewData | null = null;
+    if (resolvedPropertyId) {
+      try {
+        const { data: enrichmentRow } = await (svc.from("property_enrichments") as any)
+          .select("summary_payload, images_payload, fetched_at")
+          .eq("property_id", resolvedPropertyId)
+          .eq("provider", "mashvisor")
+          .eq("is_current", true)
+          .eq("status", "completed")
+          .maybeSingle();
+
+        if (enrichmentRow) {
+          const summary = enrichmentRow.summary_payload as MashvisorNormalizedSummary | null;
+          const images = enrichmentRow.images_payload as MashvisorImagesPayload | null;
+          if (summary && images) {
+            dealPropertyEnrichment = {
+              summary,
+              images,
+              fetchedAt: enrichmentRow.fetched_at ?? summary.fetched_at ?? null,
+            };
+          }
+        }
+      } catch {
+        // non-fatal
+      }
+    }
+
     const { data: candidateThreads } = await (svc.from("deal_threads") as any)
       .select("id, status, buyer_user_id, owner_user_id, created_at")
       .eq("deal_id", dealId)
@@ -561,6 +595,21 @@ export default async function DealPage(ctx: PageProps) {
             initialProperty={headerProperty}
             effectiveSnapshot={effectiveSnapshotRecord}
           />
+
+          {/* Enriched property preview — audience-gated, only when enrichment is available */}
+          {dealPropertyEnrichment && (
+            <div className="rounded-lg border overflow-hidden">
+              <div className="bg-muted/40 px-4 py-2 border-b">
+                <span className="text-sm font-medium">Property Preview</span>
+              </div>
+              <div className="p-4">
+                <EnrichedPropertyPreview
+                  audience={isAdmin ? "admin" : isOwner ? "owner" : "buyer"}
+                  enrichment={dealPropertyEnrichment}
+                />
+              </div>
+            </div>
+          )}
 
           {canonicalResult.isExceptionState && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950">
@@ -1098,6 +1147,34 @@ export default async function DealPage(ctx: PageProps) {
         }
       : null;
 
+    // Enrichment for this deal's linked property — non-fatal, audience-gated in JSX
+    let fallbackDealPropertyEnrichment: EnrichedPreviewData | null = null;
+    if (resolvedPropertyId) {
+      try {
+        const { data: enrichmentRow } = await (svc.from("property_enrichments") as any)
+          .select("summary_payload, images_payload, fetched_at")
+          .eq("property_id", resolvedPropertyId)
+          .eq("provider", "mashvisor")
+          .eq("is_current", true)
+          .eq("status", "completed")
+          .maybeSingle();
+
+        if (enrichmentRow) {
+          const summary = enrichmentRow.summary_payload as MashvisorNormalizedSummary | null;
+          const images = enrichmentRow.images_payload as MashvisorImagesPayload | null;
+          if (summary && images) {
+            fallbackDealPropertyEnrichment = {
+              summary,
+              images,
+              fetchedAt: enrichmentRow.fetched_at ?? summary.fetched_at ?? null,
+            };
+          }
+        }
+      } catch {
+        // non-fatal
+      }
+    }
+
     const effectiveThread =
       thread &&
       ["pending_owner", "negotiating", "accepted"].includes(thread.status)
@@ -1247,6 +1324,21 @@ export default async function DealPage(ctx: PageProps) {
             initialProperty={headerProperty}
             effectiveSnapshot={effectiveSnapshotRecord}
           />
+
+          {/* Enriched property preview — audience-gated, only when enrichment is available */}
+          {fallbackDealPropertyEnrichment && (
+            <div className="rounded-lg border overflow-hidden">
+              <div className="bg-muted/40 px-4 py-2 border-b">
+                <span className="text-sm font-medium">Property Preview</span>
+              </div>
+              <div className="p-4">
+                <EnrichedPropertyPreview
+                  audience={fallbackIsAdmin ? "admin" : fallbackIsOwner ? "owner" : "buyer"}
+                  enrichment={fallbackDealPropertyEnrichment}
+                />
+              </div>
+            </div>
+          )}
 
           {canonicalResult.isExceptionState && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950">
