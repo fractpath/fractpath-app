@@ -74,15 +74,16 @@ function humanizeOccupancy(val: string | null | undefined): string | null {
 export default async function VerifiedPropertiesPage() {
   const supabase = createServiceClient();
 
-  // Eligibility: verified + publicly enabled
+  // Eligibility: canonical verified state + publicly enabled.
+  // verified_at is used for display only — its absence does NOT disqualify a verified property.
+  // Nulls are sorted last so properties with a stamped date appear first.
   const { data, error } = await (supabase.from("properties") as any)
     .select(
       "id, address_line1, address_line2, city, state, postal_code, verified_at, ownership_type, occupancy_use",
     )
     .eq("status", "verified")
     .eq("visibility_preference", "public")
-    .not("verified_at", "is", null)
-    .order("verified_at", { ascending: false });
+    .order("verified_at", { ascending: false, nullsFirst: false });
 
   let rows: PropertyRow[] = error ? [] : ((data ?? []) as PropertyRow[]);
 
