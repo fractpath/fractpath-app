@@ -17,6 +17,7 @@ import type { PropertyReviewStatus } from "@/components/admin/AdminPropertyRevie
 import { AdminVendorReviewPanel } from "@/components/admin/AdminVendorReviewPanel";
 import { AdminAttomScreeningPanel } from "@/components/admin/AdminAttomScreeningPanel";
 import { AdminDebtBasisPanel } from "@/components/admin/AdminDebtBasisPanel";
+import { AdminMashvisorPanel } from "@/components/admin/AdminMashvisorPanel";
 import { AdminEscalationSimPanel } from "@/components/admin/AdminEscalationSimPanel";
 import { AdminManualAppraisalSimPanel } from "@/components/admin/AdminManualAppraisalSimPanel";
 import { AdminPropertyClosingPanel } from "@/components/admin/AdminPropertyClosingPanel";
@@ -310,6 +311,7 @@ export default async function AdminPropertyAuditPage({
   const latestAvmRun = recentRuns.find((r) => r.artifact_type === "avm") ?? null;
   // ATTOM enhanced screening runs are stored with artifact_type "enhanced_screening"
   const latestAttomRun = recentRuns.find((r) => r.artifact_type === "enhanced_screening") ?? null;
+  const latestMashvisorRun = recentRuns.find((r) => r.artifact_type === "mashvisor_enrichment") ?? null;
   const lastProfileError =
     latestProfileRun?.status === "failed"
       ? { error_message: latestProfileRun.error_message }
@@ -1001,6 +1003,27 @@ export default async function AdminPropertyAuditPage({
         latestVerifiedFmv={(p.latest_verified_fmv as number | null) ?? null}
         fmvVerificationSource={(p.fmv_verification_source as string | null) ?? null}
         eligibleCashCap={(p.current_fractpath_eligible_cash_cap as number | null) ?? null}
+      />
+
+      {/* ── Mashvisor enrichment ── */}
+      {/*
+        Manual admin-only enrichment fetch from Mashvisor.
+        Does not auto-trigger; does not affect owner-facing surfaces.
+        Stored in property_review_runs (artifact_type: mashvisor_enrichment).
+        Requires MASHVISOR_API_KEY to be configured.
+      */}
+      <AdminMashvisorPanel
+        propertyId={propertyId}
+        hasAddress={!!(p.address_line1 && p.city && p.state)}
+        lastRun={
+          latestMashvisorRun
+            ? {
+                status: latestMashvisorRun.status,
+                requested_at: latestMashvisorRun.requested_at,
+                normalized_payload: latestMashvisorRun.normalized_payload as any,
+              }
+            : null
+        }
       />
 
       {/* ── Debt basis management ── */}
