@@ -78,6 +78,10 @@ export type HomeownerPropertyShape = {
   owner_stated_fmv_source: string | null;
   owner_stated_fmv_source_other: string | null;
   willing_to_proceed_formal_review: string | null;
+  // Proposal preferences (owner-expressed, saved and never buyer-facing)
+  proposal_interest_status: string;
+  visibility_preference: string;
+  proposal_preferences_acknowledged_at: string | null;
   // Phase 1 verification state machine fields
   verification_state: string | null;
   verified_appraisal_value_status: string | null;
@@ -144,6 +148,9 @@ export function toHomeownerProperty(
     owner_stated_fmv_source: row.owner_stated_fmv_source ?? null,
     owner_stated_fmv_source_other: row.owner_stated_fmv_source_other ?? null,
     willing_to_proceed_formal_review: row.willing_to_proceed_formal_review ?? null,
+    proposal_interest_status: row.proposal_interest_status ?? "not_interested",
+    visibility_preference: row.visibility_preference ?? "private",
+    proposal_preferences_acknowledged_at: row.proposal_preferences_acknowledged_at ?? null,
     verification_state: row.verification_state ?? null,
     verified_appraisal_value_status: row.verified_appraisal_value_status ?? null,
     owner_verification_removed_at: row.owner_verification_removed_at ?? null,

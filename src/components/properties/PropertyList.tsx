@@ -26,6 +26,9 @@ type Property = {
   claim_thread_status?: string | null;
   // Review request status — set when an open/submitted request exists for a linked deal
   review_request_status?: "open" | "submitted" | null;
+  // Proposal preferences
+  proposal_interest_status?: string | null;
+  visibility_preference?: string | null;
   // Sprint 16 intake fields
   ownership_type?: string | null;
   occupancy_use?: string | null;
@@ -226,6 +229,17 @@ export function PropertyList() {
                         offer on the deal page.
                       </div>
                     )}
+
+                    {!isClaimable &&
+                      p.proposal_interest_status === "interested_after_verification" && (
+                        <div className="mt-1 text-[11px] text-muted-foreground">
+                          Proposal preferences: Enabled after verification
+                          {p.visibility_preference === "matched" && " · Matched visibility"}
+                          {p.visibility_preference === "public" && " · Public visibility"}
+                          {(p.visibility_preference === "private" || !p.visibility_preference) &&
+                            " · Private"}
+                        </div>
+                      )}
                   </div>
 
                   <div className="flex shrink-0 gap-2">
@@ -320,6 +334,8 @@ export function PropertyList() {
             owner_stated_fmv_source: editTarget.owner_stated_fmv_source,
             owner_stated_fmv_source_other: editTarget.owner_stated_fmv_source_other,
             willing_to_proceed_formal_review: editTarget.willing_to_proceed_formal_review,
+            proposal_interest_status: editTarget.proposal_interest_status,
+            visibility_preference: editTarget.visibility_preference,
           }}
         />
       )}
@@ -356,6 +372,8 @@ export function PropertyList() {
             owner_stated_fmv_source: verifyTarget.owner_stated_fmv_source,
             owner_stated_fmv_source_other: verifyTarget.owner_stated_fmv_source_other,
             willing_to_proceed_formal_review: verifyTarget.willing_to_proceed_formal_review,
+            proposal_interest_status: verifyTarget.proposal_interest_status,
+            visibility_preference: verifyTarget.visibility_preference,
           }}
         />
       )}

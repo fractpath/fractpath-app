@@ -162,6 +162,23 @@ export async function PATCH(
     if (v !== null) updatePayload[k] = v;
   }
 
+  // --- Proposal preferences (optional during edit; only update when sent) ---
+  const proposalInterestStatusEdit = strField("proposal_interest_status");
+  const visibilityPrefEdit = strField("visibility_preference");
+  const proposalAcknowledgedEdit = formData.get("proposal_preferences_acknowledged") === "true";
+  if (proposalInterestStatusEdit === "not_interested" || proposalInterestStatusEdit === "interested_after_verification") {
+    updatePayload.proposal_interest_status = proposalInterestStatusEdit;
+    updatePayload.visibility_preference =
+      proposalInterestStatusEdit === "interested_after_verification"
+        ? (visibilityPrefEdit === "private" || visibilityPrefEdit === "matched" || visibilityPrefEdit === "public"
+            ? visibilityPrefEdit
+            : "private")
+        : "private";
+    if (proposalInterestStatusEdit === "interested_after_verification" && proposalAcknowledgedEdit) {
+      updatePayload.proposal_preferences_acknowledged_at = new Date().toISOString();
+    }
+  }
+
   const { error: updateErr } = await (svc.from("properties") as any)
     .update(updatePayload)
     .eq("id", propertyId)

@@ -117,6 +117,9 @@ type EditPrefill = {
   owner_stated_fmv_source?: string | null;
   owner_stated_fmv_source_other?: string | null;
   willing_to_proceed_formal_review?: string | null;
+  // Proposal preferences
+  proposal_interest_status?: string | null;
+  visibility_preference?: string | null;
 };
 
 type ResolveExtras = {
@@ -308,6 +311,15 @@ export function PropertyForm(props: {
     props.editPrefill?.willing_to_proceed_formal_review ?? "",
   );
 
+  // Proposal preferences
+  const [proposalInterest, setProposalInterest] = useState<string>(
+    props.editPrefill?.proposal_interest_status ?? "not_interested",
+  );
+  const [visibilityPreference, setVisibilityPreference] = useState<string>(
+    props.editPrefill?.visibility_preference ?? "private",
+  );
+  const [proposalAcknowledged, setProposalAcknowledged] = useState<boolean>(false);
+
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -346,6 +358,9 @@ export function PropertyForm(props: {
     setOwnerStatedFmvSource(p?.owner_stated_fmv_source ?? "");
     setOwnerStatedFmvSourceOther(p?.owner_stated_fmv_source_other ?? "");
     setWillingToProceed(p?.willing_to_proceed_formal_review ?? "");
+    setProposalInterest(p?.proposal_interest_status ?? "not_interested");
+    setVisibilityPreference(p?.visibility_preference ?? "private");
+    setProposalAcknowledged(false);
   }, [props.open, defaultMode, isEdit, props.editPrefill]);
 
   const previews = useMemo(() => {
@@ -471,12 +486,20 @@ export function PropertyForm(props: {
         ownerStatedFmvSourceOther.trim() !== "") &&
       willingToProceed !== "");
 
+  // Proposal preferences validation: if interest is enabled, visibility + acknowledgment are required.
+  const proposalValid =
+    proposalInterest === "not_interested" ||
+    (proposalInterest === "interested_after_verification" &&
+      (visibilityPreference === "private" || visibilityPreference === "matched" || visibilityPreference === "public") &&
+      proposalAcknowledged);
+
   const canSubmitOwner =
     isOwnerMode &&
     addressValid &&
     structuredReady &&
     allFilesPresent &&
     intakeValid &&
+    proposalValid &&
     !submitting;
   const canSubmitInvestor =
     !isOwnerMode &&
@@ -522,6 +545,13 @@ export function PropertyForm(props: {
           fd.set("owner_stated_fmv_source_other", ownerStatedFmvSourceOther);
         if (willingToProceed)
           fd.set("willing_to_proceed_formal_review", willingToProceed);
+
+        // Proposal preferences
+        fd.set("proposal_interest_status", proposalInterest);
+        if (proposalInterest === "interested_after_verification") {
+          fd.set("visibility_preference", visibilityPreference);
+          if (proposalAcknowledged) fd.set("proposal_preferences_acknowledged", "true");
+        }
 
         // Baseline verification docs
         for (const docType of Object.keys(DOC_LABELS) as DocType[]) {
@@ -586,6 +616,13 @@ export function PropertyForm(props: {
           fd.set("owner_stated_fmv_source_other", ownerStatedFmvSourceOther);
         if (willingToProceed)
           fd.set("willing_to_proceed_formal_review", willingToProceed);
+
+        // Proposal preferences
+        fd.set("proposal_interest_status", proposalInterest);
+        if (proposalInterest === "interested_after_verification") {
+          fd.set("visibility_preference", visibilityPreference);
+          if (proposalAcknowledged) fd.set("proposal_preferences_acknowledged", "true");
+        }
 
         const res = await fetch("/api/me/properties", { method: "POST", body: fd });
         const json = await res.json().catch(() => null);
@@ -1339,6 +1376,142 @@ export function PropertyForm(props: {
                 }
               }}
             />
+          </div>
+        )}
+
+        {/* ---- Proposal preferences ---- */}
+        {isOwnerMode && (
+          <div className="space-y-4 pt-4 border-t border-border">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Proposal preferences</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                You can save your preference now. Broader visibility, if enabled later, would only
+                happen after verification and review.
+              </p>
+            </div>
+
+            {/* Interest */}
+            <div className="space-y-2">
+              <p className="text-sm font-medium">
+                Would you like to make this property available for structured home equity agreement
+                proposals?
+              </p>
+              <div className="flex flex-col gap-2">
+                {[
+                  { value: "not_interested", label: "Not now" },
+                  { value: "interested_after_verification", label: "Yes, after verification" },
+                ].map(({ value, label }) => (
+                  <label
+                    key={value}
+                    className={`flex items-center gap-3 rounded-md border px-3 py-2 cursor-pointer transition-colors ${
+                      proposalInterest === value
+                        ? "border-foreground bg-muted/40"
+                        : "hover:bg-muted/20"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="proposalInterest"
+                      value={value}
+                      checked={proposalInterest === value}
+                      onChange={() => {
+                        setProposalInterest(value);
+                        if (value === "not_interested") {
+                          setProposalAcknowledged(false);
+                        }
+                      }}
+                      className="accent-foreground"
+                    />
+                    <span className="text-sm">{label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Visibility preference — only shown when interest = after verification */}
+            {proposalInterest === "interested_after_verification" && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Property visibility preference</p>
+                <p className="text-xs text-muted-foreground">
+                  This setting records your preference only. Visibility outside your account is not
+                  enabled immediately.
+                </p>
+                <div className="flex flex-col gap-2">
+                  {[
+                    {
+                      value: "private",
+                      label: "Private",
+                      hint: "Only you and FractPath can view this property",
+                    },
+                    {
+                      value: "matched",
+                      label: "Matched",
+                      hint: "A limited anonymized profile may be shown in the future",
+                    },
+                    {
+                      value: "public",
+                      label: "Public",
+                      hint: "May be eligible for broader visibility after verification and review",
+                    },
+                  ].map(({ value, label, hint }) => (
+                    <label
+                      key={value}
+                      className={`flex items-start gap-3 rounded-md border px-3 py-2 cursor-pointer transition-colors ${
+                        visibilityPreference === value
+                          ? "border-foreground bg-muted/40"
+                          : "hover:bg-muted/20"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="visibilityPreference"
+                        value={value}
+                        checked={visibilityPreference === value}
+                        onChange={() => setVisibilityPreference(value)}
+                        className="accent-foreground mt-0.5"
+                      />
+                      <div>
+                        <span className="text-sm font-medium">{label}</span>
+                        <p className="text-xs text-muted-foreground">{hint}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Compliance disclaimer + required acknowledgment */}
+            {proposalInterest === "interested_after_verification" && (
+              <div className="rounded-md border border-muted bg-muted/20 px-3 py-3 space-y-2">
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Submitting a property does not create a public listing or obligate you to accept
+                  any proposal. If you choose proposal visibility preferences, your property will not
+                  be shown more broadly unless FractPath later verifies the property and you remain
+                  opted in. FractPath provides software tools for property intake and proposal
+                  workflow. Availability for proposals, if enabled later, is subject to verification,
+                  review, and product availability.
+                </p>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={proposalAcknowledged}
+                    onChange={(e) => setProposalAcknowledged(e.target.checked)}
+                    className="accent-foreground mt-0.5 shrink-0"
+                  />
+                  <span className="text-xs text-foreground">
+                    I understand these preferences do not guarantee visibility or offers, and I can
+                    update them later.
+                  </span>
+                </label>
+              </div>
+            )}
+
+            {proposalInterest === "not_interested" && (
+              <p className="text-xs text-muted-foreground">
+                Submitting a property does not create a public listing or obligate you to accept any
+                proposal. You can update these preferences at any time.
+              </p>
+            )}
           </div>
         )}
       </div>
