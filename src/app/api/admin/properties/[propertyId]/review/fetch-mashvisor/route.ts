@@ -23,7 +23,13 @@ export async function POST(
     });
 
     return NextResponse.json(
-      { ok: true, propertyId, runId: result.runId, summary: result.summary },
+      {
+        ok: true,
+        propertyId,
+        enrichmentId: result.enrichmentId,
+        summary: result.summary,
+        images: result.images,
+      },
       { status: 200 },
     );
   } catch (error) {

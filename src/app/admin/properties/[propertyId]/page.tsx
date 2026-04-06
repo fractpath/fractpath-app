@@ -171,7 +171,7 @@ export default async function AdminPropertyAuditPage({
     .filter(Boolean)
     .join(", ");
 
-  const [auditRes, docsRes, underwritingRes, linkedThreadRes, summaryRes, recentRunsRes] = await Promise.all([
+  const [auditRes, docsRes, underwritingRes, linkedThreadRes, summaryRes, recentRunsRes, enrichmentRes] = await Promise.all([
     (supabase.from("property_status_audit") as any)
       .select(
         "id, from_status, to_status, changed_by, actor_type, changed_at, notes",
@@ -206,6 +206,12 @@ export default async function AdminPropertyAuditPage({
       .eq("property_id", propertyId)
       .order("requested_at", { ascending: false })
       .limit(10),
+    (supabase.from("property_enrichments") as any)
+      .select("id, status, provider_record_id, is_current, summary_payload, images_payload, fetched_at, error_message")
+      .eq("property_id", propertyId)
+      .eq("provider", "mashvisor")
+      .eq("is_current", true)
+      .maybeSingle(),
   ]);
 
   // Fetch triage metadata for the linked accepted deal (if any)
@@ -311,7 +317,16 @@ export default async function AdminPropertyAuditPage({
   const latestAvmRun = recentRuns.find((r) => r.artifact_type === "avm") ?? null;
   // ATTOM enhanced screening runs are stored with artifact_type "enhanced_screening"
   const latestAttomRun = recentRuns.find((r) => r.artifact_type === "enhanced_screening") ?? null;
-  const latestMashvisorRun = recentRuns.find((r) => r.artifact_type === "mashvisor_enrichment") ?? null;
+
+  const currentEnrichment = (enrichmentRes.data ?? null) as {
+    id: string;
+    status: string;
+    provider_record_id: string | null;
+    summary_payload: unknown;
+    images_payload: unknown;
+    fetched_at: string | null;
+    error_message: string | null;
+  } | null;
   const lastProfileError =
     latestProfileRun?.status === "failed"
       ? { error_message: latestProfileRun.error_message }
@@ -1009,21 +1024,13 @@ export default async function AdminPropertyAuditPage({
       {/*
         Manual admin-only enrichment fetch from Mashvisor.
         Does not auto-trigger; does not affect owner-facing surfaces.
-        Stored in property_review_runs (artifact_type: mashvisor_enrichment).
+        Stored in property_enrichments (provider: mashvisor).
         Requires MASHVISOR_API_KEY to be configured.
       */}
       <AdminMashvisorPanel
         propertyId={propertyId}
         hasAddress={!!(p.address_line1 && p.city && p.state)}
-        lastRun={
-          latestMashvisorRun
-            ? {
-                status: latestMashvisorRun.status,
-                requested_at: latestMashvisorRun.requested_at,
-                normalized_payload: latestMashvisorRun.normalized_payload as any,
-              }
-            : null
-        }
+        enrichment={currentEnrichment}
       />
 
       {/* ── Debt basis management ── */}

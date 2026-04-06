@@ -84,6 +84,6 @@ export type NormalizedAvm = {
   providerNotes: string | null;
 };
 
-export type PropertyReviewProvider = "rentcast" | "mashvisor";
-export type PropertyReviewArtifactType = "property_profile" | "avm" | "enhanced_screening" | "mashvisor_enrichment";
+export type PropertyReviewProvider = "rentcast";
+export type PropertyReviewArtifactType = "property_profile" | "avm" | "enhanced_screening";
 export type PropertyReviewRunStatus = "pending" | "completed" | "failed";
