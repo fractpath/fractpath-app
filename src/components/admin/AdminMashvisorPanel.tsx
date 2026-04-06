@@ -19,6 +19,12 @@ type Props = {
   propertyId: string;
   hasAddress: boolean;
   enrichment: Enrichment | null;
+  /**
+   * Label shown for the numeric value estimate in the property preview stats row.
+   * Should match the active valuation lane on this property (e.g. "Reviewed value",
+   * "Appraised value"). Defaults to "Source value".
+   */
+  valuationLabel?: string;
 };
 
 function Spinner() {
@@ -35,7 +41,7 @@ function Spinner() {
   );
 }
 
-export function AdminMashvisorPanel({ propertyId, hasAddress, enrichment }: Props) {
+export function AdminMashvisorPanel({ propertyId, hasAddress, enrichment, valuationLabel = "Source value" }: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -143,6 +149,7 @@ export function AdminMashvisorPanel({ propertyId, hasAddress, enrichment }: Prop
               providerRecordId: current?.provider_record_id ?? null,
               imageCount: images.image_urls?.length ?? 0,
             }}
+            valuationLabel={valuationLabel}
           />
         ) : !loading && current?.status !== "failed" ? (
           <div className="space-y-2">

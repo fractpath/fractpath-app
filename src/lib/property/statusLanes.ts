@@ -1,4 +1,20 @@
 /**
+ * Maps a valuation lane label to a user-facing value label for numeric values.
+ *
+ * Used by EnrichedPropertyPreview and any surface that shows the Mashvisor
+ * value_estimate with a label that matches the active valuation confidence level.
+ *
+ * - "Source value"       — raw owner-provided / third-party estimate, not reviewed
+ * - "Reviewed value"     — automated valuation or ATTOM-reviewed basis
+ * - "Appraised value"    — manual appraisal on file
+ */
+export function valueLabelFromValuationLane(laneLabel: string): string {
+  if (laneLabel === "Appraised") return "Appraised value";
+  if (laneLabel === "Valuation reviewed") return "Reviewed value";
+  return "Source value";
+}
+
+/**
  * Three-lane property status derivation.
  *
  * Participation  — eligibility / ownership verification

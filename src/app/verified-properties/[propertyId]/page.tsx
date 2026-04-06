@@ -12,6 +12,7 @@ import { PropertyStatusLanes } from "@/components/properties/PropertyStatusLanes
 import {
   deriveParticipationLane,
   deriveValuationLane,
+  valueLabelFromValuationLane,
 } from "@/lib/property/statusLanes";
 
 export const runtime = "nodejs";
@@ -20,9 +21,11 @@ type PageProps = {
   params: Promise<{ propertyId: string }>;
 };
 
-// Only the public-safe columns needed for this page
+// Only the public-safe columns needed for this page.
+// Valuation-derivation columns (last four) are used server-side ONLY to compute
+// the displayed label — they are never rendered as raw values in the HTML.
 const PUBLIC_SELECT =
-  "id, address_line1, address_line2, city, state, postal_code, status, visibility_preference, verified_at, ownership_type, occupancy_use";
+  "id, address_line1, address_line2, city, state, postal_code, status, visibility_preference, verified_at, ownership_type, occupancy_use, latest_verified_fmv, escalation_avm_status, manual_appraisal_status, fmv_verification_source";
 
 function formatFullAddress(row: {
   address_line1: string | null;
@@ -95,14 +98,17 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
   const occupancyLabel = humanizeOccupancy(row.occupancy_use);
   const ownershipLabel = humanizeOwnership(row.ownership_type);
 
-  // Public-safe status lanes — no admin/AVM/appraisal fields exposed to buyers
+  // Status lanes — participation is always "verified" (enforced above).
+  // Valuation is derived server-side from real DB fields so it aligns with the
+  // admin and owner surfaces.  Raw field values are NOT rendered in the HTML.
   const publicParticipationLane = deriveParticipationLane("verified");
   const publicValuationLane = deriveValuationLane({
-    manualAppraisalStatus: null,
-    escalationAvmStatus: null,
-    fmvVerificationSource: null,
-    latestVerifiedFmv: null,
+    manualAppraisalStatus: (row.manual_appraisal_status as string | null) ?? null,
+    escalationAvmStatus: (row.escalation_avm_status as string | null) ?? null,
+    fmvVerificationSource: (row.fmv_verification_source as string | null) ?? null,
+    latestVerifiedFmv: (row.latest_verified_fmv as number | null) ?? null,
   });
+  const publicValuationLabel = valueLabelFromValuationLane(publicValuationLane.label);
 
   // Fetch current enrichment (non-fatal, audience=buyer — hides provider IDs)
   let enrichment: EnrichedPreviewData | null = null;
@@ -199,7 +205,11 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
               Property preview
             </p>
-            <EnrichedPropertyPreview enrichment={enrichment} audience="buyer" />
+            <EnrichedPropertyPreview
+              enrichment={enrichment}
+              audience="buyer"
+              valuationLabel={publicValuationLabel}
+            />
           </div>
         ) : (
           /* No-enrichment fallback — intentional simplified state */

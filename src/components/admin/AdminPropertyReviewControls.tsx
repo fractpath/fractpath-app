@@ -31,14 +31,14 @@ export const REVIEW_STATUS_META: Record<
     description: "Sufficient information collected to request deposit.",
   },
   amv_ordered: {
-    label: "AMV ordered",
+    label: "Valuation ordered",
     badgeCls: "bg-blue-100 text-blue-800",
     description: "Automated market valuation ordered and pending.",
   },
   amv_complete: {
-    label: "AMV complete",
+    label: "Valuation reviewed",
     badgeCls: "bg-green-100 text-green-800",
-    description: "Market valuation received.",
+    description: "Market valuation received and adopted as the reviewed basis.",
   },
   property_review_complete: {
     label: "Review complete",
@@ -60,18 +60,23 @@ type Props = {
 };
 
 export function AdminPropertyReviewControls({ propertyId, currentReviewStatus }: Props) {
-  const [selectedStatus, setSelectedStatus] = useState<PropertyReviewStatus>(
-    currentReviewStatus ?? "under_review",
+  // null = "not set / Source value" — the default when no review has begun.
+  // Using "" as the sentinel so it works cleanly with <select> value binding.
+  const [selectedStatus, setSelectedStatus] = useState<PropertyReviewStatus | "">(
+    currentReviewStatus ?? "",
   );
   const [note, setNote] = useState("");
   const [pending, setPending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  const currentStatusOrEmpty: PropertyReviewStatus | "" = currentReviewStatus ?? "";
+  const hasChange = selectedStatus !== currentStatusOrEmpty;
+
   async function handleApply() {
     setErr(null);
     setSuccess(null);
-    if (selectedStatus === currentReviewStatus) {
+    if (!hasChange) {
       setErr("Select a different status to apply.");
       return;
     }
@@ -81,14 +86,20 @@ export function AdminPropertyReviewControls({ propertyId, currentReviewStatus }:
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ status: selectedStatus, note: note.trim() || null }),
+        body: JSON.stringify({
+          status: selectedStatus === "" ? null : selectedStatus,
+          note: note.trim() || null,
+        }),
       });
       const body = await res.json();
       if (!body.ok) {
         setErr(body.error ?? "Failed to update review status");
       } else {
-        setSuccess(`Review status updated to: ${REVIEW_STATUS_META[selectedStatus].label}`);
-        // Reload so all server-rendered panels reflect the change
+        const label =
+          selectedStatus === ""
+            ? "Source value (not set)"
+            : REVIEW_STATUS_META[selectedStatus as PropertyReviewStatus].label;
+        setSuccess(`Valuation status updated to: ${label}`);
         window.location.reload();
       }
     } catch {
@@ -98,6 +109,11 @@ export function AdminPropertyReviewControls({ propertyId, currentReviewStatus }:
     }
   }
 
+  const selectedMeta =
+    selectedStatus && selectedStatus in REVIEW_STATUS_META
+      ? REVIEW_STATUS_META[selectedStatus as PropertyReviewStatus]
+      : null;
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -105,9 +121,11 @@ export function AdminPropertyReviewControls({ propertyId, currentReviewStatus }:
         <select
           className="text-sm border rounded px-2 py-1 bg-background"
           value={selectedStatus}
-          onChange={(e) => setSelectedStatus(e.target.value as PropertyReviewStatus)}
+          onChange={(e) => setSelectedStatus(e.target.value as PropertyReviewStatus | "")}
           disabled={pending}
         >
+          {/* Default / not-set option — represents "Source value" valuation state */}
+          <option value="">Source value (not set)</option>
           {REVIEW_STATUSES.map((s) => (
             <option key={s} value={s}>
               {REVIEW_STATUS_META[s].label}
@@ -117,16 +135,18 @@ export function AdminPropertyReviewControls({ propertyId, currentReviewStatus }:
         <button
           type="button"
           onClick={handleApply}
-          disabled={pending || selectedStatus === currentReviewStatus}
+          disabled={pending || !hasChange}
           className="text-xs px-3 py-1 rounded border hover:bg-muted disabled:opacity-50"
         >
           {pending ? "Applying…" : "Apply"}
         </button>
       </div>
 
-      {selectedStatus !== currentReviewStatus && (
+      {hasChange && (
         <p className="text-xs text-muted-foreground">
-          {REVIEW_STATUS_META[selectedStatus].description}
+          {selectedStatus === ""
+            ? "Clears the valuation review status. The property will show as Source value."
+            : (selectedMeta?.description ?? "")}
         </p>
       )}
 

@@ -41,6 +41,7 @@ import {
   deriveParticipationLane,
   deriveValuationLane,
   deriveClosingReadinessLane,
+  valueLabelFromValuationLane,
 } from "@/lib/property/statusLanes";
 
 function requirePreviewSecret(): string {
@@ -858,7 +859,7 @@ export default async function AdminPropertyAuditPage({
       {/* ── Property review ── */}
       <div className="rounded-lg border overflow-hidden">
         <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b flex items-center gap-2 flex-wrap">
-          <span>Property review</span>
+          <span>Valuation status</span>
           {reviewStatusMeta ? (
             <span className={`text-xs rounded-full px-2 py-0.5 font-normal ${reviewStatusMeta.badgeCls}`}>
               {reviewStatusMeta.label}
@@ -1048,6 +1049,7 @@ export default async function AdminPropertyAuditPage({
         propertyId={propertyId}
         hasAddress={!!(p.address_line1 && p.city && p.state)}
         enrichment={currentEnrichment}
+        valuationLabel={valueLabelFromValuationLane(adminValuationLane.label)}
       />
 
       {/* ── Debt basis management ── */}

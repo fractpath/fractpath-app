@@ -20,6 +20,13 @@ export type EnrichedPreviewData = {
 type Props = {
   enrichment: EnrichedPreviewData;
   audience: EnrichedPreviewAudience;
+  /**
+   * Label shown below the numeric value estimate in the stats row.
+   * Defaults to "Source value" (unreviewed third-party estimate).
+   * Pass "Reviewed value" when AVM/ATTOM reviewed, "Appraised value" when
+   * a manual appraisal is the controlling basis.
+   */
+  valuationLabel?: string;
 };
 
 // ─── Format helpers ────────────────────────────────────────────────────────────
@@ -66,7 +73,7 @@ function StatTile({ label, value }: { label: string; value: string }) {
 
 // ─── Main shared component ─────────────────────────────────────────────────────
 
-export function EnrichedPropertyPreview({ enrichment, audience }: Props) {
+export function EnrichedPropertyPreview({ enrichment, audience, valuationLabel = "Source value" }: Props) {
   const { summary, images } = enrichment;
   const coverUrl = images.cover_image_url ?? null;
 
@@ -147,7 +154,7 @@ export function EnrichedPropertyPreview({ enrichment, audience }: Props) {
         />
         <StatTile label="Sq ft" value={fmtNum(summary.sqft)} />
         <StatTile
-          label="Source value"
+          label={valuationLabel}
           value={fmtCurrency(summary.value_estimate)}
         />
       </div>
