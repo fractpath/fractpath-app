@@ -222,28 +222,22 @@ export function DraftDealProjectionPanel({
   const minimumHoldYears =
     safeNumber((dealTerms as any)?.minimum_hold_years) ??
     CANONICAL_DEAL_TERM_DEFAULTS.minimum_hold_years;
-  const exitWindowStart =
-    safeNumber((dealTerms as any)?.target_exit_window_start_year) ??
-    CANONICAL_DEAL_TERM_DEFAULTS.target_exit_window_start_year;
-  const exitWindowEnd =
-    safeNumber((dealTerms as any)?.target_exit_window_end_year) ??
-    CANONICAL_DEAL_TERM_DEFAULTS.target_exit_window_end_year;
   const firstExtPremiumPct =
     safeNumber((dealTerms as any)?.first_extension_premium_pct) ??
     CANONICAL_DEAL_TERM_DEFAULTS.first_extension_premium_pct;
   const secondExtPremiumPct =
     safeNumber((dealTerms as any)?.second_extension_premium_pct) ??
     CANONICAL_DEAL_TERM_DEFAULTS.second_extension_premium_pct;
-  // Auto-derive fixed 12-month extension windows from exitWindowEnd when not explicitly stored.
-  // Extensions are fixed contract structure (not editable inputs) — derive from target exit window end.
-  const firstExtStart =
-    safeNumber((dealTerms as any)?.first_extension_start_year) ?? exitWindowEnd;
-  const firstExtEnd =
-    safeNumber((dealTerms as any)?.first_extension_end_year) ?? exitWindowEnd + 1;
-  const secondExtStart =
-    safeNumber((dealTerms as any)?.second_extension_start_year) ?? exitWindowEnd + 1;
-  const secondExtEnd =
-    safeNumber((dealTerms as any)?.second_extension_end_year) ?? exitWindowEnd + 2;
+  // Extension durations are negotiable deal inputs stored in deal_terms.
+  // Derived end years: firstExtEnd = exitYear + firstExtYears, secondExtEnd = firstExtEnd + secondExtYears.
+  const firstExtYears =
+    safeNumber((dealTerms as any)?.first_extension_years) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.first_extension_years;
+  const secondExtYears =
+    safeNumber((dealTerms as any)?.second_extension_years) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.second_extension_years;
+  const firstExtEnd = exitYear + firstExtYears;
+  const secondExtEnd = firstExtEnd + secondExtYears;
   const servicingFeeMonthly =
     safeNumber((dealTerms as any)?.servicing_fee_monthly) ??
     CANONICAL_DEAL_TERM_DEFAULTS.servicing_fee_monthly;
@@ -332,22 +326,18 @@ export function DraftDealProjectionPanel({
     propertyValue * Math.pow(1 + annualAppreciation, exitYear);
 
   // Extension window config — built from deal term primitives for stable identity.
+  // Timeline: minimumHold → exitWindow(end=exitYear) → firstExt(end=firstExtEnd) → secondExt(end=secondExtEnd) → Required to Market
   const extensionConfig = useMemo((): ExtensionWindowConfig => ({
     minimumHoldYears,
-    targetExitStart: exitWindowStart,
-    targetExitEnd: exitWindowEnd,
-    firstExtStart,
+    targetExitYear: exitYear,
     firstExtEnd,
     firstExtPremiumPct,
-    secondExtStart,
     secondExtEnd,
     secondExtPremiumPct,
     longStopYear,
   }), [
-    minimumHoldYears, exitWindowStart, exitWindowEnd,
-    firstExtStart, firstExtEnd, firstExtPremiumPct,
-    secondExtStart, secondExtEnd, secondExtPremiumPct,
-    longStopYear,
+    minimumHoldYears, exitYear, firstExtEnd, firstExtPremiumPct,
+    secondExtEnd, secondExtPremiumPct, longStopYear,
   ]);
 
   // Monthly buyout series and chart data

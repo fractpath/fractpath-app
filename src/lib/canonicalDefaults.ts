@@ -19,13 +19,15 @@ export const CANONICAL_DEAL_TERM_DEFAULTS = {
   target_exit_window_end_year: 7,
   long_stop_year: 13,
 
-  // Extension windows — premiums are canonical even when window dates are unset
+  // Extension windows — premiums and durations are negotiable inputs
   first_extension_start_year: null as number | null,
   first_extension_end_year: null as number | null,
   first_extension_premium_pct: 0.06,
+  first_extension_years: 2,
   second_extension_start_year: null as number | null,
   second_extension_end_year: null as number | null,
   second_extension_premium_pct: 0.12,
+  second_extension_years: 2,
 
   // Partial buyout
   partial_buyout_allowed: false,

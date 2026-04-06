@@ -131,6 +131,7 @@ function resolveAcceptedStatus(
   canonicalStage: string | null,
   elapsed: number | null,
   dealTerms: AnyRecord | null,
+  scenario: AnyRecord | null,
 ): string {
   switch (canonicalStage) {
     case "deal_closed":
@@ -150,33 +151,23 @@ function resolveAcceptedStatus(
   const minHold =
     safeNumber((dealTerms as any)?.minimum_hold_years) ??
     CANONICAL_DEAL_TERM_DEFAULTS.minimum_hold_years;
-  const exitWindowEnd =
-    safeNumber((dealTerms as any)?.target_exit_window_end_year) ??
-    CANONICAL_DEAL_TERM_DEFAULTS.target_exit_window_end_year;
-  const longStop =
-    safeNumber((dealTerms as any)?.long_stop_year) ??
-    CANONICAL_DEAL_TERM_DEFAULTS.long_stop_year;
-
-  // Auto-derive fixed extension windows from exitWindowEnd when not explicitly stored
-  const firstExtStart =
-    safeNumber((dealTerms as any)?.first_extension_start_year) ?? exitWindowEnd;
-  const firstExtEnd =
-    safeNumber((dealTerms as any)?.first_extension_end_year) ?? exitWindowEnd + 1;
-  const secondExtStart =
-    safeNumber((dealTerms as any)?.second_extension_start_year) ?? exitWindowEnd + 1;
-  const secondExtEnd =
-    safeNumber((dealTerms as any)?.second_extension_end_year) ?? exitWindowEnd + 2;
+  const exitYear =
+    safeNumber((scenario as any)?.exit_year) ??
+    CANONICAL_SCENARIO_DEFAULTS.exit_year;
+  const firstExtYears =
+    safeNumber((dealTerms as any)?.first_extension_years) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.first_extension_years;
+  const secondExtYears =
+    safeNumber((dealTerms as any)?.second_extension_years) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.second_extension_years;
+  const firstExtEnd = exitYear + firstExtYears;
+  const secondExtEnd = firstExtEnd + secondExtYears;
 
   if (elapsed < minHold) return "Active — before exit window";
-  if (elapsed <= exitWindowEnd) return "In target exit window";
-  if (elapsed > firstExtStart && elapsed <= firstExtEnd) {
-    return "In first extension";
-  }
-  if (elapsed > secondExtStart && elapsed <= secondExtEnd) {
-    return "In second extension";
-  }
-  if (elapsed <= longStop) return "In extension";
-  return "Past long-stop";
+  if (elapsed <= exitYear) return "In target exit window";
+  if (elapsed <= firstExtEnd) return "In first extension";
+  if (elapsed <= secondExtEnd) return "In second extension";
+  return "Required to market";
 }
 
 // ─── Timeline ─────────────────────────────────────────────────────────────────
@@ -330,26 +321,21 @@ export function AcceptedDealStatusPanel({
     safeNumber((dealTerms as any)?.long_stop_year) ?? CANONICAL_DEAL_TERM_DEFAULTS.long_stop_year;
   const minimumHoldYears =
     safeNumber((dealTerms as any)?.minimum_hold_years) ?? CANONICAL_DEAL_TERM_DEFAULTS.minimum_hold_years;
-  const exitWindowStart =
-    safeNumber((dealTerms as any)?.target_exit_window_start_year) ?? CANONICAL_DEAL_TERM_DEFAULTS.target_exit_window_start_year;
-  const exitWindowEnd =
-    safeNumber((dealTerms as any)?.target_exit_window_end_year) ?? CANONICAL_DEAL_TERM_DEFAULTS.target_exit_window_end_year;
   const firstExtPremiumPct =
     safeNumber((dealTerms as any)?.first_extension_premium_pct) ??
     CANONICAL_DEAL_TERM_DEFAULTS.first_extension_premium_pct;
   const secondExtPremiumPct =
     safeNumber((dealTerms as any)?.second_extension_premium_pct) ??
     CANONICAL_DEAL_TERM_DEFAULTS.second_extension_premium_pct;
-  // Auto-derive fixed 12-month extension windows from exitWindowEnd when not explicitly stored.
-  // Extensions are fixed contract structure (not editable inputs) — derive from target exit window end.
-  const firstExtStartMain =
-    safeNumber((dealTerms as any)?.first_extension_start_year) ?? exitWindowEnd;
-  const firstExtEndMain =
-    safeNumber((dealTerms as any)?.first_extension_end_year) ?? exitWindowEnd + 1;
-  const secondExtStartMain =
-    safeNumber((dealTerms as any)?.second_extension_start_year) ?? exitWindowEnd + 1;
-  const secondExtEndMain =
-    safeNumber((dealTerms as any)?.second_extension_end_year) ?? exitWindowEnd + 2;
+  // Extension durations are negotiable deal inputs. Derived anchors use exitYear from scenario.
+  const firstExtYears =
+    safeNumber((dealTerms as any)?.first_extension_years) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.first_extension_years;
+  const secondExtYears =
+    safeNumber((dealTerms as any)?.second_extension_years) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.second_extension_years;
+  const firstExtEndMain = exitYear + firstExtYears;
+  const secondExtEndMain = firstExtEndMain + secondExtYears;
   const servicingFeeMonthly =
     safeNumber((dealTerms as any)?.servicing_fee_monthly) ?? CANONICAL_DEAL_TERM_DEFAULTS.servicing_fee_monthly;
   const exitAdminFee =
@@ -431,25 +417,21 @@ export function AcceptedDealStatusPanel({
         )
       : null;
   const cYear = contractYear(acceptedAt);
-  const statusLabel = resolveAcceptedStatus(canonicalStage ?? null, elapsed, dealTerms);
+  const statusLabel = resolveAcceptedStatus(canonicalStage ?? null, elapsed, dealTerms, scenario);
 
-  // Extension window config — built from deal term primitives for stable identity.
+  // Extension window config — derived from exitYear + negotiable extension years.
+  // Timeline: minimumHold → exitWindow(end=exitYear) → firstExt(end=firstExtEndMain) → secondExt(end=secondExtEndMain) → Required to Market
   const extensionConfig = useMemo((): ExtensionWindowConfig => ({
     minimumHoldYears,
-    targetExitStart: exitWindowStart,
-    targetExitEnd: exitWindowEnd,
-    firstExtStart: firstExtStartMain,
+    targetExitYear: exitYear,
     firstExtEnd: firstExtEndMain,
     firstExtPremiumPct,
-    secondExtStart: secondExtStartMain,
     secondExtEnd: secondExtEndMain,
     secondExtPremiumPct,
     longStopYear,
   }), [
-    minimumHoldYears, exitWindowStart, exitWindowEnd,
-    firstExtStartMain, firstExtEndMain, firstExtPremiumPct,
-    secondExtStartMain, secondExtEndMain, secondExtPremiumPct,
-    longStopYear,
+    minimumHoldYears, exitYear, firstExtEndMain, firstExtPremiumPct,
+    secondExtEndMain, secondExtPremiumPct, longStopYear,
   ]);
 
   // Current modeled buyout at elapsed months — from monthly series via interpolation
@@ -490,26 +472,31 @@ export function AcceptedDealStatusPanel({
       year: 0,
     },
     {
-      label: "Minimum hold period ends",
-      subLabel: `Year ${minimumHoldYears} — exit available after this`,
+      label: "Minimum hold ends",
+      subLabel: `Year ${minimumHoldYears} — exit available after this point`,
       year: minimumHoldYears,
     },
     {
-      label: "Target exit window",
-      subLabel: `Year ${exitWindowStart} – ${exitWindowEnd}`,
-      year: exitWindowStart,
+      label: "Target exit",
+      subLabel: `Year ${exitYear} — expected resolution point`,
+      year: exitYear,
     },
     {
-      label: "Modeled exit",
-      subLabel: `Year ${exitYear} — your modeled scenario`,
-      year: exitYear,
+      label: "First extension ends",
+      subLabel: `Year ${firstExtEndMain} — ${(firstExtPremiumPct * 100).toFixed(0)}% premium applies before this`,
+      year: firstExtEndMain,
+    },
+    {
+      label: "Second extension ends",
+      subLabel: `Year ${secondExtEndMain} — required marketing may apply after`,
+      year: secondExtEndMain,
     },
     {
       label: "Long-stop date",
       subLabel: `Year ${longStopYear} — contract must settle`,
       year: longStopYear,
     },
-  ], [acceptedAt, minimumHoldYears, exitWindowStart, exitWindowEnd, exitYear, longStopYear]);
+  ], [acceptedAt, minimumHoldYears, exitYear, firstExtEndMain, firstExtPremiumPct, secondExtEndMain, longStopYear]);
 
   return (
     <div className="border-t pt-6 space-y-5">
@@ -708,8 +695,16 @@ export function AcceptedDealStatusPanel({
                 <dd className="font-medium">Year {minimumHoldYears}</dd>
               </div>
               <div className="flex flex-col text-xs">
-                <dt className="text-muted-foreground">Exit window</dt>
-                <dd className="font-medium">Yr {exitWindowStart} – {exitWindowEnd}</dd>
+                <dt className="text-muted-foreground">Target exit</dt>
+                <dd className="font-medium">Year {exitYear}</dd>
+              </div>
+              <div className="flex flex-col text-xs">
+                <dt className="text-muted-foreground">1st ext. ends</dt>
+                <dd className="font-medium">Year {firstExtEndMain}</dd>
+              </div>
+              <div className="flex flex-col text-xs">
+                <dt className="text-muted-foreground">2nd ext. ends</dt>
+                <dd className="font-medium">Year {secondExtEndMain}</dd>
               </div>
               <div className="flex flex-col text-xs">
                 <dt className="text-muted-foreground">Long-stop</dt>

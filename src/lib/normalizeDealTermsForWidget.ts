@@ -37,9 +37,11 @@ export function normalizeDealTermsForWidget(raw: AnyRecord): AnyRecord {
     first_extension_start_year: r.first_extension_start_year ?? D.first_extension_start_year,
     first_extension_end_year: r.first_extension_end_year ?? D.first_extension_end_year,
     first_extension_premium_pct: r.first_extension_premium_pct ?? D.first_extension_premium_pct,
+    first_extension_years: r.first_extension_years ?? D.first_extension_years,
     second_extension_start_year: r.second_extension_start_year ?? D.second_extension_start_year,
     second_extension_end_year: r.second_extension_end_year ?? D.second_extension_end_year,
     second_extension_premium_pct: r.second_extension_premium_pct ?? D.second_extension_premium_pct,
+    second_extension_years: r.second_extension_years ?? D.second_extension_years,
 
     // Partial buyout
     partial_buyout_allowed: r.partial_buyout_allowed ?? D.partial_buyout_allowed,

@@ -19,9 +19,6 @@ export type DealTermsModalProps = {
 const D = CANONICAL_DEAL_TERM_DEFAULTS;
 const SD = CANONICAL_SCENARIO_DEFAULTS;
 
-const FIXED_EXT_FIRST_MONTHS = 12;
-const FIXED_EXT_SECOND_MONTHS = 12;
-
 type TabId = "payments" | "exit_terms" | "assumptions" | "fees";
 
 const TABS: { id: TabId; label: string }[] = [
@@ -49,6 +46,16 @@ function fmtCurrency(v: number): string {
     maximumFractionDigits: 0,
   }).format(v);
 }
+
+function fmtPct(v: number): string {
+  return `${(v * 100).toFixed(0)}%`;
+}
+
+function plural(n: number, word: string): string {
+  return `${n} ${n === 1 ? word : `${word}s`}`;
+}
+
+// ─── UI atoms ─────────────────────────────────────────────────────────────────
 
 function Label({ children }: { children: React.ReactNode }) {
   return (
@@ -79,6 +86,24 @@ function FieldRow({
     <div className="space-y-1.5 pb-4 border-b border-border/60 last:border-0 last:pb-0">
       <Label>{label}</Label>
       {children}
+      {hint && <Hint>{hint}</Hint>}
+    </div>
+  );
+}
+
+function ReadOnlyField({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+}) {
+  return (
+    <div className="space-y-0.5 pb-3 border-b border-border/60 last:border-0 last:pb-0">
+      <Label>{label}</Label>
+      <p className="text-sm font-medium">{value}</p>
       {hint && <Hint>{hint}</Hint>}
     </div>
   );
@@ -198,6 +223,72 @@ function CurrencyField({
   );
 }
 
+// ─── Summary tiles ────────────────────────────────────────────────────────────
+
+function SummaryTile({
+  label,
+  value,
+  sub,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+}) {
+  return (
+    <div className="rounded-md border bg-muted/25 px-3 py-2 flex flex-col gap-0.5 min-w-0">
+      <span className="text-[10px] text-muted-foreground leading-tight truncate">
+        {label}
+      </span>
+      <span className="text-sm font-semibold tabular-nums leading-tight truncate">
+        {value}
+      </span>
+      {sub && (
+        <span className="text-[10px] text-muted-foreground leading-tight truncate">
+          {sub}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function SummaryTiles({
+  propertyValue,
+  upfrontPayment,
+  monthlyPayment,
+  numPayments,
+  exitYear,
+}: {
+  propertyValue: number;
+  upfrontPayment: number;
+  monthlyPayment: number;
+  numPayments: number;
+  exitYear: number;
+}) {
+  const totalMonthly = monthlyPayment * numPayments;
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 px-5 py-3 border-b bg-muted/10">
+      <SummaryTile label="Home value" value={fmtCurrency(propertyValue)} />
+      <SummaryTile label="Upfront" value={fmtCurrency(upfrontPayment)} />
+      <SummaryTile
+        label="Monthly funding"
+        value={
+          numPayments > 0
+            ? `${fmtCurrency(monthlyPayment)}/mo`
+            : "None"
+        }
+        sub={numPayments > 0 ? `× ${numPayments} payments` : undefined}
+      />
+      <SummaryTile
+        label="Target exit"
+        value={`Year ${exitYear}`}
+        sub={totalMonthly > 0 ? `Total ${fmtCurrency(upfrontPayment + totalMonthly)}` : undefined}
+      />
+    </div>
+  );
+}
+
+// ─── Payments tab ─────────────────────────────────────────────────────────────
+
 function PaymentsTab({
   propertyValue,
   setPropertyValue,
@@ -268,59 +359,72 @@ function PaymentsTab({
   );
 }
 
+// ─── Exit Terms tab ───────────────────────────────────────────────────────────
+
 function ExitTermsTab({
   minimumHoldYears,
   setMinimumHoldYears,
   exitYear,
   setExitYear,
+  firstExtYears,
+  setFirstExtYears,
   firstExtPct,
+  setFirstExtPct,
+  secondExtYears,
+  setSecondExtYears,
   secondExtPct,
+  setSecondExtPct,
 }: {
   minimumHoldYears: number;
   setMinimumHoldYears: (v: number) => void;
   exitYear: number;
   setExitYear: (v: number) => void;
+  firstExtYears: number;
+  setFirstExtYears: (v: number) => void;
   firstExtPct: number;
+  setFirstExtPct: (v: number) => void;
+  secondExtYears: number;
+  setSecondExtYears: (v: number) => void;
   secondExtPct: number;
+  setSecondExtPct: (v: number) => void;
 }) {
+  const firstExtEnd = exitYear + firstExtYears;
+  const secondExtEnd = firstExtEnd + secondExtYears;
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <FieldRow
         label="Minimum hold"
-        hint="The earliest point at which the agreement can be exited."
+        hint="Earliest point the agreement can be resolved through sale or buyout."
       >
-        <div className="flex items-center gap-2">
-          <NumberInput
-            value={minimumHoldYears}
-            onChange={(v) => setMinimumHoldYears(Math.max(0, Math.round(v)))}
-            min={0}
-            max={5}
-            step={1}
-            className="w-20"
-            suffix={minimumHoldYears === 1 ? "year" : "years"}
-          />
-        </div>
+        <NumberInput
+          value={minimumHoldYears}
+          onChange={(v) => setMinimumHoldYears(Math.max(0, Math.round(v)))}
+          min={0}
+          max={5}
+          step={1}
+          className="w-20"
+          suffix={minimumHoldYears === 1 ? "year" : "years"}
+        />
       </FieldRow>
 
       <FieldRow
-        label="Expected exit timing"
-        hint="Modeled year for the scenario projection. Adjust to explore different exit timelines."
+        label="Target exit year"
+        hint="Expected timing for resolution under the agreement."
       >
         <div className="flex flex-col gap-1.5">
-          <div className="flex items-center gap-2">
-            <NumberInput
-              value={exitYear}
-              onChange={(v) => setExitYear(Math.max(1, Math.round(v)))}
-              min={1}
-              max={15}
-              step={1}
-              className="w-20"
-              suffix={exitYear === 1 ? "year" : "years"}
-            />
-          </div>
+          <NumberInput
+            value={exitYear}
+            onChange={(v) => setExitYear(Math.max(minimumHoldYears + 1, Math.round(v)))}
+            min={1}
+            max={15}
+            step={1}
+            className="w-20"
+            suffix={exitYear === 1 ? "year" : "years"}
+          />
           <SliderInput
             value={exitYear}
-            onChange={(v) => setExitYear(Math.round(v))}
+            onChange={(v) => setExitYear(Math.max(minimumHoldYears + 1, Math.round(v)))}
             min={1}
             max={15}
             step={1}
@@ -328,81 +432,155 @@ function ExitTermsTab({
         </div>
       </FieldRow>
 
-      <div className="rounded-md border border-border bg-muted/20 px-4 py-3 space-y-2.5">
+      <div className="rounded-md border border-border bg-muted/10 px-4 py-3 space-y-3">
         <p className="text-xs font-semibold">Extension periods</p>
-        <p className="text-xs text-muted-foreground leading-snug">
-          This agreement includes two fixed extension periods after the expected
-          exit timing. Extension durations are standard contract structure and
-          are not negotiable inputs.
-        </p>
-        <ul className="space-y-2 mt-1">
-          <li className="flex items-start gap-2.5 text-xs">
+
+        <div className="space-y-2.5">
+          <div className="flex items-start gap-2.5">
             <span className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full bg-amber-100 border border-amber-300 text-amber-700 flex items-center justify-center font-bold text-[9px]">
               1
             </span>
-            <span>
-              <span className="font-medium">First extension:</span>{" "}
-              {FIXED_EXT_FIRST_MONTHS} months — adds{" "}
-              <span className="font-medium text-amber-700">
-                {(firstExtPct * 100).toFixed(0)}%
-              </span>{" "}
-              to exit cost
-            </span>
-          </li>
-          <li className="flex items-start gap-2.5 text-xs">
+            <div className="flex-1 space-y-1.5">
+              <p className="text-xs font-medium">
+                First extension — begins Year {exitYear}, ends Year {firstExtEnd}
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <div>
+                  <p className="text-[10px] text-muted-foreground mb-0.5">
+                    Duration
+                    <span className="ml-1 text-muted-foreground/70">
+                      (additional years after target exit)
+                    </span>
+                  </p>
+                  <NumberInput
+                    value={firstExtYears}
+                    onChange={(v) => setFirstExtYears(Math.max(1, Math.round(v)))}
+                    min={1}
+                    max={10}
+                    step={1}
+                    className="w-20"
+                    suffix={firstExtYears === 1 ? "year" : "years"}
+                  />
+                </div>
+                <div>
+                  <p className="text-[10px] text-muted-foreground mb-0.5">
+                    Premium
+                    <span className="ml-1 text-muted-foreground/70">
+                      (added to exit cost)
+                    </span>
+                  </p>
+                  <NumberInput
+                    value={parseFloat((firstExtPct * 100).toFixed(1))}
+                    onChange={(v) => {
+                      const n = parseFloat(v.toFixed(1));
+                      if (Number.isFinite(n) && n >= 0) setFirstExtPct(n / 100);
+                    }}
+                    min={0}
+                    max={50}
+                    step={0.5}
+                    className="w-20"
+                    suffix="%"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-2.5">
             <span className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full bg-orange-100 border border-orange-300 text-orange-700 flex items-center justify-center font-bold text-[9px]">
               2
             </span>
-            <span>
-              <span className="font-medium">Second extension:</span>{" "}
-              {FIXED_EXT_SECOND_MONTHS} months — adds{" "}
-              <span className="font-medium text-orange-700">
-                {(secondExtPct * 100).toFixed(0)}%
-              </span>{" "}
-              to exit cost
-            </span>
-          </li>
-        </ul>
+            <div className="flex-1 space-y-1.5">
+              <p className="text-xs font-medium">
+                Second extension — begins Year {firstExtEnd}, ends Year {secondExtEnd}
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <div>
+                  <p className="text-[10px] text-muted-foreground mb-0.5">
+                    Duration
+                    <span className="ml-1 text-muted-foreground/70">
+                      (additional years after first extension)
+                    </span>
+                  </p>
+                  <NumberInput
+                    value={secondExtYears}
+                    onChange={(v) => setSecondExtYears(Math.max(1, Math.round(v)))}
+                    min={1}
+                    max={10}
+                    step={1}
+                    className="w-20"
+                    suffix={secondExtYears === 1 ? "year" : "years"}
+                  />
+                </div>
+                <div>
+                  <p className="text-[10px] text-muted-foreground mb-0.5">
+                    Premium
+                    <span className="ml-1 text-muted-foreground/70">
+                      (applies through required marketing)
+                    </span>
+                  </p>
+                  <NumberInput
+                    value={parseFloat((secondExtPct * 100).toFixed(1))}
+                    onChange={(v) => {
+                      const n = parseFloat(v.toFixed(1));
+                      if (Number.isFinite(n) && n >= 0) setSecondExtPct(n / 100);
+                    }}
+                    min={0}
+                    max={50}
+                    step={0.5}
+                    className="w-20"
+                    suffix="%"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div className="rounded-md border border-border bg-muted/20 px-4 py-3 space-y-2">
-        <p className="text-xs font-semibold">Contract maturity</p>
+      <div className="rounded-md border border-border bg-muted/20 px-4 py-3">
+        <p className="text-xs font-semibold mb-1">Contract maturity</p>
         <p className="text-xs text-muted-foreground leading-snug">
-          If the agreement remains open after the expected exit timing, the
-          contract may require active steps toward resolution. This can include
-          marketing the property for sale if no written extension is in place.
-        </p>
-        <p className="text-xs text-muted-foreground leading-snug">
-          The agreement may also be resolved through a buyout under the
-          contract — a sale is not the only path. Extension periods are fixed
-          parts of the contract structure and require written handling. If
-          extension periods apply, they increase the total exit cost.
+          After the target exit timing and extension periods, the agreement may require
+          active steps toward resolution — including marketing the property for sale, or
+          a buyout if permitted. This is not a foreclosure.
         </p>
       </div>
 
-      <div className="rounded-md border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30 px-4 py-3 space-y-2">
+      <div className="rounded-md border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30 px-4 py-3 space-y-1.5">
         <p className="text-xs font-semibold text-blue-900 dark:text-blue-100">
           What this means
         </p>
         <ul className="space-y-1 text-xs text-blue-800 dark:text-blue-200 leading-snug list-disc pl-4">
           <li>
             You must hold the agreement for at least{" "}
-            {minimumHoldYears} {minimumHoldYears === 1 ? "year" : "years"}.
+            {plural(minimumHoldYears, "year")}. Before Year {exitYear} (and
+            after the minimum hold), the agreement can be resolved through sale
+            or buyout.
           </li>
           <li>
-            The expected exit timing is{" "}
-            {exitYear} {exitYear === 1 ? "year" : "years"}.
+            If the agreement is still open after Year {exitYear}, a{" "}
+            <strong>{plural(firstExtYears, "year")} first extension</strong>{" "}
+            applies — adding{" "}
+            <strong>{fmtPct(firstExtPct)}</strong> to the projected exit cost
+            through Year {firstExtEnd}.
           </li>
           <li>
-            If the agreement remains open after that point, fixed extension
-            premiums may increase the total exit cost — the first extension
-            adds {(firstExtPct * 100).toFixed(0)}% and the second adds{" "}
-            {(secondExtPct * 100).toFixed(0)}%.
+            A{" "}
+            <strong>{plural(secondExtYears, "year")} second extension</strong>{" "}
+            then applies (Year {firstExtEnd}–{secondExtEnd}), adding an
+            additional{" "}
+            <strong>{fmtPct(secondExtPct)}</strong> to the exit cost.
           </li>
           <li>
-            If no written extension is in place, the contract may require
-            active steps toward resolution, including sale marketing or another
-            permitted exit path such as buyout.
+            After Year {secondExtEnd}, the agreement enters{" "}
+            <strong>Required to Market</strong>. The{" "}
+            {fmtPct(secondExtPct)} second extension premium continues to apply
+            until the agreement is resolved.
+          </li>
+          <li>
+            Resolution can include marketing the property for sale or a buyout
+            under the contract — a forced sale is not the only path.
           </li>
         </ul>
       </div>
@@ -410,14 +588,14 @@ function ExitTermsTab({
   );
 }
 
+// ─── Assumptions tab ──────────────────────────────────────────────────────────
+
 function AssumptionsTab({
   annualAppreciation,
   setAnnualAppreciation,
-  exitYear,
 }: {
   annualAppreciation: number;
   setAnnualAppreciation: (v: number) => void;
-  exitYear: number;
 }) {
   const pct = annualAppreciation * 100;
   return (
@@ -457,138 +635,72 @@ function AssumptionsTab({
       </FieldRow>
 
       <div className="rounded-md border border-border bg-muted/20 px-4 py-3">
-        <p className="text-xs font-semibold mb-1">Modeled exit</p>
-        <p className="text-xs text-muted-foreground">
-          Expected exit timing is set to{" "}
-          <span className="font-medium">
-            Year {exitYear}
-          </span>
-          . Adjust it in the Exit Terms tab.
+        <p className="text-xs font-semibold mb-1">About projections</p>
+        <p className="text-xs text-muted-foreground leading-snug">
+          Projections use this appreciation rate to estimate future home value
+          and the buyer&#39;s proportional appreciation share. They are
+          illustrative — not a guarantee or appraisal.
         </p>
       </div>
     </div>
   );
 }
 
+// ─── Fees tab (read-only computed) ────────────────────────────────────────────
+
 function FeesTab({
-  setupFeePct,
-  setSetupFeePct,
-  setupFeeFloor,
-  setSetupFeeFloor,
-  setupFeeCap,
-  setSetupFeeCap,
-  servicingFeeMonthly,
-  setServicingFeeMonthly,
-  paymentAdminFee,
-  setPaymentAdminFee,
-  exitAdminFee,
-  setExitAdminFee,
+  upfrontPayment,
+  monthlyPayment,
+  numPayments,
 }: {
-  setupFeePct: number;
-  setSetupFeePct: (v: number) => void;
-  setupFeeFloor: number;
-  setSetupFeeFloor: (v: number) => void;
-  setupFeeCap: number;
-  setSetupFeeCap: (v: number) => void;
-  servicingFeeMonthly: number;
-  setServicingFeeMonthly: (v: number) => void;
-  paymentAdminFee: number;
-  setPaymentAdminFee: (v: number) => void;
-  exitAdminFee: number;
-  setExitAdminFee: (v: number) => void;
+  upfrontPayment: number;
+  monthlyPayment: number;
+  numPayments: number;
 }) {
+  const contractedDealSize = upfrontPayment + monthlyPayment * numPayments;
+  const rawSetupFee = contractedDealSize * D.setup_fee_pct;
+  const setupFee = Math.min(
+    Math.max(rawSetupFee, D.setup_fee_floor),
+    D.setup_fee_cap,
+  );
+  const paymentAdminTotal = D.payment_admin_fee * numPayments;
+
   return (
-    <div className="space-y-4">
-      <FieldRow
+    <div className="space-y-3">
+      <p className="text-[11px] text-muted-foreground leading-snug">
+        Platform fees are computed — not negotiable deal inputs. Values shown
+        are estimates based on current payment configuration.
+      </p>
+
+      <ReadOnlyField
         label="Setup fee"
-        hint="Percentage of contracted deal size collected once at closing, subject to floor and cap."
-      >
-        <div className="flex items-center gap-2">
-          <input
-            type="number"
-            value={(setupFeePct * 100).toFixed(2)}
-            min={0}
-            max={10}
-            step={0.01}
-            onChange={(e) => {
-              const n = parseFloat(e.target.value);
-              if (Number.isFinite(n) && n > 0) setSetupFeePct(n / 100);
-            }}
-            className="w-24 rounded-md border border-input bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-          />
-          <span className="text-sm text-muted-foreground">%</span>
-        </div>
-      </FieldRow>
-      <FieldRow
-        label="Setup fee floor"
-        hint="Minimum setup fee charged regardless of deal size."
-      >
-        <NumberInput
-          value={setupFeeFloor}
-          onChange={setSetupFeeFloor}
-          min={0}
-          max={10000}
-          step={50}
-          prefix="$"
-        />
-      </FieldRow>
-      <FieldRow
-        label="Setup fee cap"
-        hint="Maximum setup fee charged regardless of deal size."
-      >
-        <NumberInput
-          value={setupFeeCap}
-          onChange={setSetupFeeCap}
-          min={1000}
-          max={50000}
-          step={500}
-          prefix="$"
-        />
-      </FieldRow>
-      <FieldRow
+        value={fmtCurrency(setupFee)}
+        hint={`${(D.setup_fee_pct * 100).toFixed(1)}% of contracted deal size (upfront + all monthly payments), floor ${fmtCurrency(D.setup_fee_floor)}, cap ${fmtCurrency(D.setup_fee_cap)}. Collected once at closing.`}
+      />
+      <ReadOnlyField
         label="Monthly servicing fee"
-        hint="Recurring monthly fee during the agreement."
-      >
-        <NumberInput
-          value={servicingFeeMonthly}
-          onChange={setServicingFeeMonthly}
-          min={0}
-          max={500}
-          step={1}
-          prefix="$"
-          suffix="/mo"
-        />
-      </FieldRow>
-      <FieldRow
+        value={`${fmtCurrency(D.servicing_fee_monthly)}/mo`}
+        hint="Recurring monthly fee during the agreement term."
+      />
+      <ReadOnlyField
         label="Payment admin fee"
-        hint="Fee assessed per monthly payment event."
-      >
-        <NumberInput
-          value={paymentAdminFee}
-          onChange={setPaymentAdminFee}
-          min={0}
-          max={50}
-          step={1}
-          prefix="$"
-          suffix="/payment"
-        />
-      </FieldRow>
-      <FieldRow
+        value={
+          numPayments > 0
+            ? `${fmtCurrency(paymentAdminTotal)} total (${fmtCurrency(D.payment_admin_fee)} × ${numPayments} payments)`
+            : `${fmtCurrency(D.payment_admin_fee)}/payment`
+        }
+        hint="Assessed per monthly funding disbursement."
+      />
+      <ReadOnlyField
         label="Exit admin fee"
+        value={fmtCurrency(D.exit_admin_fee_amount)}
         hint="One-time fee collected at settlement."
-      >
-        <NumberInput
-          value={exitAdminFee}
-          onChange={setExitAdminFee}
-          min={0}
-          max={25000}
-          step={100}
-          prefix="$"
-        />
-      </FieldRow>
+      />
     </div>
   );
 }
+
+// ─── Main modal ───────────────────────────────────────────────────────────────
 
 export function DealTermsModal({
   initial,
@@ -616,39 +728,25 @@ export function DealTermsModal({
     safeN(dt.number_of_payments, D.number_of_payments),
   );
   const [minimumHoldYears, setMinimumHoldYears] = useState(() =>
-    safeN(dt.minimum_hold_years, 1),
+    safeN(dt.minimum_hold_years, D.minimum_hold_years),
   );
   const [exitYear, setExitYear] = useState(() =>
     safeN(sc.exit_year, SD.exit_year),
   );
-  const firstExtPct = safeNPos(
-    dt.first_extension_premium_pct,
-    D.first_extension_premium_pct,
+  const [firstExtYears, setFirstExtYears] = useState(() =>
+    safeN(dt.first_extension_years, D.first_extension_years),
   );
-  const secondExtPct = safeNPos(
-    dt.second_extension_premium_pct,
-    D.second_extension_premium_pct,
+  const [firstExtPct, setFirstExtPct] = useState(() =>
+    safeNPos(dt.first_extension_premium_pct, D.first_extension_premium_pct),
+  );
+  const [secondExtYears, setSecondExtYears] = useState(() =>
+    safeN(dt.second_extension_years, D.second_extension_years),
+  );
+  const [secondExtPct, setSecondExtPct] = useState(() =>
+    safeNPos(dt.second_extension_premium_pct, D.second_extension_premium_pct),
   );
   const [annualAppreciation, setAnnualAppreciation] = useState(() =>
     safeN(sc.annual_appreciation, SD.annual_appreciation),
-  );
-  const [setupFeePct, setSetupFeePct] = useState(() =>
-    safeNPos(dt.setup_fee_pct, D.setup_fee_pct),
-  );
-  const [setupFeeFloor, setSetupFeeFloor] = useState(() =>
-    safeN(dt.setup_fee_floor, D.setup_fee_floor),
-  );
-  const [setupFeeCap, setSetupFeeCap] = useState(() =>
-    safeNPos(dt.setup_fee_cap, D.setup_fee_cap),
-  );
-  const [servicingFeeMonthly, setServicingFeeMonthly] = useState(() =>
-    safeNPos(dt.servicing_fee_monthly, D.servicing_fee_monthly),
-  );
-  const [paymentAdminFee, setPaymentAdminFee] = useState(() =>
-    safeNPos(dt.payment_admin_fee, D.payment_admin_fee),
-  );
-  const [exitAdminFee, setExitAdminFee] = useState(() =>
-    safeNPos(dt.exit_admin_fee_amount, D.exit_admin_fee_amount),
   );
 
   useEffect(() => {
@@ -675,13 +773,9 @@ export function DealTermsModal({
         monthly_payment: monthlyPayment,
         number_of_payments: numPayments,
         minimum_hold_years: minimumHoldYears,
-        setup_fee_pct: setupFeePct,
-        setup_fee_floor: setupFeeFloor,
-        setup_fee_cap: setupFeeCap,
-        servicing_fee_monthly: servicingFeeMonthly,
-        payment_admin_fee: paymentAdminFee,
-        exit_admin_fee_amount: exitAdminFee,
+        first_extension_years: firstExtYears,
         first_extension_premium_pct: firstExtPct,
+        second_extension_years: secondExtYears,
         second_extension_premium_pct: secondExtPct,
       };
       const scenario: AnyRecord = {
@@ -712,6 +806,7 @@ export function DealTermsModal({
         aria-label="Edit deal terms"
         className="w-full sm:max-w-lg rounded-t-2xl sm:rounded-xl border bg-background shadow-2xl flex flex-col max-h-[90dvh] overflow-hidden"
       >
+        {/* Header */}
         <div className="flex items-center justify-between border-b px-5 py-4 flex-shrink-0">
           <h2 className="text-base font-semibold">Edit deal terms</h2>
           <button
@@ -736,6 +831,16 @@ export function DealTermsModal({
           </button>
         </div>
 
+        {/* Summary tiles — always visible */}
+        <SummaryTiles
+          propertyValue={propertyValue}
+          upfrontPayment={upfrontPayment}
+          monthlyPayment={monthlyPayment}
+          numPayments={numPayments}
+          exitYear={exitYear}
+        />
+
+        {/* Tab bar */}
         <div className="flex border-b flex-shrink-0 overflow-x-auto">
           {TABS.map((tab) => (
             <button
@@ -753,6 +858,7 @@ export function DealTermsModal({
           ))}
         </div>
 
+        {/* Tab body */}
         <div className="flex-1 overflow-y-auto px-5 py-4">
           {error && (
             <div className="mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">
@@ -778,40 +884,37 @@ export function DealTermsModal({
               setMinimumHoldYears={setMinimumHoldYears}
               exitYear={exitYear}
               setExitYear={setExitYear}
+              firstExtYears={firstExtYears}
+              setFirstExtYears={setFirstExtYears}
               firstExtPct={firstExtPct}
+              setFirstExtPct={setFirstExtPct}
+              secondExtYears={secondExtYears}
+              setSecondExtYears={setSecondExtYears}
               secondExtPct={secondExtPct}
+              setSecondExtPct={setSecondExtPct}
             />
           )}
           {activeTab === "assumptions" && (
             <AssumptionsTab
               annualAppreciation={annualAppreciation}
               setAnnualAppreciation={setAnnualAppreciation}
-              exitYear={exitYear}
             />
           )}
           {activeTab === "fees" && (
             <FeesTab
-              setupFeePct={setupFeePct}
-              setSetupFeePct={setSetupFeePct}
-              setupFeeFloor={setupFeeFloor}
-              setSetupFeeFloor={setSetupFeeFloor}
-              setupFeeCap={setupFeeCap}
-              setSetupFeeCap={setSetupFeeCap}
-              servicingFeeMonthly={servicingFeeMonthly}
-              setServicingFeeMonthly={setServicingFeeMonthly}
-              paymentAdminFee={paymentAdminFee}
-              setPaymentAdminFee={setPaymentAdminFee}
-              exitAdminFee={exitAdminFee}
-              setExitAdminFee={setExitAdminFee}
+              upfrontPayment={upfrontPayment}
+              monthlyPayment={monthlyPayment}
+              numPayments={numPayments}
             />
           )}
         </div>
 
-        <div className="flex items-center justify-between border-t px-5 py-3.5 flex-shrink-0 gap-3">
+        {/* Footer */}
+        <div className="flex items-center justify-between gap-3 border-t px-5 py-3 flex-shrink-0">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border px-4 py-2 text-sm font-medium hover:bg-muted/50"
+            className="rounded-md border px-3.5 py-1.5 text-sm font-medium hover:bg-muted/60"
           >
             Cancel
           </button>
@@ -819,12 +922,9 @@ export function DealTermsModal({
             type="button"
             onClick={handleSave}
             disabled={saving}
-            className="inline-flex items-center gap-2 rounded-lg bg-foreground px-5 py-2 text-sm font-medium text-background disabled:opacity-50"
+            className="rounded-md bg-foreground px-4 py-1.5 text-sm font-medium text-background disabled:opacity-50 hover:bg-foreground/90"
           >
-            {saving && (
-              <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-background border-t-transparent" />
-            )}
-            Save terms
+            {saving ? "Saving…" : "Save"}
           </button>
         </div>
       </div>

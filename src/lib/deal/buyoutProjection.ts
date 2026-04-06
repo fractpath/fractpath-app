@@ -75,23 +75,35 @@ export function modeledFundingToDate(
 // ─── Extension window identification ─────────────────────────────────────────
 
 /**
- * Extension window configuration — all year values are fractional.
- * null start/end means that extension period is not explicitly configured.
+ * Extension window configuration derived from negotiable deal term inputs.
+ *
+ * Timeline: minimumHold → exitWindow → firstExtension → secondExtension → Required to Market
+ *
+ * firstExtEnd   = targetExitYear + firstExtYears
+ * secondExtEnd  = firstExtEnd + secondExtYears
+ *
+ * After secondExtEnd, the deal enters "Required to Market".
+ * The secondExtPremiumPct continues to apply during Required to Market until resolution.
  */
 export type ExtensionWindowConfig = {
   minimumHoldYears: number;
-  targetExitStart: number;
-  targetExitEnd: number;
-  firstExtStart: number | null;
-  firstExtEnd: number | null;
+  /** Single target exit anchor. First extension starts immediately after. */
+  targetExitYear: number;
+  /** End of first extension = targetExitYear + firstExtYears */
+  firstExtEnd: number;
   firstExtPremiumPct: number;
-  secondExtStart: number | null;
-  secondExtEnd: number | null;
+  /** End of second extension = firstExtEnd + secondExtYears. Premium continues through Required to Market. */
+  secondExtEnd: number;
   secondExtPremiumPct: number;
   longStopYear: number;
 };
 
-/** Identifies which contract window a given year falls in and the applicable premium. */
+/**
+ * Identifies which contract window a given year falls in and the applicable premium.
+ *
+ * After the second extension ends, the deal enters "Required to market".
+ * The second extension premium continues to apply until the agreement is resolved.
+ */
 function identifyContractWindow(
   yearF: number,
   cfg: ExtensionWindowConfig,
@@ -99,26 +111,17 @@ function identifyContractWindow(
   if (yearF < cfg.minimumHoldYears) {
     return { label: "Minimum hold", premiumPct: 0 };
   }
-  if (yearF >= cfg.targetExitStart && yearF <= cfg.targetExitEnd) {
-    return { label: "Target exit window", premiumPct: 0 };
+  if (yearF <= cfg.targetExitYear) {
+    return { label: "Exit window", premiumPct: 0 };
   }
-  if (
-    cfg.firstExtStart !== null &&
-    cfg.firstExtEnd !== null &&
-    yearF > cfg.firstExtStart &&
-    yearF <= cfg.firstExtEnd
-  ) {
+  if (yearF <= cfg.firstExtEnd) {
     return { label: "First extension", premiumPct: cfg.firstExtPremiumPct };
   }
-  if (
-    cfg.secondExtStart !== null &&
-    cfg.secondExtEnd !== null &&
-    yearF > cfg.secondExtStart &&
-    yearF <= cfg.secondExtEnd
-  ) {
+  if (yearF <= cfg.secondExtEnd) {
     return { label: "Second extension", premiumPct: cfg.secondExtPremiumPct };
   }
-  return { label: "Outside exit window", premiumPct: 0 };
+  // Required to Market: second extension premium continues until resolution.
+  return { label: "Required to market", premiumPct: cfg.secondExtPremiumPct };
 }
 
 // ─── Monthly buyout series ────────────────────────────────────────────────────

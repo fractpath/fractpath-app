@@ -61,7 +61,7 @@ function buildBands(
 ): BandDescriptor[] {
   const bands: BandDescriptor[] = [];
 
-  // Minimum hold (pre-exit) band
+  // Minimum hold — slate tint
   if (cfg.minimumHoldYears > 0) {
     bands.push({
       startYear: 0,
@@ -71,44 +71,47 @@ function buildBands(
     });
   }
 
-  // Target exit window (no premium) — green tint
-  const targetStart = Math.max(cfg.targetExitStart, 0);
-  const targetEnd = Math.min(cfg.targetExitEnd, maxYear);
-  if (targetEnd > targetStart) {
+  // Exit window (no premium) — green tint; min-hold to target exit year
+  const ewEnd = Math.min(cfg.targetExitYear, maxYear);
+  if (ewEnd > cfg.minimumHoldYears) {
     bands.push({
-      startYear: targetStart,
-      endYear: targetEnd,
+      startYear: cfg.minimumHoldYears,
+      endYear: ewEnd,
       label: "Exit window",
       fillColor: "rgba(134,239,172,0.18)",
     });
   }
 
-  // First extension — amber tint
-  if (cfg.firstExtStart !== null && cfg.firstExtEnd !== null) {
-    const s = Math.max(cfg.firstExtStart, 0);
-    const e = Math.min(cfg.firstExtEnd, maxYear);
-    if (e > s) {
-      bands.push({
-        startYear: s,
-        endYear: e,
-        label: `+${fmtPct(cfg.firstExtPremiumPct)}`,
-        fillColor: "rgba(253,224,71,0.18)",
-      });
-    }
+  // First extension — amber tint; targetExitYear to firstExtEnd
+  const fe1End = Math.min(cfg.firstExtEnd, maxYear);
+  if (fe1End > cfg.targetExitYear) {
+    bands.push({
+      startYear: cfg.targetExitYear,
+      endYear: fe1End,
+      label: `+${fmtPct(cfg.firstExtPremiumPct)}`,
+      fillColor: "rgba(253,224,71,0.22)",
+    });
   }
 
-  // Second extension — orange tint
-  if (cfg.secondExtStart !== null && cfg.secondExtEnd !== null) {
-    const s = Math.max(cfg.secondExtStart, 0);
-    const e = Math.min(cfg.secondExtEnd, maxYear);
-    if (e > s) {
-      bands.push({
-        startYear: s,
-        endYear: e,
-        label: `+${fmtPct(cfg.secondExtPremiumPct)}`,
-        fillColor: "rgba(251,146,60,0.18)",
-      });
-    }
+  // Second extension — orange tint; firstExtEnd to secondExtEnd
+  const fe2End = Math.min(cfg.secondExtEnd, maxYear);
+  if (fe2End > cfg.firstExtEnd) {
+    bands.push({
+      startYear: cfg.firstExtEnd,
+      endYear: fe2End,
+      label: `+${fmtPct(cfg.secondExtPremiumPct)}`,
+      fillColor: "rgba(251,146,60,0.22)",
+    });
+  }
+
+  // Required to Market — subtle red tint; after second extension to end of chart
+  if (maxYear > cfg.secondExtEnd) {
+    bands.push({
+      startYear: cfg.secondExtEnd,
+      endYear: maxYear,
+      label: "Req. to market",
+      fillColor: "rgba(239,68,68,0.09)",
+    });
   }
 
   return bands;
@@ -300,11 +303,11 @@ export function BuyoutProjectionChart({
 
         {/* Extension boundary vertical ticks (extension start/end years) */}
         {extensionConfig && (() => {
-          const boundaries: number[] = [];
-          if (extensionConfig.firstExtStart !== null) boundaries.push(extensionConfig.firstExtStart);
-          if (extensionConfig.firstExtEnd !== null) boundaries.push(extensionConfig.firstExtEnd);
-          if (extensionConfig.secondExtStart !== null) boundaries.push(extensionConfig.secondExtStart);
-          if (extensionConfig.secondExtEnd !== null) boundaries.push(extensionConfig.secondExtEnd);
+          const boundaries = [
+            extensionConfig.targetExitYear,
+            extensionConfig.firstExtEnd,
+            extensionConfig.secondExtEnd,
+          ];
           return boundaries
             .filter((yr) => yr > 0 && yr < maxYear)
             .map((yr) => (
@@ -506,7 +509,7 @@ export function BuyoutProjectionChart({
               </div>
               <div className="flex items-center justify-between gap-3">
                 <span className="text-amber-600 font-medium">
-                  {hover.windowLabel === "Second extension"
+                  {hover.windowLabel === "Second extension" || hover.windowLabel === "Required to market"
                     ? `Extension premium (2nd) +${fmtPct(hover.extensionPremiumPct)}`
                     : `Extension premium (1st) +${fmtPct(hover.extensionPremiumPct)}`}
                 </span>
@@ -520,7 +523,7 @@ export function BuyoutProjectionChart({
               </div>
               {extensionConfig && (
                 <p className="text-[10px] text-muted-foreground leading-tight pt-0.5">
-                  {`Exiting in Yr ${extensionConfig.targetExitStart}–${extensionConfig.targetExitEnd} avoids this cost`}
+                  {`Exiting by Yr ${extensionConfig.targetExitYear} avoids this cost`}
                 </p>
               )}
             </div>
