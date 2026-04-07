@@ -1,0 +1,719 @@
+"use client";
+
+import { useMemo } from "react";
+import { normalizeDealTermsForWidget } from "@/lib/normalizeDealTermsForWidget";
+import {
+  normalizeResultsForWidget,
+} from "@/components/deal/widgetNormalization";
+import { DealWidgetShell } from "@/components/deal/DealWidgetShell";
+import {
+  CANONICAL_DEAL_TERM_DEFAULTS,
+  CANONICAL_SCENARIO_DEFAULTS,
+} from "@/lib/canonicalDefaults";
+import {
+  buildMonthlyBuyoutSeries,
+  computeContractedDealSize,
+  computeRealtorPaidToDate,
+  computeRealtorProjectedTotal,
+  computeSetupFee,
+  interpolateBuyoutAtMonth,
+  type ExtensionWindowConfig,
+} from "@/lib/deal/buyoutProjection";
+import { BuyoutProjectionChart } from "@/components/deal/BuyoutProjectionChart";
+
+type AnyRecord = Record<string, unknown>;
+
+type AcceptedDealStatusPanelProps = {
+  dealId: string;
+  initialSnapshot?: AnyRecord | null;
+  inputs: AnyRecord | null;
+  results: AnyRecord | null;
+  computeVersion?: string | null;
+  persona?: string;
+  canonicalStage?: string | null;
+  /**
+   * ISO timestamp of the acceptance event.
+   *
+   * Derivation order (most to least grounded):
+   *   1. deal_events WHERE event_type = 'OFFER_ACCEPTED'
+   *   2. deal_events WHERE event_type = 'DEAL_ACCEPTED'
+   *   3. null — time-based status falls back to canonical stage label.
+   */
+  acceptedAt?: string | null;
+};
+
+// ─── Utility ──────────────────────────────────────────────────────────────────
+
+function safeRecord(v: unknown): AnyRecord | null {
+  return v !== null && typeof v === "object" && !Array.isArray(v)
+    ? (v as AnyRecord)
+    : null;
+}
+
+function safeNumber(v: unknown): number | null {
+  if (v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function fmtCurrency(v: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(v);
+}
+
+function fmtPercent(v: number): string {
+  return `${(v * 100).toFixed(1)}%`;
+}
+
+function hasSubstantiveData(snap: AnyRecord | null): boolean {
+  if (!snap) return false;
+  const inputs = safeRecord((snap as any)?.inputs);
+  const results = safeRecord((snap as any)?.outputs?.results);
+  return !!(inputs || results);
+}
+
+function hasRenderableComputedSnapshot(
+  inputs: AnyRecord | null,
+  results: AnyRecord | null,
+): boolean {
+  if (!inputs || !results) return false;
+
+  const dealTerms = safeRecord((inputs as any)?.deal_terms);
+  const scenario = safeRecord((inputs as any)?.scenario);
+
+  if (!dealTerms || !scenario) return false;
+
+  const requiredResultKeys = [
+    "total_scheduled_buyer_funding",
+    "scheduled_buyer_appreciation_share",
+    "extension_adjusted_buyout_amount",
+    "base_buyout_amount",
+  ];
+
+  for (const key of requiredResultKeys) {
+    const v = (results as any)?.[key];
+    if (typeof v !== "number" || !Number.isFinite(v)) return false;
+  }
+
+  if (
+    typeof (scenario as any)?.annual_appreciation !== "number" ||
+    !Number.isFinite((scenario as any).annual_appreciation)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+// ─── Time helpers ─────────────────────────────────────────────────────────────
+
+const MS_PER_YEAR = 365.25 * 24 * 3600 * 1000;
+
+function elapsedYears(acceptedAt: string | null | undefined): number | null {
+  if (!acceptedAt) return null;
+  const ms = new Date(acceptedAt).getTime();
+  if (!Number.isFinite(ms)) return null;
+  return Math.max(0, (Date.now() - ms) / MS_PER_YEAR);
+}
+
+function contractYear(acceptedAt: string | null | undefined): number | null {
+  const y = elapsedYears(acceptedAt);
+  if (y === null) return null;
+  return Math.floor(y) + 1;
+}
+
+// ─── Status derivation ────────────────────────────────────────────────────────
+
+function resolveAcceptedStatus(
+  canonicalStage: string | null,
+  elapsed: number | null,
+  dealTerms: AnyRecord | null,
+  scenario: AnyRecord | null,
+): string {
+  switch (canonicalStage) {
+    case "deal_closed":
+      return "Closed";
+    case "agreement_signed":
+      return "Agreement signed";
+    case "agreement_out_for_signatures":
+      return "Agreement out for signatures";
+    case "ready_for_signatures":
+      return "Agreement being prepared";
+    default:
+      break;
+  }
+
+  if (elapsed === null) return "Active";
+
+  const minHold =
+    safeNumber((dealTerms as any)?.minimum_hold_years) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.minimum_hold_years;
+  const exitYear =
+    safeNumber((scenario as any)?.exit_year) ??
+    CANONICAL_SCENARIO_DEFAULTS.exit_year;
+  const firstExtYears =
+    safeNumber((dealTerms as any)?.first_extension_years) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.first_extension_years;
+  const secondExtYears =
+    safeNumber((dealTerms as any)?.second_extension_years) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.second_extension_years;
+  const firstExtEnd = exitYear + firstExtYears;
+  const secondExtEnd = firstExtEnd + secondExtYears;
+
+  if (elapsed < minHold) return "Active — before exit window";
+  if (elapsed <= exitYear) return "In target exit window";
+  if (elapsed <= firstExtEnd) return "In first extension";
+  if (elapsed <= secondExtEnd) return "In second extension";
+  return "Required to market";
+}
+
+// ─── Timeline ─────────────────────────────────────────────────────────────────
+
+type TimelineMilestone = { label: string; subLabel: string; year: number };
+
+type TimelineProps = { milestones: TimelineMilestone[]; elapsedYears: number | null };
+
+function LifecycleTimeline({ milestones, elapsedYears: elapsed }: TimelineProps) {
+  if (milestones.length === 0) return null;
+  return (
+    <div className="relative">
+      <div
+        className="absolute left-3 top-3 w-0.5 bg-border"
+        style={{ height: "calc(100% - 1.5rem)" }}
+        aria-hidden="true"
+      />
+      <ol className="space-y-3 pl-0">
+        {milestones.map((m, i) => {
+          const isPast = elapsed !== null && elapsed >= m.year;
+          const isCurrent =
+            elapsed !== null &&
+            elapsed >= m.year &&
+            (i === milestones.length - 1 || elapsed < milestones[i + 1].year);
+          return (
+            <li key={m.label} className="relative flex items-start gap-3 pl-8">
+              <span
+                className={`absolute left-0 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border-2 text-[10px] font-bold ${
+                  isCurrent
+                    ? "border-blue-500 bg-blue-500 text-white"
+                    : isPast
+                      ? "border-emerald-500 bg-emerald-500 text-white"
+                      : "border-muted-foreground/30 bg-background text-muted-foreground/50"
+                }`}
+              >
+                {isPast ? (
+                  <svg viewBox="0 0 12 12" fill="none" className="h-3 w-3" aria-hidden="true">
+                    <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                ) : (
+                  i + 1
+                )}
+              </span>
+              <div className="min-w-0 flex-1 pt-0.5">
+                <p className={`text-xs font-medium leading-tight ${isCurrent ? "text-blue-600 dark:text-blue-400" : isPast ? "text-foreground" : "text-muted-foreground"}`}>
+                  {m.label}
+                </p>
+                <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">{m.subLabel}</p>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
+// ─── Metric card ──────────────────────────────────────────────────────────────
+
+type MetricCardProps = { label: string; value: string; sub?: string; highlight?: boolean };
+
+function MetricCard({ label, value, sub, highlight }: MetricCardProps) {
+  return (
+    <div className={`rounded-lg border px-4 py-3 flex flex-col gap-0.5 ${highlight ? "border-blue-200 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-800" : "bg-muted/30"}`}>
+      <span className="text-xs text-muted-foreground leading-tight">{label}</span>
+      <span className="text-lg font-semibold tabular-nums leading-tight">{value}</span>
+      {sub ? <span className="text-xs text-muted-foreground leading-tight">{sub}</span> : null}
+    </div>
+  );
+}
+
+// ─── Panel ────────────────────────────────────────────────────────────────────
+
+export function AcceptedDealStatusPanel({
+  dealId: _dealId,
+  initialSnapshot,
+  inputs,
+  results,
+  computeVersion,
+  persona = "homeowner",
+  canonicalStage,
+  acceptedAt,
+}: AcceptedDealStatusPanelProps) {
+  const seedSnapshot = useMemo(() => {
+    const snap = safeRecord(initialSnapshot);
+
+    if (snap && hasSubstantiveData(snap)) {
+      const snapInputs = safeRecord((snap as any)?.inputs);
+      const snapDealTerms = safeRecord((snapInputs as any)?.deal_terms);
+      const snapScenario = safeRecord((snapInputs as any)?.scenario);
+      const snapResults = safeRecord((snap as any)?.outputs?.results);
+
+      const annualAppreciation =
+        typeof (snapScenario as any)?.annual_appreciation === "number" &&
+        Number.isFinite((snapScenario as any).annual_appreciation)
+          ? (snapScenario as any).annual_appreciation
+          : CANONICAL_SCENARIO_DEFAULTS.annual_appreciation;
+
+      return {
+        ...snap,
+        inputs: {
+          ...(snapInputs ?? {}),
+          deal_terms: normalizeDealTermsForWidget(snapDealTerms ?? {}),
+          scenario: { ...(snapScenario ?? {}), annual_appreciation: annualAppreciation },
+        },
+        outputs: {
+          ...(safeRecord((snap as any)?.outputs) ?? {}),
+          results: snapResults ? normalizeResultsForWidget(snapResults) : null,
+        },
+      } as AnyRecord;
+    }
+
+    const inRec = safeRecord(inputs);
+    const outRec = safeRecord(results);
+    if (!inRec && !outRec) return null;
+
+    let normalizedInputs: AnyRecord | null = inRec;
+    if (inRec && safeRecord((inRec as any).deal_terms) && safeRecord((inRec as any).scenario)) {
+      const dealTerms = (inRec as any).deal_terms as AnyRecord;
+      normalizedInputs = { ...(inRec as any), deal_terms: normalizeDealTermsForWidget(dealTerms) };
+    }
+
+    return {
+      inputs: normalizedInputs ?? null,
+      outputs: { results: outRec ? normalizeResultsForWidget(outRec) : null },
+      compute_version: computeVersion ?? null,
+      schema_version: (initialSnapshot as any)?.schema_version ?? null,
+    } as AnyRecord;
+  }, [initialSnapshot, inputs, results, computeVersion]);
+
+  const defaultSeed = useMemo<AnyRecord>(
+    () => ({ inputs: { deal_terms: {}, scenario: {} }, outputs: { results: null }, compute_version: null, schema_version: "1" }),
+    [],
+  );
+
+  const currentInputs = safeRecord((seedSnapshot as any)?.inputs);
+  const currentResults = safeRecord((seedSnapshot as any)?.outputs?.results);
+  const renderable = hasRenderableComputedSnapshot(currentInputs, currentResults);
+
+  const dealTerms = safeRecord((currentInputs as any)?.deal_terms);
+  const scenario = safeRecord((currentInputs as any)?.scenario);
+
+  // Deal term values
+  const propertyValue =
+    safeNumber((dealTerms as any)?.property_value) ?? CANONICAL_DEAL_TERM_DEFAULTS.property_value;
+  const annualAppreciation =
+    safeNumber((scenario as any)?.annual_appreciation) ?? CANONICAL_SCENARIO_DEFAULTS.annual_appreciation;
+  const exitYear =
+    safeNumber((scenario as any)?.exit_year) ?? CANONICAL_SCENARIO_DEFAULTS.exit_year;
+  const longStopYear =
+    safeNumber((dealTerms as any)?.long_stop_year) ?? CANONICAL_DEAL_TERM_DEFAULTS.long_stop_year;
+  const minimumHoldYears =
+    safeNumber((dealTerms as any)?.minimum_hold_years) ?? CANONICAL_DEAL_TERM_DEFAULTS.minimum_hold_years;
+  const firstExtPremiumPct =
+    safeNumber((dealTerms as any)?.first_extension_premium_pct) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.first_extension_premium_pct;
+  const secondExtPremiumPct =
+    safeNumber((dealTerms as any)?.second_extension_premium_pct) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.second_extension_premium_pct;
+  // Extension durations are negotiable deal inputs. Derived anchors use exitYear from scenario.
+  const firstExtYears =
+    safeNumber((dealTerms as any)?.first_extension_years) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.first_extension_years;
+  const secondExtYears =
+    safeNumber((dealTerms as any)?.second_extension_years) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.second_extension_years;
+  const firstExtEndMain = exitYear + firstExtYears;
+  const secondExtEndMain = firstExtEndMain + secondExtYears;
+  const servicingFeeMonthly =
+    safeNumber((dealTerms as any)?.servicing_fee_monthly) ?? CANONICAL_DEAL_TERM_DEFAULTS.servicing_fee_monthly;
+  const exitAdminFee =
+    safeNumber((dealTerms as any)?.exit_admin_fee_amount) ?? CANONICAL_DEAL_TERM_DEFAULTS.exit_admin_fee_amount;
+  const paymentAdminFee =
+    safeNumber((dealTerms as any)?.payment_admin_fee) ?? CANONICAL_DEAL_TERM_DEFAULTS.payment_admin_fee;
+
+  // Realtor representation — read from deal terms; hidden when mode is NONE.
+  const realtorMode =
+    ((dealTerms as any)?.realtor_representation_mode as string | undefined) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.realtor_representation_mode;
+  const realtorCommissionPct =
+    safeNumber((dealTerms as any)?.realtor_commission_pct) ??
+    CANONICAL_DEAL_TERM_DEFAULTS.realtor_commission_pct;
+  const showRealtor = realtorMode !== "NONE";
+
+  // Deal payment terms — needed for contracted deal size and funding progression.
+  const upfrontPayment =
+    safeNumber((dealTerms as any)?.upfront_payment) ?? CANONICAL_DEAL_TERM_DEFAULTS.upfront_payment;
+  const monthlyPayment =
+    safeNumber((dealTerms as any)?.monthly_payment) ?? CANONICAL_DEAL_TERM_DEFAULTS.monthly_payment;
+  const numberOfPayments =
+    safeNumber((dealTerms as any)?.number_of_payments) ?? CANONICAL_DEAL_TERM_DEFAULTS.number_of_payments;
+
+  // Contracted deal size: upfront + (monthly × num_payments).
+  // This is the correct base for setup fee — NOT property value.
+  const contractedDealSize = computeContractedDealSize(
+    upfrontPayment,
+    monthlyPayment,
+    numberOfPayments,
+  );
+
+  // Setup fee: prefer engine result; derive from formula as fallback.
+  // Formula: clamp(contractedDealSize × feePct, feeFloor, feeCap)
+  const setupFeeFromEngine = safeNumber((currentResults as any)?.fractpath_setup_fee_amount);
+  // setup_fee_pct and setup_fee_cap: use || so stale-zero values stored in raw
+  // snapshot deal_terms fall back to canonical defaults. Mirrors the pos() guards
+  // in normalizeDealTermsForWidget; dealTerms here is the raw snapshot input, not
+  // the normalized output, so the panel re-applies the same protection inline.
+  // setup_fee_floor uses ?? only — a 0 floor ("no minimum") is a valid configuration.
+  const setupFeePct =
+    safeNumber((dealTerms as any)?.setup_fee_pct) || CANONICAL_DEAL_TERM_DEFAULTS.setup_fee_pct;
+  const setupFeeFloor =
+    safeNumber((dealTerms as any)?.setup_fee_floor) ?? CANONICAL_DEAL_TERM_DEFAULTS.setup_fee_floor;
+  const setupFeeCap =
+    safeNumber((dealTerms as any)?.setup_fee_cap) || CANONICAL_DEAL_TERM_DEFAULTS.setup_fee_cap;
+  // Priority: engine result when present and > 0 (guard against stale-zero engine output);
+  // fallback to app-side formula using contracted deal size whenever contractedDealSize > 0.
+  const setupFee =
+    setupFeeFromEngine !== null && setupFeeFromEngine > 0
+      ? setupFeeFromEngine
+      : contractedDealSize > 0
+        ? computeSetupFee(contractedDealSize, setupFeePct, setupFeeFloor, setupFeeCap)
+        : null;
+
+  // Result values
+  const totalBuyerFunding = safeNumber((currentResults as any)?.total_scheduled_buyer_funding);
+  const appreciationShare = safeNumber((currentResults as any)?.scheduled_buyer_appreciation_share);
+  const projectedExitCost = safeNumber((currentResults as any)?.extension_adjusted_buyout_amount);
+  // Time-based computations
+  const elapsed = elapsedYears(acceptedAt);
+  const elapsedMonths = elapsed !== null ? elapsed * 12 : null;
+
+  // Model A realtor: contractedDealSize × commissionPct for projected total,
+  // fundedToDate(month) × commissionPct for modeled paid-to-date.
+  // Applied to each funding disbursement — not FMV or appreciation.
+  const realtorProjectedTotal =
+    showRealtor && realtorCommissionPct > 0
+      ? computeRealtorProjectedTotal(contractedDealSize, realtorCommissionPct)
+      : null;
+  const modeledRealtorPaidToDate =
+    showRealtor && realtorCommissionPct > 0 && elapsedMonths !== null
+      ? computeRealtorPaidToDate(
+          upfrontPayment,
+          monthlyPayment,
+          numberOfPayments,
+          Math.round(elapsedMonths),
+          realtorCommissionPct,
+        )
+      : null;
+  const cYear = contractYear(acceptedAt);
+  const statusLabel = resolveAcceptedStatus(canonicalStage ?? null, elapsed, dealTerms, scenario);
+
+  // Extension window config — derived from exitYear + negotiable extension years.
+  // Timeline: minimumHold → exitWindow(end=exitYear) → firstExt(end=firstExtEndMain) → secondExt(end=secondExtEndMain) → Required to Market
+  const extensionConfig = useMemo((): ExtensionWindowConfig => ({
+    minimumHoldYears,
+    targetExitYear: exitYear,
+    firstExtEnd: firstExtEndMain,
+    firstExtPremiumPct,
+    secondExtEnd: secondExtEndMain,
+    secondExtPremiumPct,
+    longStopYear,
+  }), [
+    minimumHoldYears, exitYear, firstExtEndMain, firstExtPremiumPct,
+    secondExtEndMain, secondExtPremiumPct, longStopYear,
+  ]);
+
+  // Current modeled buyout at elapsed months — from monthly series via interpolation
+  const currentModeledBuyout = useMemo(() => {
+    if (!renderable || appreciationShare === null || elapsedMonths === null) {
+      return null;
+    }
+    const series = buildMonthlyBuyoutSeries(
+      propertyValue, annualAppreciation, upfrontPayment, monthlyPayment, numberOfPayments, appreciationShare, longStopYear, extensionConfig,
+    );
+    return interpolateBuyoutAtMonth(series, elapsedMonths);
+  }, [renderable, upfrontPayment, monthlyPayment, numberOfPayments, appreciationShare, elapsedMonths, propertyValue, annualAppreciation, longStopYear, extensionConfig]);
+
+  // Monthly chart data
+  const chartData = useMemo(() => {
+    if (!renderable || appreciationShare === null) return null;
+
+    const series = buildMonthlyBuyoutSeries(
+      propertyValue, annualAppreciation, upfrontPayment, monthlyPayment, numberOfPayments, appreciationShare, longStopYear, extensionConfig,
+    );
+    if (series.length < 2) return null;
+
+    const exitMonthRounded = Math.round(exitYear * 12);
+    const exitPoint =
+      series.find((p) => p.month === exitMonthRounded) ??
+      series[Math.min(exitMonthRounded, series.length - 1)];
+
+    return { series, exitBuyout: exitPoint.buyout };
+  }, [renderable, propertyValue, annualAppreciation, upfrontPayment, monthlyPayment, numberOfPayments, appreciationShare, longStopYear, exitYear, extensionConfig]);
+
+  // Timeline milestones
+  const timelineMilestones = useMemo((): TimelineMilestone[] => [
+    {
+      label: "Agreement accepted",
+      subLabel: acceptedAt
+        ? `Started ${new Date(acceptedAt).toLocaleDateString("en-US", { month: "short", year: "numeric" })}`
+        : "Start of agreement",
+      year: 0,
+    },
+    {
+      label: "Minimum hold ends",
+      subLabel: `Year ${minimumHoldYears} — exit available after this point`,
+      year: minimumHoldYears,
+    },
+    {
+      label: "Target exit",
+      subLabel: `Year ${exitYear} — expected resolution point`,
+      year: exitYear,
+    },
+    {
+      label: "First extension ends",
+      subLabel: `Year ${firstExtEndMain} — ${(firstExtPremiumPct * 100).toFixed(0)}% premium applies before this`,
+      year: firstExtEndMain,
+    },
+    {
+      label: "Second extension ends",
+      subLabel: `Year ${secondExtEndMain} — required marketing may apply after`,
+      year: secondExtEndMain,
+    },
+    {
+      label: "Long-stop date",
+      subLabel: `Year ${longStopYear} — contract must settle`,
+      year: longStopYear,
+    },
+  ], [acceptedAt, minimumHoldYears, exitYear, firstExtEndMain, firstExtPremiumPct, secondExtEndMain, longStopYear]);
+
+  return (
+    <div className="border-t pt-6 space-y-5">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold">Agreement Status</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Modeled from your accepted agreement and scheduled payments.
+          </p>
+        </div>
+        <span className="inline-flex flex-shrink-0 items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          {statusLabel}
+        </span>
+      </div>
+
+      {/* Status cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <MetricCard
+          label="Current Buyout"
+          value={
+            currentModeledBuyout !== null
+              ? fmtCurrency(currentModeledBuyout)
+              : projectedExitCost !== null
+                ? fmtCurrency(projectedExitCost)
+                : "—"
+          }
+          sub={
+            elapsed !== null
+              ? `Modeled at Year ${elapsed.toFixed(1).replace(".0", "")}`
+              : "Modeled from agreement"
+          }
+          highlight
+        />
+        <MetricCard
+          label="Contract Year"
+          value={cYear !== null ? `Year ${cYear}` : "—"}
+          sub={
+            acceptedAt
+              ? `Since ${new Date(acceptedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
+              : "Acceptance date not recorded"
+          }
+        />
+        <MetricCard
+          label="Current Status"
+          value={statusLabel}
+          sub={
+            elapsed !== null
+              ? `${elapsed.toFixed(1).replace(".0", "")} years elapsed`
+              : "Based on agreement stage"
+          }
+        />
+      </div>
+
+      {!acceptedAt && (
+        <p className="text-[11px] text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-md px-3 py-2">
+          Acceptance date is not recorded — Contract Year and time-based status
+          are unavailable. Contact your account team if this needs to be corrected.
+        </p>
+      )}
+
+      {/* Compact saved terms (read-only) */}
+      <DealWidgetShell
+        initialSnapshot={seedSnapshot ?? defaultSeed}
+        canEdit={false}
+        persona={persona}
+        onSave={undefined}
+        initiallyOpenEditor={false}
+      />
+
+      {renderable && chartData ? (
+        <>
+          {/* Monthly buyout chart */}
+          <div className="rounded-lg border bg-card px-4 pt-4 pb-2">
+            <BuyoutProjectionChart
+              series={chartData.series}
+              exitYear={exitYear}
+              exitBuyout={chartData.exitBuyout}
+              elapsedMonths={elapsedMonths}
+              chartLabel="Projected buyout by contract month"
+              chartSubLabel={`Blue = projected buyout. Amber = current position. Green = Year ${exitYear} (modeled exit). Shaded bands show contract windows. Hover any point for details.`}
+              chartFootnote="Values are modeled projections based on scheduled payments, not actual payment history."
+              extensionConfig={extensionConfig}
+            />
+          </div>
+
+          {/* Lifecycle timeline */}
+          <div className="rounded-lg border bg-muted/10 px-4 py-4">
+            <p className="text-xs font-medium mb-3">Agreement timeline</p>
+            <LifecycleTimeline milestones={timelineMilestones} elapsedYears={elapsed} />
+          </div>
+
+          {/* Projection + fee summary */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="rounded-lg border bg-muted/20 px-4 py-3 space-y-2">
+              <p className="text-xs font-semibold">Projected at exit</p>
+              <dl className="space-y-1">
+                <div className="flex justify-between text-xs">
+                  <dt className="text-muted-foreground">Projected exit cost</dt>
+                  <dd className="font-medium">
+                    {projectedExitCost !== null ? fmtCurrency(projectedExitCost) : "—"}
+                  </dd>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <dt className="text-muted-foreground">Modeled exit year</dt>
+                  <dd className="font-medium">Year {exitYear}</dd>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <dt className="text-muted-foreground">Appreciation share</dt>
+                  <dd className="font-medium">
+                    {appreciationShare !== null ? fmtPercent(appreciationShare) : "—"}
+                  </dd>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <dt className="text-muted-foreground">Annual appreciation</dt>
+                  <dd className="font-medium">{fmtPercent(annualAppreciation)}</dd>
+                </div>
+              </dl>
+            </div>
+
+            <div className="rounded-lg border bg-muted/20 px-4 py-3 space-y-2">
+              <p className="text-xs font-semibold">Fee summary</p>
+              <dl className="space-y-1">
+                {setupFee !== null ? (
+                  <div className="flex justify-between text-xs">
+                    <dt className="text-muted-foreground">One-time setup fee</dt>
+                    <dd className="font-medium">{fmtCurrency(setupFee)}</dd>
+                  </div>
+                ) : null}
+                <div className="flex justify-between text-xs">
+                  <dt className="text-muted-foreground">Monthly servicing fee</dt>
+                  <dd className="font-medium">{fmtCurrency(servicingFeeMonthly)}/mo</dd>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <dt className="text-muted-foreground">Payment admin fee</dt>
+                  <dd className="font-medium">{fmtCurrency(paymentAdminFee)}/payment</dd>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <dt className="text-muted-foreground">Exit admin fee</dt>
+                  <dd className="font-medium">{fmtCurrency(exitAdminFee)}</dd>
+                </div>
+              </dl>
+              <p className="text-[10px] text-muted-foreground pt-1">
+                Setup fee is collected once at closing from total deal cash (contracted deal size), subject to a floor and cap. Monthly servicing and payment admin fees are recurring. Exit admin fee is charged at settlement.
+              </p>
+            </div>
+          </div>
+
+          {/* Realtor representation — only rendered when a realtor mode is active */}
+          {showRealtor ? (
+            <div className="rounded-lg border bg-muted/20 px-4 py-3 space-y-2">
+              <p className="text-xs font-semibold">Realtor representation</p>
+              <dl className="space-y-1">
+                <div className="flex justify-between text-xs">
+                  <dt className="text-muted-foreground">Representation</dt>
+                  <dd className="font-medium">
+                    {realtorMode === "BUYER"
+                      ? "Buyer's agent"
+                      : realtorMode === "SELLER"
+                        ? "Seller's agent"
+                        : realtorMode === "DUAL"
+                          ? "Dual agency"
+                          : realtorMode}
+                  </dd>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <dt className="text-muted-foreground">Commission rate</dt>
+                  <dd className="font-medium">{fmtPercent(realtorCommissionPct)}</dd>
+                </div>
+                {realtorProjectedTotal !== null ? (
+                  <div className="flex justify-between text-xs">
+                    <dt className="text-muted-foreground">Projected total realtor fee</dt>
+                    <dd className="font-medium">{fmtCurrency(realtorProjectedTotal)}</dd>
+                  </div>
+                ) : null}
+                {modeledRealtorPaidToDate !== null ? (
+                  <div className="flex justify-between text-xs">
+                    <dt className="text-muted-foreground">Modeled realtor fee paid to date</dt>
+                    <dd className="font-medium">{fmtCurrency(modeledRealtorPaidToDate)}</dd>
+                  </div>
+                ) : null}
+              </dl>
+              <p className="text-[10px] text-muted-foreground pt-1">
+                Applied to each funding disbursement. Paid-to-date is modeled from accepted agreement and scheduled payments — not actual servicer-posted payments.
+              </p>
+            </div>
+          ) : null}
+
+          {/* Milestone summary */}
+          <div className="rounded-lg border bg-muted/20 px-4 py-3 space-y-1">
+            <p className="text-xs font-semibold mb-2">Agreement milestones</p>
+            <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1">
+              <div className="flex flex-col text-xs">
+                <dt className="text-muted-foreground">Minimum hold</dt>
+                <dd className="font-medium">Year {minimumHoldYears}</dd>
+              </div>
+              <div className="flex flex-col text-xs">
+                <dt className="text-muted-foreground">Target exit</dt>
+                <dd className="font-medium">Year {exitYear}</dd>
+              </div>
+              <div className="flex flex-col text-xs">
+                <dt className="text-muted-foreground">1st ext. ends</dt>
+                <dd className="font-medium">Year {firstExtEndMain}</dd>
+              </div>
+              <div className="flex flex-col text-xs">
+                <dt className="text-muted-foreground">2nd ext. ends</dt>
+                <dd className="font-medium">Year {secondExtEndMain}</dd>
+              </div>
+              <div className="flex flex-col text-xs">
+                <dt className="text-muted-foreground">Long-stop</dt>
+                <dd className="font-medium">Year {longStopYear}</dd>
+              </div>
+            </dl>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}

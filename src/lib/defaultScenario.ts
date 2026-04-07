@@ -1,36 +1,58 @@
 // src/lib/defaultScenario.ts
 // App repo boundary: no imports from @fractpath/compute. Use local structural types.
 
+import {
+  CANONICAL_DEAL_TERM_DEFAULTS,
+  CANONICAL_SCENARIO_DEFAULTS,
+} from "@/lib/canonicalDefaults";
+
 export type DealTerms = {
+  // Core economics
   property_value: number;
   upfront_payment: number;
   monthly_payment: number;
   number_of_payments: number;
 
-  payback_window_start_year: number;
-  payback_window_end_year: number;
-  timing_factor_early: number;
-  timing_factor_late: number;
-
-  floor_multiple: number;
-  ceiling_multiple: number;
-  downside_mode: "HARD_FLOOR" | "NO_FLOOR";
-
-  contract_maturity_years: number;
-  liquidity_trigger_year: number;
+  // Lifecycle
   minimum_hold_years: number;
+  contract_maturity_years: number;
+  target_exit_year: number | null;
+  target_exit_window_start_year: number;
+  target_exit_window_end_year: number;
+  long_stop_year: number;
 
-  platform_fee: number;
+  // Extension windows
+  first_extension_start_year: number | null;
+  first_extension_end_year: number | null;
+  first_extension_premium_pct: number | null;
+  second_extension_start_year: number | null;
+  second_extension_end_year: number | null;
+  second_extension_premium_pct: number | null;
+
+  // Partial buyout
+  partial_buyout_allowed: boolean;
+  partial_buyout_min_fraction: number | null;
+  partial_buyout_increment_fraction: number | null;
+
+  // Buyer purchase option
+  buyer_purchase_option_enabled: boolean;
+  buyer_purchase_notice_days: number | null;
+  buyer_purchase_closing_days: number | null;
+
+  // Fees
+  setup_fee_pct: number | null;
+  setup_fee_floor: number | null;
+  setup_fee_cap: number | null;
   servicing_fee_monthly: number;
-  exit_fee_pct: number;
+  payment_admin_fee: number | null;
+  exit_admin_fee_amount: number;
 
-  duration_yield_floor_enabled: boolean;
-  duration_yield_floor_start_year: number | null;
-  duration_yield_floor_min_multiple: number | null;
-
+  // Realtor
   realtor_representation_mode: "BUYER" | "SELLER" | "DUAL" | "NONE";
   realtor_commission_pct: number;
-  realtor_commission_payment_mode: "PER_PAYMENT_EVENT";
+
+  // Allow extra fields passed through from engine outputs
+  [key: string]: unknown;
 };
 
 export type ScenarioAssumptions = {
@@ -53,43 +75,51 @@ function isRecord(v: unknown): v is AnyRecord {
 
 export function getDefaultScenario(): ScenarioAssumptions {
   return {
-    annual_appreciation: 0.03,
-    closing_cost_pct: 0.06,
-    exit_year: 5,
+    annual_appreciation: CANONICAL_SCENARIO_DEFAULTS.annual_appreciation,
+    closing_cost_pct: CANONICAL_SCENARIO_DEFAULTS.closing_cost_pct,
+    exit_year: CANONICAL_SCENARIO_DEFAULTS.exit_year,
   };
 }
 
 export function getDefaultDealTerms(): DealTerms {
+  const D = CANONICAL_DEAL_TERM_DEFAULTS;
   return {
-    property_value: 500000,
-    upfront_payment: 50000,
-    monthly_payment: 0,
-    number_of_payments: 0,
+    property_value: D.property_value,
+    upfront_payment: D.upfront_payment,
+    monthly_payment: D.monthly_payment,
+    number_of_payments: D.number_of_payments,
 
-    payback_window_start_year: 3,
-    payback_window_end_year: 7,
-    timing_factor_early: 0.5,
-    timing_factor_late: 1.5,
+    minimum_hold_years: D.minimum_hold_years,
+    contract_maturity_years: D.contract_maturity_years,
+    target_exit_year: D.target_exit_year,
+    target_exit_window_start_year: D.target_exit_window_start_year,
+    target_exit_window_end_year: D.target_exit_window_end_year,
+    long_stop_year: D.long_stop_year,
 
-    floor_multiple: 1.0,
-    ceiling_multiple: 3.0,
-    downside_mode: "HARD_FLOOR",
+    first_extension_start_year: D.first_extension_start_year,
+    first_extension_end_year: D.first_extension_end_year,
+    first_extension_premium_pct: D.first_extension_premium_pct,
+    second_extension_start_year: D.second_extension_start_year,
+    second_extension_end_year: D.second_extension_end_year,
+    second_extension_premium_pct: D.second_extension_premium_pct,
 
-    contract_maturity_years: 10,
-    liquidity_trigger_year: 5,
-    minimum_hold_years: 2,
+    partial_buyout_allowed: D.partial_buyout_allowed,
+    partial_buyout_min_fraction: D.partial_buyout_min_fraction,
+    partial_buyout_increment_fraction: D.partial_buyout_increment_fraction,
 
-    platform_fee: 0,
-    servicing_fee_monthly: 0,
-    exit_fee_pct: 0,
+    buyer_purchase_option_enabled: D.buyer_purchase_option_enabled,
+    buyer_purchase_notice_days: D.buyer_purchase_notice_days,
+    buyer_purchase_closing_days: D.buyer_purchase_closing_days,
 
-    duration_yield_floor_enabled: false,
-    duration_yield_floor_start_year: null,
-    duration_yield_floor_min_multiple: null,
+    setup_fee_pct: D.setup_fee_pct,
+    setup_fee_floor: D.setup_fee_floor,
+    setup_fee_cap: D.setup_fee_cap,
+    servicing_fee_monthly: D.servicing_fee_monthly,
+    payment_admin_fee: D.payment_admin_fee,
+    exit_admin_fee_amount: D.exit_admin_fee_amount,
 
-    realtor_representation_mode: "NONE",
-    realtor_commission_pct: 0,
-    realtor_commission_payment_mode: "PER_PAYMENT_EVENT",
+    realtor_representation_mode: D.realtor_representation_mode,
+    realtor_commission_pct: D.realtor_commission_pct,
   };
 }
 

@@ -1,4 +1,11 @@
-import { computeDeal as canonicalComputeDeal, COMPUTE_VERSION } from "@fractpath/compute";
+import {
+  computeDeal as canonicalComputeDeal,
+  COMPUTE_VERSION,
+} from "@fractpath/compute";
+import {
+  CANONICAL_DEAL_TERM_DEFAULTS,
+  CANONICAL_SCENARIO_DEFAULTS,
+} from "@/lib/canonicalDefaults";
 
 type Ok<T> = { ok: true; result: T };
 type Err = {
@@ -20,9 +27,13 @@ function num(v: any): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
-const DEAL_TERMS_DEFAULTS: Record<string, unknown> = {
-  monthly_payment: 0,
-  number_of_payments: 0,
+// Internal engine-compat defaults: the installed engine requires these structural fields.
+// These are NOT part of the public v11 DealTerms interface — callers do not need to supply them.
+// v10 timing/floor/cap fields are kept internally so the engine computes correctly.
+const ENGINE_COMPAT_DEFAULTS: Record<string, unknown> = {
+  monthly_payment: CANONICAL_DEAL_TERM_DEFAULTS.monthly_payment,
+  number_of_payments: CANONICAL_DEAL_TERM_DEFAULTS.number_of_payments,
+  // v10 structural fields (engine internal — not part of v11 public interface)
   payback_window_start_year: 3,
   payback_window_end_year: 7,
   timing_factor_early: 1,
@@ -30,21 +41,31 @@ const DEAL_TERMS_DEFAULTS: Record<string, unknown> = {
   floor_multiple: 1.1,
   ceiling_multiple: 2.0,
   downside_mode: "HARD_FLOOR",
-  contract_maturity_years: 30,
-  liquidity_trigger_year: 13,
-  minimum_hold_years: 2,
-  platform_fee: 2500,
-  servicing_fee_monthly: 20,
-  exit_fee_pct: 0.01,
-  realtor_representation_mode: "NONE",
-  realtor_commission_pct: 0,
+  contract_maturity_years: CANONICAL_DEAL_TERM_DEFAULTS.contract_maturity_years,
+  liquidity_trigger_year: CANONICAL_DEAL_TERM_DEFAULTS.long_stop_year,
+  minimum_hold_years: CANONICAL_DEAL_TERM_DEFAULTS.minimum_hold_years,
+  // Canonical fee defaults
+  setup_fee_pct: CANONICAL_DEAL_TERM_DEFAULTS.setup_fee_pct,
+  setup_fee_floor: CANONICAL_DEAL_TERM_DEFAULTS.setup_fee_floor,
+  setup_fee_cap: CANONICAL_DEAL_TERM_DEFAULTS.setup_fee_cap,
+  servicing_fee_monthly: CANONICAL_DEAL_TERM_DEFAULTS.servicing_fee_monthly,
+  payment_admin_fee: CANONICAL_DEAL_TERM_DEFAULTS.payment_admin_fee,
+  exit_admin_fee_amount: CANONICAL_DEAL_TERM_DEFAULTS.exit_admin_fee_amount,
+  first_extension_premium_pct: CANONICAL_DEAL_TERM_DEFAULTS.first_extension_premium_pct,
+  second_extension_premium_pct: CANONICAL_DEAL_TERM_DEFAULTS.second_extension_premium_pct,
+  // v10 legacy fee fields (zero — canonical fees are handled via v11 fields above)
+  platform_fee: 0,
+  exit_fee_pct: 0,
+  // Realtor
+  realtor_representation_mode: CANONICAL_DEAL_TERM_DEFAULTS.realtor_representation_mode,
+  realtor_commission_pct: CANONICAL_DEAL_TERM_DEFAULTS.realtor_commission_pct,
   realtor_commission_payment_mode: "PER_PAYMENT_EVENT",
 };
 
 const SCENARIO_DEFAULTS: Record<string, unknown> = {
-  annual_appreciation: 0.03,
-  closing_cost_pct: 0.02,
-  exit_year: 5,
+  annual_appreciation: CANONICAL_SCENARIO_DEFAULTS.annual_appreciation,
+  closing_cost_pct: CANONICAL_SCENARIO_DEFAULTS.closing_cost_pct,
+  exit_year: CANONICAL_SCENARIO_DEFAULTS.exit_year,
 };
 
 export async function computeDeal(
@@ -62,7 +83,9 @@ export async function computeDeal(
 
   const property_value = num(inputs.deal_terms.property_value);
   const upfront_payment = num(inputs.deal_terms.upfront_payment);
-  const exit_year = num(inputs.scenario.exit_year ?? SCENARIO_DEFAULTS.exit_year);
+  const exit_year = num(
+    inputs.scenario.exit_year ?? SCENARIO_DEFAULTS.exit_year,
+  );
 
   if (property_value === null) {
     return {
@@ -86,66 +109,41 @@ export async function computeDeal(
     };
   }
 
+  // Merge: engine-compat defaults → canonical v11 caller-supplied terms (caller wins)
   const terms: Record<string, unknown> = {
-    ...DEAL_TERMS_DEFAULTS,
+    ...ENGINE_COMPAT_DEFAULTS,
     ...inputs.deal_terms,
+    // Enforce payment mode to satisfy the engine
+    realtor_commission_payment_mode: "PER_PAYMENT_EVENT",
   };
-
-  if (terms.realtor_commission_payment_mode !== "PER_PAYMENT_EVENT") {
-    terms.realtor_commission_payment_mode = "PER_PAYMENT_EVENT";
-  }
 
   const scenario: Record<string, unknown> = {
     ...SCENARIO_DEFAULTS,
     ...inputs.scenario,
   };
 
-  let dealResults: any;
+  let engineOutput: any;
   try {
-    dealResults = canonicalComputeDeal(terms as any, scenario as any);
+    engineOutput = canonicalComputeDeal(terms as any, scenario as any);
   } catch (e: any) {
     return { ok: false, code: "ERROR", error: e?.message ?? String(e) };
   }
 
-  const results: Record<string, unknown> = {
-    invested_capital_total: dealResults.invested_capital_total,
-    projected_fmv: dealResults.projected_fmv,
-    isa_settlement: dealResults.isa_settlement,
-    investor_profit: dealResults.investor_profit,
-    investor_multiple: dealResults.investor_multiple,
-    investor_irr_annual: dealResults.investor_irr_annual,
-    investor_irr_annual_net: dealResults.investor_irr_annual_net,
-
-    vested_equity_percentage: dealResults.vested_equity_percentage,
-    vested_equity_pct: dealResults.vested_equity_percentage,
-
-    base_equity_value: dealResults.base_equity_value,
-    floor_amount: dealResults.floor_amount,
-    ceiling_amount: dealResults.ceiling_amount,
-    isa_pre_floor_cap: dealResults.isa_pre_floor_cap,
-    gain_above_capital: dealResults.gain_above_capital,
-    timing_factor_applied: dealResults.timing_factor_applied,
-
-    isa_standard_pre_dyf: dealResults.isa_standard_pre_dyf,
-    dyf_floor_amount: dealResults.dyf_floor_amount,
-    dyf_applied: dealResults.dyf_applied,
-
-    realtor_fee_total_projected: dealResults.realtor_fee_total_projected,
-    realtor_fee_upfront_projected: dealResults.realtor_fee_upfront_projected,
-    realtor_fee_installments_projected: dealResults.realtor_fee_installments_projected,
-    buyer_realtor_fee_total_projected: dealResults.buyer_realtor_fee_total_projected,
-    seller_realtor_fee_total_projected: dealResults.seller_realtor_fee_total_projected,
-
-    annual_appreciation: num(inputs.scenario.annual_appreciation) ?? 0.03,
-
-    compute_version: dealResults.compute_version ?? COMPUTE_VERSION,
-  };
+  // Pass through all engine results directly.
+  // The engine is expected to return v11-shaped result fields.
+  const computeVersion: string =
+    typeof engineOutput.compute_version === "string"
+      ? engineOutput.compute_version
+      : COMPUTE_VERSION;
 
   return {
     ok: true,
     result: {
-      compute_version: dealResults.compute_version ?? COMPUTE_VERSION,
-      results,
+      compute_version: computeVersion,
+      results: {
+        ...(isObj(engineOutput) ? engineOutput : {}),
+        compute_version: computeVersion,
+      },
     },
   };
 }

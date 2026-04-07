@@ -1,4 +1,7 @@
-"use client";
+import {
+  CANONICAL_DEAL_TERM_DEFAULTS,
+  CANONICAL_SCENARIO_DEFAULTS,
+} from "@/lib/canonicalDefaults";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -22,31 +25,9 @@ function pickStr(obj: AnyRecord, ...keys: string[]): string | undefined {
   return undefined;
 }
 
-const DEFAULT_DEAL_TERMS: AnyRecord = {
-  property_value: 500000,
-  upfront_payment: 50000,
-  monthly_payment: 0,
-  number_of_payments: 0,
-  payback_window_start_year: 3,
-  payback_window_end_year: 7,
-  timing_factor_early: 0.5,
-  timing_factor_late: 1.5,
-  floor_multiple: 1.0,
-  ceiling_multiple: 3.0,
-  downside_mode: "HARD_FLOOR",
-  contract_maturity_years: 10,
-  liquidity_trigger_year: 5,
-  minimum_hold_years: 2,
-  platform_fee: 0,
-  servicing_fee_monthly: 0,
-  exit_fee_pct: 0,
-};
+const DEFAULT_DEAL_TERMS: AnyRecord = { ...CANONICAL_DEAL_TERM_DEFAULTS };
 
-const DEFAULT_SCENARIO: AnyRecord = {
-  annual_appreciation: 0.03,
-  closing_cost_pct: 0.06,
-  exit_year: 5,
-};
+const DEFAULT_SCENARIO: AnyRecord = { ...CANONICAL_SCENARIO_DEFAULTS };
 
 export type NormalizedInputs = {
   deal_terms: AnyRecord;
@@ -93,19 +74,32 @@ export function normalizeWidgetPayload(payload: unknown): NormalizedInputs {
     upfront_payment: pickNum(dtSrc, "upfront_payment", "investment_amount", "upfront") ?? DEFAULT_DEAL_TERMS.upfront_payment,
     monthly_payment: pickNum(dtSrc, "monthly_payment", "monthly") ?? DEFAULT_DEAL_TERMS.monthly_payment,
     number_of_payments: pickNum(dtSrc, "number_of_payments", "payments") ?? DEFAULT_DEAL_TERMS.number_of_payments,
-    payback_window_start_year: pickNum(dtSrc, "payback_window_start_year") ?? DEFAULT_DEAL_TERMS.payback_window_start_year,
-    payback_window_end_year: pickNum(dtSrc, "payback_window_end_year") ?? DEFAULT_DEAL_TERMS.payback_window_end_year,
-    timing_factor_early: pickNum(dtSrc, "timing_factor_early") ?? DEFAULT_DEAL_TERMS.timing_factor_early,
-    timing_factor_late: pickNum(dtSrc, "timing_factor_late") ?? DEFAULT_DEAL_TERMS.timing_factor_late,
-    floor_multiple: pickNum(dtSrc, "floor_multiple") ?? DEFAULT_DEAL_TERMS.floor_multiple,
-    ceiling_multiple: pickNum(dtSrc, "ceiling_multiple") ?? DEFAULT_DEAL_TERMS.ceiling_multiple,
-    downside_mode: pickStr(dtSrc, "downside_mode") ?? DEFAULT_DEAL_TERMS.downside_mode,
-    contract_maturity_years: pickNum(dtSrc, "contract_maturity_years", "term_years") ?? DEFAULT_DEAL_TERMS.contract_maturity_years,
-    liquidity_trigger_year: pickNum(dtSrc, "liquidity_trigger_year") ?? DEFAULT_DEAL_TERMS.liquidity_trigger_year,
     minimum_hold_years: pickNum(dtSrc, "minimum_hold_years") ?? DEFAULT_DEAL_TERMS.minimum_hold_years,
-    platform_fee: pickNum(dtSrc, "platform_fee") ?? DEFAULT_DEAL_TERMS.platform_fee,
+    contract_maturity_years: pickNum(dtSrc, "contract_maturity_years", "term_years") ?? DEFAULT_DEAL_TERMS.contract_maturity_years,
+    target_exit_year: pickNum(dtSrc, "target_exit_year") ?? DEFAULT_DEAL_TERMS.target_exit_year,
+    target_exit_window_start_year: pickNum(dtSrc, "target_exit_window_start_year") ?? DEFAULT_DEAL_TERMS.target_exit_window_start_year,
+    target_exit_window_end_year: pickNum(dtSrc, "target_exit_window_end_year") ?? DEFAULT_DEAL_TERMS.target_exit_window_end_year,
+    long_stop_year: pickNum(dtSrc, "long_stop_year") ?? DEFAULT_DEAL_TERMS.long_stop_year,
+    first_extension_start_year: pickNum(dtSrc, "first_extension_start_year") ?? DEFAULT_DEAL_TERMS.first_extension_start_year,
+    first_extension_end_year: pickNum(dtSrc, "first_extension_end_year") ?? DEFAULT_DEAL_TERMS.first_extension_end_year,
+    first_extension_premium_pct: pickNum(dtSrc, "first_extension_premium_pct") ?? DEFAULT_DEAL_TERMS.first_extension_premium_pct,
+    second_extension_start_year: pickNum(dtSrc, "second_extension_start_year") ?? DEFAULT_DEAL_TERMS.second_extension_start_year,
+    second_extension_end_year: pickNum(dtSrc, "second_extension_end_year") ?? DEFAULT_DEAL_TERMS.second_extension_end_year,
+    second_extension_premium_pct: pickNum(dtSrc, "second_extension_premium_pct") ?? DEFAULT_DEAL_TERMS.second_extension_premium_pct,
+    partial_buyout_allowed: dtSrc.partial_buyout_allowed ?? DEFAULT_DEAL_TERMS.partial_buyout_allowed,
+    partial_buyout_min_fraction: pickNum(dtSrc, "partial_buyout_min_fraction") ?? DEFAULT_DEAL_TERMS.partial_buyout_min_fraction,
+    partial_buyout_increment_fraction: pickNum(dtSrc, "partial_buyout_increment_fraction") ?? DEFAULT_DEAL_TERMS.partial_buyout_increment_fraction,
+    buyer_purchase_option_enabled: dtSrc.buyer_purchase_option_enabled ?? DEFAULT_DEAL_TERMS.buyer_purchase_option_enabled,
+    buyer_purchase_notice_days: pickNum(dtSrc, "buyer_purchase_notice_days") ?? DEFAULT_DEAL_TERMS.buyer_purchase_notice_days,
+    buyer_purchase_closing_days: pickNum(dtSrc, "buyer_purchase_closing_days") ?? DEFAULT_DEAL_TERMS.buyer_purchase_closing_days,
+    setup_fee_pct: pickNum(dtSrc, "setup_fee_pct") ?? DEFAULT_DEAL_TERMS.setup_fee_pct,
+    setup_fee_floor: pickNum(dtSrc, "setup_fee_floor") ?? DEFAULT_DEAL_TERMS.setup_fee_floor,
+    setup_fee_cap: pickNum(dtSrc, "setup_fee_cap") ?? DEFAULT_DEAL_TERMS.setup_fee_cap,
     servicing_fee_monthly: pickNum(dtSrc, "servicing_fee_monthly") ?? DEFAULT_DEAL_TERMS.servicing_fee_monthly,
-    exit_fee_pct: pickNum(dtSrc, "exit_fee_pct") ?? DEFAULT_DEAL_TERMS.exit_fee_pct,
+    payment_admin_fee: pickNum(dtSrc, "payment_admin_fee") ?? DEFAULT_DEAL_TERMS.payment_admin_fee,
+    exit_admin_fee_amount: pickNum(dtSrc, "exit_admin_fee_amount") ?? DEFAULT_DEAL_TERMS.exit_admin_fee_amount,
+    realtor_representation_mode: pickStr(dtSrc, "realtor_representation_mode") ?? DEFAULT_DEAL_TERMS.realtor_representation_mode,
+    realtor_commission_pct: pickNum(dtSrc, "realtor_commission_pct") ?? DEFAULT_DEAL_TERMS.realtor_commission_pct,
   };
 
   const scenario: AnyRecord = {

@@ -1,0 +1,4 @@
+-- This migration is intentionally a no-op.
+-- The mashvisor_enrichment artifact type was removed from the plan;
+-- Mashvisor data is stored in the dedicated property_enrichments table instead.
+-- See: 20260406000002_property_enrichments.sql

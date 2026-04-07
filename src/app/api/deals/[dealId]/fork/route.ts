@@ -12,6 +12,7 @@ import {
   getDefaultScenario,
 } from "@/lib/defaultScenario";
 import { assertNotRealtor } from "@/lib/authz";
+import { CONTRACT_VERSION, SCHEMA_VERSION } from "@/lib/contractVersion";
 
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
@@ -158,12 +159,11 @@ export async function POST(
 const computedAt = new Date().toISOString();
 
       const fullSnapshot = {
-        schema_version: "1",
+        contract_version: CONTRACT_VERSION,
+        schema_version: SCHEMA_VERSION,
+        compute_version,
         inputs: canonicalInputs,
         outputs: { results },
-
-        // Canonical v10 fields
-        compute_version,
         computed_at: computedAt,
         computed_by: user.id,
       };

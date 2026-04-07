@@ -21,10 +21,18 @@ function assert(condition: boolean, msg: string) {
 
 function makeArgs(overrides: Record<string, unknown> = {}) {
   return {
-    contractVersion: "10.0.0" as string | null,
-    schemaVersion: "10" as string | null,
+    contractVersion: "11.0.0" as string | null,
+    schemaVersion: "11" as string | null,
     inputs: { deal_terms: { property_value: 500000 } } as Record<string, unknown> | null,
-    outputs: { results: { invested_capital_total: 50000, isa_settlement: 65000 } } as Record<string, unknown> | null,
+    outputs: {
+      results: {
+        current_contract_value: 520000,
+        current_participation_value: 480000,
+        extension_adjusted_buyout_amount: 510000,
+        funding_completion_factor: 0.6,
+        fractpath_revenue_to_date: 3200,
+      },
+    } as Record<string, unknown> | null,
     ...overrides,
   };
 }
@@ -46,67 +54,66 @@ test("empty outputs returns Not computed", () => {
 
 console.log("\n--- KPI extraction ---\n");
 
-test("extracts invested_capital_total KPI", () => {
+test("extracts current_contract_value KPI", () => {
   const vm = buildDealSummaryViewModel(makeArgs({
-    outputs: { results: { invested_capital_total: 50000 } },
+    outputs: { results: { current_contract_value: 520000 } },
   }));
   assert(vm.kpis.length >= 1, "at least one kpi");
-  assert(vm.kpis[0].label === "Invested capital", "got " + vm.kpis[0].label);
+  assert(vm.kpis[0].label === "Contract value", "got " + vm.kpis[0].label);
 });
 
-test("extracts isa_settlement KPI", () => {
+test("extracts current_participation_value KPI", () => {
   const vm = buildDealSummaryViewModel(makeArgs({
-    outputs: { results: { isa_settlement: 65000 } },
+    outputs: { results: { current_participation_value: 480000 } },
   }));
   const labels = vm.kpis.map((k) => k.label);
-  assert(labels.includes("ISA settlement"), "has ISA settlement");
+  assert(labels.includes("Participation value"), "has Participation value");
 });
 
-test("extracts multiple KPIs from canonical results", () => {
+test("extracts extension_adjusted_buyout_amount KPI", () => {
+  const vm = buildDealSummaryViewModel(makeArgs({
+    outputs: { results: { extension_adjusted_buyout_amount: 510000 } },
+  }));
+  const labels = vm.kpis.map((k) => k.label);
+  assert(labels.includes("Buyout amount"), "has Buyout amount");
+});
+
+test("extracts multiple KPIs from canonical v11 results", () => {
   const vm = buildDealSummaryViewModel(makeArgs({
     outputs: {
       results: {
-        invested_capital_total: 50000,
-        projected_fmv: 600000,
-        isa_settlement: 65000,
-        investor_multiple: 1.3,
-        investor_irr_annual: 0.058,
-        investor_profit: 15000,
+        current_contract_value: 520000,
+        current_participation_value: 480000,
+        extension_adjusted_buyout_amount: 510000,
+        funding_completion_factor: 0.6,
+        fractpath_revenue_to_date: 3200,
       },
     },
   }));
-  assert(vm.kpis.length >= 3, "at least 3 KPIs from rich results");
+  assert(vm.kpis.length >= 3, "at least 3 KPIs from rich results: " + vm.kpis.length);
 });
 
 console.log("\n--- sanity guards ---\n");
 
-test("omits IRR when abs > 1 (100%)", () => {
+test("omits funding_completion_factor when > 1", () => {
   const vm = buildDealSummaryViewModel(makeArgs({
-    outputs: { results: { invested_capital_total: 50000, investor_irr_annual: 1.5 } },
+    outputs: { results: { current_contract_value: 500000, funding_completion_factor: 1.5 } },
   }));
   const labels = vm.kpis.map((k) => k.label);
-  assert(!labels.includes("Investor IRR (annual)"), "IRR > 100% should be omitted");
+  assert(!labels.includes("Funding completion"), "factor > 1 should be omitted");
 });
 
-test("omits multiple when > 10", () => {
+test("omits funding_completion_factor when negative", () => {
   const vm = buildDealSummaryViewModel(makeArgs({
-    outputs: { results: { invested_capital_total: 50000, investor_multiple: 15 } },
+    outputs: { results: { current_contract_value: 500000, funding_completion_factor: -0.1 } },
   }));
   const labels = vm.kpis.map((k) => k.label);
-  assert(!labels.includes("Investor multiple"), "multiple > 10 should be omitted");
-});
-
-test("omits multiple when negative", () => {
-  const vm = buildDealSummaryViewModel(makeArgs({
-    outputs: { results: { invested_capital_total: 50000, investor_multiple: -1 } },
-  }));
-  const labels = vm.kpis.map((k) => k.label);
-  assert(!labels.includes("Investor multiple"), "negative multiple should be omitted");
+  assert(!labels.includes("Funding completion"), "negative factor should be omitted");
 });
 
 test("omits NaN money fields", () => {
   const vm = buildDealSummaryViewModel(makeArgs({
-    outputs: { results: { invested_capital_total: NaN, isa_settlement: Infinity } },
+    outputs: { results: { current_contract_value: NaN, current_participation_value: Infinity } },
   }));
   assert(vm.kpis[0].label === "Status", "NaN/Infinity should yield Status fallback");
 });
@@ -117,6 +124,14 @@ test("shows Computed (insufficient data) when results has no renderable KPIs", (
   }));
   assert(vm.kpis[0].label === "Status", "fallback label");
   assert(vm.kpis[0].value === "Computed (insufficient data)", "fallback value: " + vm.kpis[0].value);
+});
+
+test("flat v11 results (no .results wrapper) detected via known keys", () => {
+  const vm = buildDealSummaryViewModel(makeArgs({
+    outputs: { current_contract_value: 500000, funding_completion_factor: 0.5 },
+  }));
+  const labels = vm.kpis.map((k) => k.label);
+  assert(labels.includes("Contract value"), "flat v11 detection: " + JSON.stringify(labels));
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed out of " + (passed + failed) + " tests\n");

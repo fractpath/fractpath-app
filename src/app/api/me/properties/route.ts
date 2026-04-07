@@ -38,7 +38,7 @@ function formatAddress(row: Record<string, any>): string {
 
 // Columns to fetch for properties owned by this user (includes homeowner-visible debt + intake fields)
 const OWNED_SELECT =
-  "id, address_line1, address_line2, city, state, postal_code, status, ownership_status, is_private, owner_user_id, claimed_by_user_id, created_by_user_id, created_at, updated_at, has_secured_property_debt, secured_property_debt_amount, secured_debt_verification_status, secured_debt_fresh_until, ownership_type, occupancy_use, occupancy_use_other, major_condition_issue, major_condition_issue_details, known_liens_and_claims, total_known_debt_amount, total_known_debt_confidence, debt_statement_availability, title_claims_known, title_claims_details, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, owner_stated_fmv_source_other, willing_to_proceed_formal_review";
+  "id, address_line1, address_line2, city, state, postal_code, status, ownership_status, is_private, owner_user_id, claimed_by_user_id, created_by_user_id, created_at, updated_at, has_secured_property_debt, secured_property_debt_amount, secured_debt_verification_status, secured_debt_fresh_until, ownership_type, occupancy_use, occupancy_use_other, major_condition_issue, major_condition_issue_details, known_liens_and_claims, total_known_debt_amount, total_known_debt_confidence, debt_statement_availability, title_claims_known, title_claims_details, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, owner_stated_fmv_source_other, willing_to_proceed_formal_review, proposal_interest_status, visibility_preference, proposal_preferences_acknowledged_at";
 
 // Columns to fetch for claimable properties (cross-user — no underwriting data)
 const CLAIMABLE_SELECT =
@@ -312,11 +312,41 @@ export async function GET() {
     }
   }
 
-  const rows = Array.from(byId.values()).sort((a: any, b: any) => {
+  let rows = Array.from(byId.values()).sort((a: any, b: any) => {
     const aTime = new Date(a.updated_at ?? a.created_at ?? 0).getTime();
     const bTime = new Date(b.updated_at ?? b.created_at ?? 0).getTime();
     return bTime - aTime;
   });
+
+  // Enrich properties with enrichment thumbnail — best-effort, non-fatal
+  {
+    const allIds = rows.map((r: any) => r.id).filter(Boolean);
+    if (allIds.length > 0) {
+      try {
+        const { data: enrichRows } = await (svc.from("property_enrichments") as any)
+          .select("property_id, images_payload")
+          .in("property_id", allIds)
+          .eq("is_current", true)
+          .eq("provider", "mashvisor")
+          .not("images_payload", "is", null);
+
+        const thumbnailMap = new Map<string, string | null>();
+        for (const e of enrichRows ?? []) {
+          const url = e?.images_payload?.cover_image_url ?? null;
+          thumbnailMap.set(e.property_id, url);
+        }
+
+        if (thumbnailMap.size > 0) {
+          rows = rows.map((r: any) => {
+            const thumb = thumbnailMap.get(r.id);
+            return thumb !== undefined ? { ...r, cover_image_url: thumb } : r;
+          });
+        }
+      } catch {
+        // best-effort — do not fail the response
+      }
+    }
+  }
 
   return NextResponse.json({ ok: true, properties: rows });
 }
@@ -504,6 +534,24 @@ export async function POST(req: Request) {
     if (v !== null) activeIntakeColumns[k] = v;
   }
 
+  // --- Proposal preferences ---
+  const proposalInterestStatus = strOrNull("proposal_interest_status");
+  const visibilityPref = strOrNull("visibility_preference");
+  const proposalAcknowledged = formData.get("proposal_preferences_acknowledged") === "true";
+  const propPrefsColumns: Record<string, any> = {};
+  if (proposalInterestStatus === "not_interested" || proposalInterestStatus === "interested_after_verification") {
+    propPrefsColumns.proposal_interest_status = proposalInterestStatus;
+    propPrefsColumns.visibility_preference =
+      proposalInterestStatus === "interested_after_verification"
+        ? (visibilityPref === "private" || visibilityPref === "matched" || visibilityPref === "public"
+            ? visibilityPref
+            : "private")
+        : "private";
+    if (proposalInterestStatus === "interested_after_verification" && proposalAcknowledged) {
+      propPrefsColumns.proposal_preferences_acknowledged_at = new Date().toISOString();
+    }
+  }
+
   if (existingProperty) {
     const ownedByAnotherUser =
       !!existingProperty.owner_user_id &&
@@ -533,6 +581,7 @@ export async function POST(req: Request) {
         normalized_address: computed_normalized || null,
         ...debtColumns,
         ...activeIntakeColumns,
+        ...propPrefsColumns,
       })
       .eq("id", existingProperty.id)
       .select("id")
@@ -562,6 +611,7 @@ export async function POST(req: Request) {
         normalized_address: computed_normalized || null,
         ...debtColumns,
         ...activeIntakeColumns,
+        ...propPrefsColumns,
       })
       .select("id")
       .single();

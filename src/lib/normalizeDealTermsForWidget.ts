@@ -1,4 +1,17 @@
+import { CANONICAL_DEAL_TERM_DEFAULTS } from "@/lib/canonicalDefaults";
+
 type AnyRecord = Record<string, unknown>;
+
+const D = CANONICAL_DEAL_TERM_DEFAULTS;
+
+/**
+ * Stale-zero guard for fee fields that must be positive.
+ * Old snapshots may store 0 for fee fields that were not yet seeded.
+ * `??` alone does not catch 0 (only null/undefined), so we treat 0 as stale.
+ */
+function pos(v: unknown, d: number): number {
+  return typeof v === "number" && v > 0 ? v : d;
+}
 
 export function normalizeDealTermsForWidget(raw: AnyRecord): AnyRecord {
   const r = raw as any;
@@ -6,44 +19,52 @@ export function normalizeDealTermsForWidget(raw: AnyRecord): AnyRecord {
   return {
     ...raw,
 
-    // Core economics defaults
-    property_value: r.property_value ?? 600000,
-    upfront_payment: r.upfront_payment ?? 100000,
-    monthly_payment: r.monthly_payment ?? 0,
-    number_of_payments: r.number_of_payments ?? 0,
+    // Core economics
+    property_value: r.property_value ?? D.property_value,
+    upfront_payment: r.upfront_payment ?? D.upfront_payment,
+    monthly_payment: r.monthly_payment ?? D.monthly_payment,
+    number_of_payments: r.number_of_payments ?? D.number_of_payments,
 
-    // Timing / settlement defaults
-    payback_window_start_year: r.payback_window_start_year ?? 3,
-    payback_window_end_year: r.payback_window_end_year ?? 7,
-    timing_factor_early: r.timing_factor_early ?? 1,
-    timing_factor_late: r.timing_factor_late ?? 1,
+    // Lifecycle
+    minimum_hold_years: r.minimum_hold_years ?? D.minimum_hold_years,
+    contract_maturity_years: r.contract_maturity_years ?? D.contract_maturity_years,
+    target_exit_year: r.target_exit_year ?? D.target_exit_year,
+    target_exit_window_start_year: r.target_exit_window_start_year ?? D.target_exit_window_start_year,
+    target_exit_window_end_year: r.target_exit_window_end_year ?? D.target_exit_window_end_year,
+    long_stop_year: r.long_stop_year ?? D.long_stop_year,
 
-    // Protection defaults
-    floor_multiple: r.floor_multiple ?? 1.1,
-    ceiling_multiple: r.ceiling_multiple ?? 2.0,
-    downside_mode: r.downside_mode ?? "HARD_FLOOR",
+    // Extension windows
+    first_extension_start_year: r.first_extension_start_year ?? D.first_extension_start_year,
+    first_extension_end_year: r.first_extension_end_year ?? D.first_extension_end_year,
+    first_extension_premium_pct: r.first_extension_premium_pct ?? D.first_extension_premium_pct,
+    first_extension_years: r.first_extension_years ?? D.first_extension_years,
+    second_extension_start_year: r.second_extension_start_year ?? D.second_extension_start_year,
+    second_extension_end_year: r.second_extension_end_year ?? D.second_extension_end_year,
+    second_extension_premium_pct: r.second_extension_premium_pct ?? D.second_extension_premium_pct,
+    second_extension_years: r.second_extension_years ?? D.second_extension_years,
 
-    // Lifecycle defaults
-    contract_maturity_years: r.contract_maturity_years ?? 30,
-    liquidity_trigger_year: r.liquidity_trigger_year ?? 13,
-    minimum_hold_years: r.minimum_hold_years ?? 2,
+    // Partial buyout
+    partial_buyout_allowed: r.partial_buyout_allowed ?? D.partial_buyout_allowed,
+    partial_buyout_min_fraction: r.partial_buyout_min_fraction ?? D.partial_buyout_min_fraction,
+    partial_buyout_increment_fraction: r.partial_buyout_increment_fraction ?? D.partial_buyout_increment_fraction,
 
-    // Duration yield floor defaults
-    duration_yield_floor_enabled: r.duration_yield_floor_enabled ?? false,
-    duration_yield_floor_start_year:
-      r.duration_yield_floor_start_year ?? null,
-    duration_yield_floor_min_multiple:
-      r.duration_yield_floor_min_multiple ?? null,
+    // Buyer purchase option
+    buyer_purchase_option_enabled: r.buyer_purchase_option_enabled ?? D.buyer_purchase_option_enabled,
+    buyer_purchase_notice_days: r.buyer_purchase_notice_days ?? D.buyer_purchase_notice_days,
+    buyer_purchase_closing_days: r.buyer_purchase_closing_days ?? D.buyer_purchase_closing_days,
 
-    // Fee defaults
-    platform_fee: r.platform_fee ?? 2500,
-    servicing_fee_monthly: r.servicing_fee_monthly ?? 20,
-    exit_fee_pct: r.exit_fee_pct ?? 0.01,
+    // Fees — use pos() for fields where 0 is nonsensical (stale-zero must fall back).
+    // setup_fee_floor uses ?? only — a 0 floor is a valid "no minimum" configuration.
+    // setup_fee_cap uses pos() — a 0 cap means "fee cannot exceed $0", which is never intended.
+    setup_fee_pct: pos(r.setup_fee_pct, D.setup_fee_pct),
+    setup_fee_floor: r.setup_fee_floor ?? D.setup_fee_floor,
+    setup_fee_cap: pos(r.setup_fee_cap, D.setup_fee_cap),
+    servicing_fee_monthly: pos(r.servicing_fee_monthly, D.servicing_fee_monthly),
+    payment_admin_fee: pos(r.payment_admin_fee, D.payment_admin_fee),
+    exit_admin_fee_amount: pos(r.exit_admin_fee_amount, D.exit_admin_fee_amount),
 
-    // Realtor defaults
-    realtor_representation_mode: r.realtor_representation_mode ?? "NONE",
-    realtor_commission_pct: r.realtor_commission_pct ?? 0,
-    realtor_commission_payment_mode:
-      r.realtor_commission_payment_mode ?? "PER_PAYMENT_EVENT",
+    // Realtor
+    realtor_representation_mode: r.realtor_representation_mode ?? D.realtor_representation_mode,
+    realtor_commission_pct: r.realtor_commission_pct ?? D.realtor_commission_pct,
   };
 }

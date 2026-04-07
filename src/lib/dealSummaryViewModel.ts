@@ -27,12 +27,6 @@ function fmtPct(n: number, digits = 2): string {
   return (n * 100).toFixed(digits) + "%";
 }
 
-function fmtNum(n: number, digits = 2): string {
-  return n.toLocaleString("en-US", {
-    maximumFractionDigits: digits,
-  });
-}
-
 function extractCanonicalResults(
   outputs: Record<string, unknown> | null | undefined,
 ): Record<string, unknown> | null {
@@ -43,12 +37,13 @@ function extractCanonicalResults(
     return maybeResults;
   }
 
+  // v11 flat-results detection (no nested .results wrapper)
   if (
-    "invested_capital_total" in outputs ||
-    "isa_settlement" in outputs ||
-    "projected_fmv" in outputs ||
-    "investor_multiple" in outputs ||
-    "investor_irr_annual" in outputs
+    "current_contract_value" in outputs ||
+    "current_participation_value" in outputs ||
+    "extension_adjusted_buyout_amount" in outputs ||
+    "funding_completion_factor" in outputs ||
+    "fractpath_revenue_to_date" in outputs
   ) {
     return outputs;
   }
@@ -72,39 +67,29 @@ export function buildDealSummaryViewModel(args: {
 
   const kpis: Kpi[] = [];
 
-  const invested = safeMoney(results.invested_capital_total);
-  if (invested !== null) {
-    kpis.push({ label: "Invested capital", value: fmtMoney(invested) });
+  const contractValue = safeMoney(results.current_contract_value);
+  if (contractValue !== null) {
+    kpis.push({ label: "Contract value", value: fmtMoney(contractValue) });
   }
 
-  const fmv = safeMoney(results.projected_fmv);
-  if (fmv !== null) {
-    kpis.push({ label: "Projected FMV", value: fmtMoney(fmv) });
+  const participationValue = safeMoney(results.current_participation_value);
+  if (participationValue !== null) {
+    kpis.push({ label: "Participation value", value: fmtMoney(participationValue) });
   }
 
-  const settlement = safeMoney(results.isa_settlement);
-  if (settlement !== null) {
-    kpis.push({ label: "ISA settlement", value: fmtMoney(settlement) });
+  const buyout = safeMoney(results.extension_adjusted_buyout_amount);
+  if (buyout !== null) {
+    kpis.push({ label: "Buyout amount", value: fmtMoney(buyout) });
   }
 
-  const multiple = safeMoney(results.investor_multiple);
-  if (multiple !== null && multiple >= 0 && multiple <= 10) {
-    kpis.push({ label: "Investor multiple", value: fmtNum(multiple, 2) + "\u00d7" });
+  const fundingCompletion = safeMoney(results.funding_completion_factor);
+  if (fundingCompletion !== null && fundingCompletion >= 0 && fundingCompletion <= 1) {
+    kpis.push({ label: "Funding completion", value: fmtPct(fundingCompletion, 1) });
   }
 
-  const irr = safeMoney(results.investor_irr_annual);
-  if (irr !== null && Math.abs(irr) <= 1) {
-    kpis.push({ label: "Investor IRR (annual)", value: fmtPct(irr, 2) });
-  }
-
-  const profit = safeMoney(results.investor_profit);
-  if (profit !== null) {
-    kpis.push({ label: "Investor profit", value: fmtMoney(profit) });
-  }
-
-  const vested = safeMoney(results.vested_equity_percentage);
-  if (vested !== null) {
-    kpis.push({ label: "Vested equity", value: fmtPct(vested, 2) });
+  const fractpathRevenue = safeMoney(results.fractpath_revenue_to_date);
+  if (fractpathRevenue !== null) {
+    kpis.push({ label: "FractPath revenue", value: fmtMoney(fractpathRevenue) });
   }
 
   if (kpis.length === 0) {

@@ -23,6 +23,17 @@ import {
   isAppraisalBadgeExpired,
   isAppraisalBadgeUnderReview,
 } from "@/lib/property/badges";
+import {
+  EnrichedPropertyPreview,
+  type EnrichedPreviewData,
+} from "@/components/property/EnrichedPropertyPreview";
+import { PropertyStatusLanes } from "@/components/properties/PropertyStatusLanes";
+import {
+  deriveParticipationLane,
+  deriveValuationLane,
+  deriveClosingReadinessLane,
+  valueLabelFromValuationLane,
+} from "@/lib/property/statusLanes";
 
 type LinkedDeal = {
   thread_id: string;
@@ -82,6 +93,8 @@ type Props = {
   workflowState?: PropertyWorkflowState | null;
   /** Audit entries from property_status_audit for the activity timeline */
   activityEntries?: PropertyAuditEntry[];
+  /** Enriched property preview data — shown to owner when available */
+  enrichment?: EnrichedPreviewData | null;
 };
 
 // ── Status badge ─────────────────────────────────────────────────────────────
@@ -204,21 +217,33 @@ function PropertyWorkflowWidget({ state }: { state: PropertyWorkflowState }) {
   const {
     propertyStatus,
     propertyReviewStatus,
-    rentcastFmv,
     rentcastProvider,
     escalationAvmStatus,
     manualAppraisalStatus,
   } = state;
 
-  function fmtUsd(n: number | null | undefined): string | null {
-    if (n == null) return null;
-    return `$${Math.round(n).toLocaleString("en-US")}`;
-  }
-
   // Once ATTOM or manual appraisal has reached a resolved state, the rentcast-level
   // "Review in progress" card is superseded. PropertyValuationSections handles those states.
   const escalationResolved =
     escalationAvmStatus === "completed" || manualAppraisalStatus === "complete";
+
+  // Verified check must come FIRST — property.status is the authoritative participation
+  // state.  A stale property_review_status must not override it with "under review".
+  if (propertyStatus === "verified") {
+    return (
+      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 space-y-1.5">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-semibold text-emerald-900">Property verified</span>
+          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">
+            Verified
+          </span>
+        </div>
+        <p className="text-xs text-emerald-800">
+          Your property has been verified. Our team is continuing to review your file.
+        </p>
+      </div>
+    );
+  }
 
   if (
     !escalationResolved &&
@@ -259,22 +284,6 @@ function PropertyWorkflowWidget({ state }: { state: PropertyWorkflowState }) {
     );
   }
 
-  if (propertyStatus === "verified") {
-    return (
-      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 space-y-1.5">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-semibold text-emerald-900">Property verified</span>
-          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">
-            Verified
-          </span>
-        </div>
-        <p className="text-xs text-emerald-800">
-          Your property has been verified. Our team is continuing to review your file.
-        </p>
-      </div>
-    );
-  }
-
   return null;
 }
 
@@ -286,6 +295,7 @@ export function PropertyDetailClient({
   reviewRequest,
   workflowState,
   activityEntries = [],
+  enrichment = null,
 }: Props) {
   const [editOpen, setEditOpen] = useState(false);
 
@@ -315,6 +325,26 @@ export function PropertyDetailClient({
     property.title_claims_known ||
     property.owner_stated_fmv != null ||
     property.willing_to_proceed_formal_review;
+
+  // Three-lane status derivation
+  const ownerParticipationLane = deriveParticipationLane(property.status);
+  const ownerValuationLane = workflowState
+    ? deriveValuationLane({
+        manualAppraisalStatus: workflowState.manualAppraisalStatus,
+        escalationAvmStatus: workflowState.escalationAvmStatus,
+        fmvVerificationSource: workflowState.fmvVerificationSource,
+        latestVerifiedFmv: workflowState.latestVerifiedFmv,
+      })
+    : deriveValuationLane({
+        manualAppraisalStatus: null,
+        escalationAvmStatus: null,
+        fmvVerificationSource: null,
+        latestVerifiedFmv: null,
+      });
+  const ownerClosingReadinessLane = deriveClosingReadinessLane({
+    hasAcceptedDeal: linkedDeal?.thread_status === "accepted",
+    propertyReviewStatus: workflowState?.propertyReviewStatus ?? null,
+  });
 
   return (
     <div className="space-y-6">
@@ -405,7 +435,11 @@ export function PropertyDetailClient({
                 <path d="M6.5 9a2.5 2.5 0 1 1 5 0 2.5 2.5 0 0 1-5 0Z" />
                 <path fillRule="evenodd" d="M1.5 1A1.5 1.5 0 0 0 0 2.5v11A1.5 1.5 0 0 0 1.5 15h13a1.5 1.5 0 0 0 1.5-1.5v-11A1.5 1.5 0 0 0 14.5 1h-13Zm1 3a.5.5 0 0 1 .5-.5H5a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5Zm.5 2.5a.5.5 0 0 0 0 1h1a.5.5 0 0 0 0-1H3Zm5.5 4.5a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" clipRule="evenodd" />
               </svg>
-              {appraisalUnderReview ? "Appraisal under review" : "Verified Appraisal Value"}
+              {appraisalUnderReview
+                ? "Appraisal under review"
+                : ownerValuationLane.label === "Appraised"
+                  ? "Appraised value"
+                  : "Reviewed valuation basis"}
             </span>
           )}
 
@@ -432,6 +466,29 @@ export function PropertyDetailClient({
         )}
       </div>
 
+      {/* Three-lane status block */}
+      <PropertyStatusLanes
+        participation={ownerParticipationLane}
+        valuation={ownerValuationLane}
+        closingReadiness={ownerClosingReadinessLane}
+      />
+
+      {/* Enriched property preview — shown to owner when enrichment is available */}
+      {enrichment && (
+        <div className="rounded-lg border overflow-hidden">
+          <div className="bg-muted/40 px-4 py-2 border-b">
+            <span className="text-sm font-medium">Property Preview</span>
+          </div>
+          <div className="p-4">
+            <EnrichedPropertyPreview
+              audience="owner"
+              enrichment={enrichment}
+              valuationLabel={valueLabelFromValuationLane(ownerValuationLane.label)}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Valuation confirmed card — plain-language trust signal when appraisal badge is active */}
       {showVerifiedAppraisalBadge && !appraisalUnderReview && !appraisalExpired && (
         <div className="rounded-lg border border-violet-200 bg-violet-50 p-4 space-y-1.5">
@@ -439,11 +496,14 @@ export function PropertyDetailClient({
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4 text-violet-700 shrink-0">
               <path fillRule="evenodd" d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1Zm3.844 4.574a.75.75 0 0 1 .082 1.058l-3.5 4a.75.75 0 0 1-1.09.058L5.086 8.44a.75.75 0 0 1 1.08-1.043l1.696 1.753 2.96-3.385a.75.75 0 0 1 1.022-.19Z" clipRule="evenodd" />
             </svg>
-            <span className="text-sm font-semibold text-violet-900">Valuation confirmed</span>
+            <span className="text-sm font-semibold text-violet-900">
+              {ownerValuationLane.label === "Appraised" ? "Appraised value" : "Reviewed valuation basis"}
+            </span>
           </div>
           <p className="text-xs text-violet-800">
-            Your property&apos;s value has been independently verified through our review process.
-            This verified basis is active and on file for your deal.
+            {ownerValuationLane.label === "Appraised"
+              ? "Your property's value has been independently appraised and is on file for your deal."
+              : "A reviewed valuation basis has been adopted for your property through our review process. This basis is active and on file for your deal."}
           </p>
           {property.property_review_expires_at && fmtDateShort(property.property_review_expires_at) && (
             <p className="text-xs text-violet-700">
@@ -557,6 +617,51 @@ export function PropertyDetailClient({
           </p>
         </div>
       )}
+
+      {/* Proposal preferences */}
+      <div className="rounded-lg border p-5 space-y-1">
+        <h2 className="text-sm font-semibold mb-3">Proposal preferences</h2>
+        {property.proposal_interest_status === "interested_after_verification" ? (
+          <>
+            <Row
+              fieldLabel="Proposals"
+              value="Enabled after verification"
+            />
+            <Row
+              fieldLabel="Visibility"
+              value={
+                property.visibility_preference === "public"
+                  ? "Public"
+                  : property.visibility_preference === "matched"
+                    ? "Matched buyers only"
+                    : "Private"
+              }
+            />
+            <Row
+              fieldLabel="Terms acknowledgment"
+              value={
+                property.proposal_preferences_acknowledged_at
+                  ? "Accepted"
+                  : "Pending"
+              }
+            />
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            You have not enabled proposals for this property.{" "}
+            {canEdit(property.status) && (
+              <button
+                type="button"
+                onClick={() => setEditOpen(true)}
+                className="underline hover:text-foreground"
+              >
+                Edit property
+              </button>
+            )}{" "}
+            to update your preferences.
+          </p>
+        )}
+      </div>
 
       {/* Review request panel */}
       {reviewRequest && (reviewRequest.status === "open" || reviewRequest.status === "submitted") && (

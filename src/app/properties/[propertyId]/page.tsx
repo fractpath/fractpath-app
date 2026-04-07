@@ -8,11 +8,16 @@ import type { HomeownerReviewRequest } from "@/components/properties/ReviewReque
 import type { PropertyWorkflowState } from "@/components/properties/PropertyDetailClient";
 import type { LiveIneligiblePhase } from "@/components/properties/PropertyValuationSections";
 import type { PropertyAuditEntry } from "@/components/properties/PropertyActivityTimeline";
+import type {
+  MashvisorNormalizedSummary,
+  MashvisorImagesPayload,
+} from "@/lib/mashvisor/types";
+import type { EnrichedPreviewData } from "@/components/property/EnrichedPropertyPreview";
 
 export const runtime = "nodejs";
 
 const OWNED_SELECT =
-  "id, address_line1, address_line2, city, state, postal_code, status, ownership_status, is_private, owner_user_id, claimed_by_user_id, created_by_user_id, created_at, updated_at, has_secured_property_debt, secured_property_debt_amount, secured_debt_verification_status, secured_debt_fresh_until, ownership_type, occupancy_use, occupancy_use_other, major_condition_issue, major_condition_issue_details, known_liens_and_claims, total_known_debt_amount, total_known_debt_confidence, debt_statement_availability, title_claims_known, title_claims_details, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, owner_stated_fmv_source_other, willing_to_proceed_formal_review, property_review_status, escalation_deposit_status, escalation_avm_status, latest_verified_fmv, fmv_verified_at, fmv_verification_source, manual_appraisal_status, manual_appraisal_fmv, verified_at, property_review_expires_at, verification_state, owner_verification_removed_at, verified_appraisal_value_status, verified_appraisal_value_context_owner_id";
+  "id, address_line1, address_line2, city, state, postal_code, status, ownership_status, is_private, owner_user_id, claimed_by_user_id, created_by_user_id, created_at, updated_at, has_secured_property_debt, secured_property_debt_amount, secured_debt_verification_status, secured_debt_fresh_until, ownership_type, occupancy_use, occupancy_use_other, major_condition_issue, major_condition_issue_details, known_liens_and_claims, total_known_debt_amount, total_known_debt_confidence, debt_statement_availability, title_claims_known, title_claims_details, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, owner_stated_fmv_source_other, willing_to_proceed_formal_review, proposal_interest_status, visibility_preference, proposal_preferences_acknowledged_at, property_review_status, escalation_deposit_status, escalation_avm_status, latest_verified_fmv, fmv_verified_at, fmv_verification_source, manual_appraisal_status, manual_appraisal_fmv, verified_at, property_review_expires_at, verification_state, owner_verification_removed_at, verified_appraisal_value_status, verified_appraisal_value_context_owner_id";
 
 function formatAddress(row: any): string {
   return [
@@ -245,6 +250,32 @@ export default async function PropertyDetailPage({ params }: PageProps) {
     }
   }
 
+  // Fetch current enrichment for this property (non-fatal)
+  let ownerEnrichment: EnrichedPreviewData | null = null;
+  try {
+    const { data: enrichmentRow } = await (svc.from("property_enrichments") as any)
+      .select("summary_payload, images_payload, fetched_at")
+      .eq("property_id", propertyId)
+      .eq("provider", "mashvisor")
+      .eq("is_current", true)
+      .eq("status", "completed")
+      .maybeSingle();
+
+    if (enrichmentRow) {
+      const summary = enrichmentRow.summary_payload as MashvisorNormalizedSummary | null;
+      const images = enrichmentRow.images_payload as MashvisorImagesPayload | null;
+      if (summary && images) {
+        ownerEnrichment = {
+          summary,
+          images,
+          fetchedAt: enrichmentRow.fetched_at ?? summary.fetched_at ?? null,
+        };
+      }
+    }
+  } catch {
+    // non-fatal — proceed without enrichment
+  }
+
   return (
     <div>
       <AppHeader />
@@ -255,6 +286,7 @@ export default async function PropertyDetailPage({ params }: PageProps) {
           reviewRequest={reviewRequest}
           workflowState={workflowState}
           activityEntries={activityEntries}
+          enrichment={ownerEnrichment}
         />
       </main>
     </div>

@@ -62,8 +62,13 @@ function unwrapSnapshotPayload(raw: unknown): Record<string, unknown> | null {
 }
 
 // ---------------------------------------------------------------------------
-// Version Drift Control (only enforce if fields are present at that level)
+// Version Drift Control (soft check — presence only, no exact match required)
 // ---------------------------------------------------------------------------
+//
+// Resume always recomputes deterministically server-side from canonical inputs.
+// Exact version equality is intentionally not enforced: the route accepts any
+// non-empty version string present in the payload and stamps the output with
+// the app's own CONTRACT_VERSION / SCHEMA_VERSION.
 
 function enforceVersionsIfPresent(payload: Record<string, unknown>) {
   const rawSv =
@@ -71,16 +76,11 @@ function enforceVersionsIfPresent(payload: Record<string, unknown>) {
       ? String((payload as any).schema_version).trim()
       : "";
 
-  // Accept aliases: "v1" and "1"
-  const normalizedSv =
-    rawSv.length > 0 && /^v?\d+$/i.test(rawSv)
-      ? rawSv.replace(/^v/i, "")
-      : rawSv;
-
-  if (normalizedSv.length > 0 && normalizedSv !== SCHEMA_VERSION) {
+  // If schema_version is present it must be a non-empty string — no exact match required.
+  if ((payload as any).schema_version !== undefined && rawSv.length === 0) {
     return {
       ok: false as const,
-      error: `Unsupported schema_version "${rawSv}". Expected "${SCHEMA_VERSION}"`,
+      error: "schema_version must be a non-empty string when provided",
     };
   }
 
@@ -91,32 +91,12 @@ function enforceVersionsIfPresent(payload: Record<string, unknown>) {
         ? String((payload as any).compute_version).trim()
         : "";
 
-  const normalizedCv =
-    rawCv.length > 0 && /^v?\d+(\.\d+)*$/i.test(rawCv)
-      ? rawCv.replace(/^v/i, "")
-      : rawCv;
-
-  // Allow expected canonical contract version
-  if (normalizedCv.length > 0 && normalizedCv === CONTRACT_VERSION) {
-    return { ok: true as const };
-  }
-
-  // Allow known legacy "wrapper/package" versions emitted by older marketing builds.
-  // Resume always recomputes deterministically, so this is an envelope-compat allowance,
-  // not a compute/contract change.
-  const LEGACY_ACCEPTED_CONTRACT_VERSIONS = new Set<string>(["0.0.1", "1.0.0"]);
-
-  if (
-    normalizedCv.length > 0 &&
-    LEGACY_ACCEPTED_CONTRACT_VERSIONS.has(normalizedCv)
-  ) {
-    return { ok: true as const };
-  }
-
-  if (normalizedCv.length > 0) {
+  // If contract_version / compute_version is present it must be a non-empty string.
+  const cvField = (payload as any).contract_version ?? (payload as any).compute_version;
+  if (cvField !== undefined && rawCv.length === 0) {
     return {
       ok: false as const,
-      error: `Unsupported contract_version "${rawCv}". Expected "${CONTRACT_VERSION}"`,
+      error: "contract_version must be a non-empty string when provided",
     };
   }
 
@@ -260,9 +240,9 @@ export async function POST(request: NextRequest) {
     const fullSnapshot = {
       contract_version: CONTRACT_VERSION,
       schema_version: SCHEMA_VERSION,
+      compute_version,
       inputs: canonicalInputs,
       outputs: { results },
-      compute_version,
       computed_at: computedAt,
       computed_by: user.id,
     };

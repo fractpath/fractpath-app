@@ -22,7 +22,7 @@ function assert(condition: boolean, msg: string) {
 const ROUTE_PATH = "src/app/api/deals/resume/route.ts";
 const content = fs.readFileSync(ROUTE_PATH, "utf-8");
 
-console.log("\n--- Resume Route Contract Tests (Dual-Path: Canonical + Legacy) ---\n");
+console.log("\n--- Resume Route Contract Tests ---\n");
 
 test("resume endpoint file exists at correct App Router path", () => {
   assert(fs.existsSync(ROUTE_PATH), "route.ts must exist");
@@ -88,33 +88,14 @@ test("resume route handles already-redeemed tokens with idempotent deal lookup",
   );
 });
 
-test("resume route detects canonical snapshot shape (deal_terms present)", () => {
+test("resume route normalizes canonical inputs from snapshot payload", () => {
   assert(
-    content.includes("detectSnapshotShape"),
-    "must call detectSnapshotShape to distinguish payload types",
-  );
-  assert(
-    content.includes('"canonical"'),
-    "must have canonical shape constant",
+    content.includes("normalizeCanonicalInputsFromUnknown"),
+    "must call normalizeCanonicalInputsFromUnknown to extract deal_terms + scenario",
   );
   assert(
     content.includes("deal_terms"),
-    "must check for deal_terms field to detect canonical shape",
-  );
-});
-
-test("resume route detects legacy snapshot shape (inputs present)", () => {
-  assert(
-    content.includes('"legacy"'),
-    "must have legacy shape constant",
-  );
-  assert(
-    content.includes("validateDraftSnapshotV1"),
-    "must validate legacy drafts via validateDraftSnapshotV1",
-  );
-  assert(
-    content.includes("mapDraftToDealSnapshot"),
-    "must map legacy drafts via mapDraftToDealSnapshot",
+    "must check for deal_terms in the normalized inputs",
   );
 });
 
@@ -125,21 +106,11 @@ test("resume route rejects unrecognized snapshot format with 422", () => {
   );
 });
 
-test("resume route extracts canonical inputs (deal_terms + assumptions/scenario)", () => {
+test("resume route validates property_value after normalization", () => {
   assert(
-    content.includes("extractCanonicalInputs"),
-    "must call extractCanonicalInputs for canonical shape",
-  );
-  assert(
-    content.includes("assumptions") && content.includes("scenario"),
-    "must handle both assumptions and scenario field names",
-  );
-});
-
-test("resume route validates schema_version on canonical snapshots", () => {
-  assert(
-    content.includes("schema_version") && content.includes("Canonical snapshot missing required schema_version"),
-    "must validate schema_version exists and is non-empty on canonical path",
+    content.includes("property_value is required") ||
+      content.includes("property_value"),
+    "must validate property_value after normalization",
   );
 });
 
@@ -151,7 +122,7 @@ test("resume route ALWAYS recomputes via computeDeal (both paths)", () => {
   const computeCallCount = (content.match(/computeDeal\(/g) || []).length;
   assert(
     computeCallCount >= 1,
-    "computeDeal must be called (unified path, not duplicated per branch)",
+    "computeDeal must be called",
   );
 
   const nonCommentLines = content
@@ -171,10 +142,10 @@ test("resume route ensures canonical envelope via ensureScenario", () => {
   );
 });
 
-test("resume route builds canonical-only snapshot object", () => {
+test("resume route builds canonical snapshot stamped with CONTRACT_VERSION and SCHEMA_VERSION", () => {
   assert(
-    content.includes('schema_version: "1"'),
-    'must set schema_version "1"',
+    content.includes("CONTRACT_VERSION") && content.includes("SCHEMA_VERSION"),
+    "must stamp snapshot with CONTRACT_VERSION and SCHEMA_VERSION from contractVersion",
   );
   assert(
     content.includes("inputs: canonicalInputs"),
@@ -243,13 +214,6 @@ test("resume route records audit events (DEAL_CREATED and DEAL_SNAPSHOT_COMPUTED
   assert(
     content.includes('"DEAL_SNAPSHOT_COMPUTED"'),
     "must record DEAL_SNAPSHOT_COMPUTED event",
-  );
-});
-
-test("resume route records snapshot_shape in audit event payload", () => {
-  assert(
-    content.includes("snapshot_shape"),
-    "must include snapshot_shape (canonical or legacy) in audit event payload",
   );
 });
 

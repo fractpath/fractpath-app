@@ -33,10 +33,10 @@ function sha256Hex(s: string): string {
 }
 
 /**
- * FullDealSnapshotV1 validator
+ * FullDealSnapshotV1 validator (v11-compatible)
  * Required:
- * - contract_version: non-empty string
- * - schema_version: must be "1" (string)
+ * - contract_version: non-empty string (any version)
+ * - schema_version: non-empty string (any version, not required to equal "1")
  * - inputs: object (not array)
  * - outputs: object (not array)
  * - outputs.results: object (not array)   (required for persistence)
@@ -78,13 +78,7 @@ export function validateFullDealSnapshotV1(payload: any): Ok | Err {
     };
   }
 
-  if (payload.schema_version !== "1") {
-    return {
-      ok: false,
-      code: "INVALID_FIELD",
-      error: "schema_version must be '1'",
-    };
-  }
+  // schema_version must be a non-empty string — no exact value required (v11+)
 
   if (!isObj(payload.inputs)) {
     return {

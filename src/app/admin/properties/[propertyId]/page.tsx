@@ -17,6 +17,7 @@ import type { PropertyReviewStatus } from "@/components/admin/AdminPropertyRevie
 import { AdminVendorReviewPanel } from "@/components/admin/AdminVendorReviewPanel";
 import { AdminAttomScreeningPanel } from "@/components/admin/AdminAttomScreeningPanel";
 import { AdminDebtBasisPanel } from "@/components/admin/AdminDebtBasisPanel";
+import { AdminMashvisorPanel } from "@/components/admin/AdminMashvisorPanel";
 import { AdminEscalationSimPanel } from "@/components/admin/AdminEscalationSimPanel";
 import { AdminManualAppraisalSimPanel } from "@/components/admin/AdminManualAppraisalSimPanel";
 import { AdminPropertyClosingPanel } from "@/components/admin/AdminPropertyClosingPanel";
@@ -35,6 +36,13 @@ import {
   DEVIATION_ESCALATION_THRESHOLD_PCT,
   type AvmEligibilityCard,
 } from "@/lib/avmEligibility";
+import { PropertyStatusLanes } from "@/components/properties/PropertyStatusLanes";
+import {
+  deriveParticipationLane,
+  deriveValuationLane,
+  deriveClosingReadinessLane,
+  valueLabelFromValuationLane,
+} from "@/lib/property/statusLanes";
 
 function requirePreviewSecret(): string {
   const v = process.env.ADMIN_DOC_PREVIEW_SECRET;
@@ -139,7 +147,7 @@ export default async function AdminPropertyAuditPage({
 
   const propRes = await (supabase.from("properties") as any)
     .select(
-      "id, owner_user_id, address_line1, address_line2, city, state, postal_code, status, created_at, updated_at, reviewed_at, reviewed_by, verified_at, verified_by, review_notes, has_secured_property_debt, secured_property_debt_amount, secured_debt_certified_at, secured_debt_last_verified_at, secured_debt_fresh_until, secured_debt_verification_status, latest_verified_fmv, fmv_verified_at, fmv_verification_source, ltv_policy_ratio, max_accessible_cash_current, ownership_type, occupancy_use, occupancy_use_other, major_condition_issue, major_condition_issue_details, known_liens_and_claims, total_known_debt_amount, total_known_debt_confidence, debt_statement_availability, title_claims_known, title_claims_details, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, owner_stated_fmv_source_other, willing_to_proceed_formal_review, property_review_status, property_review_status_updated_at, property_review_note, property_review_expires_at, property_review_completed_at, escalation_deposit_status, escalation_avm_status, closing_review_status, closing_review_note, manual_appraisal_status, manual_appraisal_fmv, verification_state, owner_verification_removed_at, owner_verification_removed_reason, verified_appraisal_value_status, verified_appraisal_value_context_owner_id, current_fractpath_eligible_cash_cap, current_eligibility_posture, current_limiting_factors_json, current_controlling_secured_debt_basis, current_controlling_secured_debt_amount, secured_debt_basis_reason, secured_debt_basis_updated_at",
+      "id, owner_user_id, address_line1, address_line2, city, state, postal_code, status, created_at, updated_at, reviewed_at, reviewed_by, verified_at, verified_by, review_notes, has_secured_property_debt, secured_property_debt_amount, secured_debt_certified_at, secured_debt_last_verified_at, secured_debt_fresh_until, secured_debt_verification_status, latest_verified_fmv, fmv_verified_at, fmv_verification_source, ltv_policy_ratio, max_accessible_cash_current, ownership_type, occupancy_use, occupancy_use_other, major_condition_issue, major_condition_issue_details, known_liens_and_claims, total_known_debt_amount, total_known_debt_confidence, debt_statement_availability, title_claims_known, title_claims_details, owner_stated_fmv, owner_stated_fmv_confidence, owner_stated_fmv_source, owner_stated_fmv_source_other, willing_to_proceed_formal_review, proposal_interest_status, visibility_preference, proposal_preferences_acknowledged_at, property_review_status, property_review_status_updated_at, property_review_note, property_review_expires_at, property_review_completed_at, escalation_deposit_status, escalation_avm_status, closing_review_status, closing_review_note, manual_appraisal_status, manual_appraisal_fmv, verification_state, owner_verification_removed_at, owner_verification_removed_reason, verified_appraisal_value_status, verified_appraisal_value_context_owner_id, current_fractpath_eligible_cash_cap, current_eligibility_posture, current_limiting_factors_json, current_controlling_secured_debt_basis, current_controlling_secured_debt_amount, secured_debt_basis_reason, secured_debt_basis_updated_at",
     )
     .eq("id", propertyId)
     .maybeSingle();
@@ -170,7 +178,7 @@ export default async function AdminPropertyAuditPage({
     .filter(Boolean)
     .join(", ");
 
-  const [auditRes, docsRes, underwritingRes, linkedThreadRes, summaryRes, recentRunsRes] = await Promise.all([
+  const [auditRes, docsRes, underwritingRes, linkedThreadRes, summaryRes, recentRunsRes, enrichmentRes] = await Promise.all([
     (supabase.from("property_status_audit") as any)
       .select(
         "id, from_status, to_status, changed_by, actor_type, changed_at, notes",
@@ -205,6 +213,12 @@ export default async function AdminPropertyAuditPage({
       .eq("property_id", propertyId)
       .order("requested_at", { ascending: false })
       .limit(10),
+    (supabase.from("property_enrichments") as any)
+      .select("id, status, provider_record_id, is_current, summary_payload, images_payload, fetched_at, error_message")
+      .eq("property_id", propertyId)
+      .eq("provider", "mashvisor")
+      .eq("is_current", true)
+      .maybeSingle(),
   ]);
 
   // Fetch triage metadata for the linked accepted deal (if any)
@@ -310,6 +324,16 @@ export default async function AdminPropertyAuditPage({
   const latestAvmRun = recentRuns.find((r) => r.artifact_type === "avm") ?? null;
   // ATTOM enhanced screening runs are stored with artifact_type "enhanced_screening"
   const latestAttomRun = recentRuns.find((r) => r.artifact_type === "enhanced_screening") ?? null;
+
+  const currentEnrichment = (enrichmentRes.data ?? null) as {
+    id: string;
+    status: string;
+    provider_record_id: string | null;
+    summary_payload: unknown;
+    images_payload: unknown;
+    fetched_at: string | null;
+    error_message: string | null;
+  } | null;
   const lastProfileError =
     latestProfileRun?.status === "failed"
       ? { error_message: latestProfileRun.error_message }
@@ -429,6 +453,20 @@ export default async function AdminPropertyAuditPage({
     external_partner: "External partner",
   };
 
+  // ── Three-lane status derivation ──────────────────────────────────────────
+  const adminParticipationLane = deriveParticipationLane(p.status ?? null);
+  const adminValuationLane = deriveValuationLane({
+    manualAppraisalStatus: (p.manual_appraisal_status as string | null) ?? null,
+    escalationAvmStatus: (p.escalation_avm_status as string | null) ?? null,
+    fmvVerificationSource: (p.fmv_verification_source as string | null) ?? null,
+    latestVerifiedFmv: (p.latest_verified_fmv as number | null) ?? null,
+  });
+  const adminClosingReadinessLane = deriveClosingReadinessLane({
+    hasAcceptedDeal: !!linkedThreadRes.data?.id,
+    propertyReviewStatus: (p.property_review_status as string | null) ?? null,
+    closingReviewStatus: (p.closing_review_status as string | null) ?? null,
+  });
+
   return (
     <main className="mx-auto max-w-4xl p-6 space-y-6">
 
@@ -476,16 +514,13 @@ export default async function AdminPropertyAuditPage({
 
       {/* ── Property overview ── */}
       <div className="rounded-lg border p-4 text-sm space-y-1">
-        <div className="flex items-center gap-2 flex-wrap mb-2">
-          <span className="font-medium">Verification status:</span>
-          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-muted text-foreground">
-            {String(p.status).replace(/_/g, " ")}
-          </span>
-          {reviewStatusMeta && (
-            <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${reviewStatusMeta.badgeCls}`}>
-              {reviewStatusMeta.label}
-            </span>
-          )}
+        {/* Three-lane status block */}
+        <div className="mb-3">
+          <PropertyStatusLanes
+            participation={adminParticipationLane}
+            valuation={adminValuationLane}
+            closingReadiness={adminClosingReadinessLane}
+          />
         </div>
         <div>
           <span className="text-muted-foreground">Owner:</span>{" "}
@@ -686,6 +721,50 @@ export default async function AdminPropertyAuditPage({
         </div>
       )}
 
+      {/* ── Proposal Preferences ── */}
+      <div className="rounded-lg border overflow-hidden">
+        <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b">
+          Proposal Preferences
+        </div>
+        <div className="p-4 text-sm">
+          <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+            <div>
+              <div className="text-muted-foreground text-xs">Proposals</div>
+              <div className="font-medium">
+                {p.proposal_interest_status === "interested_after_verification"
+                  ? "Enabled after verification"
+                  : "Off"}
+              </div>
+            </div>
+            <div>
+              <div className="text-muted-foreground text-xs">Visibility</div>
+              <div className="font-medium capitalize">
+                {p.visibility_preference
+                  ? p.visibility_preference.charAt(0).toUpperCase() +
+                    p.visibility_preference.slice(1)
+                  : "Private"}
+              </div>
+            </div>
+            <div>
+              <div className="text-muted-foreground text-xs">Acknowledgment</div>
+              <div className="font-medium">
+                {p.proposal_preferences_acknowledged_at
+                  ? `Accepted — ${formatDate(p.proposal_preferences_acknowledged_at)}`
+                  : p.proposal_interest_status === "interested_after_verification"
+                    ? "Missing"
+                    : "Not required"}
+              </div>
+            </div>
+          </div>
+          {p.visibility_preference === "public" && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Public preference does not make this property buyer-visible until verification
+              succeeds and downstream product visibility rules allow it.
+            </p>
+          )}
+        </div>
+      </div>
+
       {/* ── Verification + Supporting documents (two sections rendered by component) ── */}
       <PropertyDocumentsPreview propertyId={propertyId} docs={docs} />
 
@@ -780,7 +859,7 @@ export default async function AdminPropertyAuditPage({
       {/* ── Property review ── */}
       <div className="rounded-lg border overflow-hidden">
         <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b flex items-center gap-2 flex-wrap">
-          <span>Property review</span>
+          <span>Valuation status</span>
           {reviewStatusMeta ? (
             <span className={`text-xs rounded-full px-2 py-0.5 font-normal ${reviewStatusMeta.badgeCls}`}>
               {reviewStatusMeta.label}
@@ -957,6 +1036,20 @@ export default async function AdminPropertyAuditPage({
         latestVerifiedFmv={(p.latest_verified_fmv as number | null) ?? null}
         fmvVerificationSource={(p.fmv_verification_source as string | null) ?? null}
         eligibleCashCap={(p.current_fractpath_eligible_cash_cap as number | null) ?? null}
+      />
+
+      {/* ── Mashvisor enrichment ── */}
+      {/*
+        Manual admin-only enrichment fetch from Mashvisor.
+        Does not auto-trigger; does not affect owner-facing surfaces.
+        Stored in property_enrichments (provider: mashvisor).
+        Requires MASHVISOR_API_KEY to be configured.
+      */}
+      <AdminMashvisorPanel
+        propertyId={propertyId}
+        hasAddress={!!(p.address_line1 && p.city && p.state)}
+        enrichment={currentEnrichment}
+        valuationLabel={valueLabelFromValuationLane(adminValuationLane.label)}
       />
 
       {/* ── Debt basis management ── */}

@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "moduleResolution": "node",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@fractpath/compute": [
+        "./node_modules/fractpath-calculator-widget/packages/compute/dist/index.d.ts"
+      ]
+    },
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": [
+    "node_modules",
+    "fractpath-calculator-widget-src",
+    "attached_assets"
+  ]
+}
