@@ -10,6 +10,7 @@ import type { EnrichedPreviewData } from "@/components/property/EnrichedProperty
 import Link from "next/link";
 import { PropertyStatusLanes } from "@/components/properties/PropertyStatusLanes";
 import {
+  deriveClosingReadinessLane,
   deriveParticipationLane,
   deriveValuationLane,
   valueLabelFromValuationLane,
@@ -110,6 +111,12 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
   });
   const publicValuationLabel = valueLabelFromValuationLane(publicValuationLane.label);
 
+  const publicClosingReadinessLane = deriveClosingReadinessLane({
+    hasAcceptedDeal: false,
+    propertyReviewStatus: null,
+    closingReviewStatus: null,
+  });
+  
   // Fetch current enrichment (non-fatal, audience=buyer — hides provider IDs)
   let enrichment: EnrichedPreviewData | null = null;
   try {
@@ -196,6 +203,7 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
         <PropertyStatusLanes
           participation={publicParticipationLane}
           valuation={publicValuationLane}
+          closingReadiness={publicClosingReadinessLane}
           showClosingReadiness={false}
         />
 
