@@ -26,6 +26,17 @@ function str(v: unknown): string | null {
   return s !== "" ? s : null;
 }
 
+function toHttpsUrl(v: unknown): string | null {
+  const s = str(v);
+  if (!s) return null;
+
+  if (s.startsWith("http://")) {
+    return `https://${s.slice("http://".length)}`;
+  }
+
+  return s;
+}
+
 /**
  * Extract the property data object from a raw Mashvisor response.
  *
@@ -104,8 +115,8 @@ export function extractMashvisorImages(raw: unknown): MashvisorImagesPayload {
   // Cover image: content.image.url or content.image.image
   const imageObj = c["image"] as Record<string, unknown> | null | undefined;
   const coverUrl =
-    str(imageObj?.["url"]) ??
-    str(imageObj?.["image"]) ??
+    toHttpsUrl(imageObj?.["url"]) ??
+    toHttpsUrl(imageObj?.["image"]) ??
     null;
 
   // Gallery: content.extra_images array
@@ -116,8 +127,12 @@ export function extractMashvisorImages(raw: unknown): MashvisorImagesPayload {
     for (const item of extraImages) {
       const u =
         typeof item === "object" && item !== null
-          ? str((item as Record<string, unknown>)["url"] ?? (item as Record<string, unknown>)["image"] ?? item)
-          : str(item);
+          ? toHttpsUrl(
+              (item as Record<string, unknown>)["url"] ??
+                (item as Record<string, unknown>)["image"] ??
+                item,
+            )
+          : toHttpsUrl(item);
       if (u) galleryUrls.push(u);
     }
   }
