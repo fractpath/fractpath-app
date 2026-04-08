@@ -18,6 +18,180 @@ export type MashvisorEnrichmentResult = {
   images: MashvisorImagesPayload;
 };
 
+// ─── Image import constants ────────────────────────────────────────────────────
+
+/** Public bucket for FractPath-hosted enrichment images. */
+const IMAGE_BUCKET = "property-images";
+
+/** Per-image fetch timeout (ms). Skip the image if it takes longer. */
+const FETCH_TIMEOUT_MS = 8_000;
+
+/** Maximum images to import per enrichment run. */
+const MAX_IMAGES = 10;
+
+// ─── Storage bucket bootstrap ──────────────────────────────────────────────────
+
+async function ensureImageBucket(
+  supabase: ReturnType<typeof createAdminClient>,
+): Promise<void> {
+  const { data } = await supabase.storage.getBucket(IMAGE_BUCKET);
+  if (!data) {
+    const { error } = await supabase.storage.createBucket(IMAGE_BUCKET, {
+      public: true,
+      fileSizeLimit: 5 * 1024 * 1024,
+    });
+    if (error) {
+      // Non-fatal: another concurrent request may have already created it.
+      console.warn(
+        `[Mashvisor] Could not create bucket ${IMAGE_BUCKET}: ${error.message}`,
+      );
+    }
+  }
+}
+
+// ─── Per-image fetch + upload ──────────────────────────────────────────────────
+
+async function importSingleImage(
+  supabase: ReturnType<typeof createAdminClient>,
+  providerUrl: string,
+  storagePath: string,
+): Promise<{ hostedUrl: string | null; failureReason: string | null }> {
+  let res: Response;
+  try {
+    res = await fetch(providerUrl, {
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      headers: { "User-Agent": "FractPath-Enrichment/1.0" },
+    });
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : "fetch error";
+    return { hostedUrl: null, failureReason: reason };
+  }
+
+  if (!res.ok) {
+    return { hostedUrl: null, failureReason: `HTTP ${res.status}` };
+  }
+
+  const contentType = (res.headers.get("content-type") ?? "").split(";")[0].trim();
+  if (!contentType.startsWith("image/")) {
+    return {
+      hostedUrl: null,
+      failureReason: `Not an image (content-type: ${contentType || "unknown"})`,
+    };
+  }
+
+  let buf: Buffer;
+  try {
+    buf = Buffer.from(await res.arrayBuffer());
+  } catch {
+    return { hostedUrl: null, failureReason: "Failed to read response body" };
+  }
+
+  const { error: uploadErr } = await supabase.storage
+    .from(IMAGE_BUCKET)
+    .upload(storagePath, buf, { contentType, upsert: true });
+
+  if (uploadErr) {
+    return { hostedUrl: null, failureReason: `Upload: ${uploadErr.message}` };
+  }
+
+  const { data: pubData } = supabase.storage
+    .from(IMAGE_BUCKET)
+    .getPublicUrl(storagePath);
+
+  return { hostedUrl: pubData.publicUrl, failureReason: null };
+}
+
+// ─── Batch image import ────────────────────────────────────────────────────────
+
+async function importImages(
+  supabase: ReturnType<typeof createAdminClient>,
+  propertyId: string,
+  enrichmentId: string,
+  providerUrls: string[],
+): Promise<{ urlMap: Map<string, string>; succeeded: number; attempted: number }> {
+  const urlMap = new Map<string, string>();
+  let succeeded = 0;
+  const cap = Math.min(providerUrls.length, MAX_IMAGES);
+
+  console.log(
+    `[Mashvisor] Image import starting: ${cap} image(s) for property ${propertyId}`,
+  );
+
+  for (let i = 0; i < cap; i++) {
+    const provUrl = providerUrls[i];
+
+    const urlExt = provUrl.split("?")[0].split(".").pop()?.toLowerCase();
+    const ext =
+      urlExt && ["jpg", "jpeg", "png", "webp"].includes(urlExt)
+        ? urlExt === "jpeg" ? "jpg" : urlExt
+        : "jpg";
+
+    const storagePath = `enrichments/${propertyId}/${enrichmentId}/${i}.${ext}`;
+    const host = (() => {
+      try { return new URL(provUrl).hostname; } catch { return provUrl.slice(0, 50); }
+    })();
+
+    const { hostedUrl, failureReason } = await importSingleImage(
+      supabase,
+      provUrl,
+      storagePath,
+    );
+
+    if (hostedUrl) {
+      urlMap.set(provUrl, hostedUrl);
+      succeeded++;
+      console.log(`[Mashvisor] Image ${i + 1}/${cap} OK — host: ${host}`);
+    } else {
+      console.warn(
+        `[Mashvisor] Image ${i + 1}/${cap} FAILED — host: ${host} — reason: ${failureReason}`,
+      );
+    }
+  }
+
+  console.log(
+    `[Mashvisor] Image import complete: ${succeeded}/${cap} succeeded for property ${propertyId}`,
+  );
+
+  return { urlMap, succeeded, attempted: cap };
+}
+
+// ─── URL rewrite ───────────────────────────────────────────────────────────────
+
+/**
+ * Rewrite a provider MashvisorImagesPayload to use FractPath-hosted URLs.
+ *
+ * - cover_image_url and image_urls are replaced with uploaded copies.
+ * - Images whose uploads failed are dropped from both lists.
+ * - Original provider URLs are preserved in provider_image_urls (debug only).
+ *
+ * Exported so the verification script can unit-test this pure function.
+ */
+export function rewriteImagesPayload(
+  providerPayload: MashvisorImagesPayload,
+  urlMap: Map<string, string>,
+): MashvisorImagesPayload {
+  const hostedImageUrls = providerPayload.image_urls
+    .map((u) => urlMap.get(u))
+    .filter((u): u is string => u !== undefined);
+
+  // cover_image_url is typically the first entry in image_urls; fall back to
+  // the first successfully hosted image if the cover's upload failed.
+  const hostedCover = providerPayload.cover_image_url
+    ? urlMap.get(providerPayload.cover_image_url) ?? hostedImageUrls[0] ?? null
+    : hostedImageUrls[0] ?? null;
+
+  return {
+    cover_image_url: hostedCover,
+    image_urls: hostedImageUrls,
+    provider_image_urls: {
+      cover: providerPayload.cover_image_url,
+      gallery: providerPayload.image_urls,
+    },
+  };
+}
+
+// ─── Main enrichment function ──────────────────────────────────────────────────
+
 export async function runMashvisorEnrichment(
   input: RunMashvisorEnrichmentInput,
 ): Promise<MashvisorEnrichmentResult> {
@@ -88,7 +262,7 @@ export async function runMashvisorEnrichment(
 
   let rawPayload: unknown;
   let summary: MashvisorNormalizedSummary;
-  let images: MashvisorImagesPayload;
+  let providerImages: MashvisorImagesPayload;
 
   try {
     rawPayload = await fetchMashvisorProperty({
@@ -98,7 +272,7 @@ export async function runMashvisorEnrichment(
       zip_code: p.postal_code ?? undefined,
     });
     summary = normalizeMashvisorResponse(rawPayload);
-    images = extractMashvisorImages(rawPayload);
+    providerImages = extractMashvisorImages(rawPayload);
   } catch (fetchErr) {
     const msg = fetchErr instanceof Error ? fetchErr.message : "Mashvisor fetch failed";
     await (supabase.from("property_enrichments") as any)
@@ -109,6 +283,43 @@ export async function runMashvisorEnrichment(
       })
       .eq("id", enrichmentId);
     throw new Error(msg);
+  }
+
+  // ── Image import: download provider images server-side and re-host ────────────
+  //
+  // Provider Listhub URLs return AccessDenied when requested by a browser
+  // (Referer-gated CDN). Server-side fetches bypass this restriction.
+  // Failures are non-fatal: partial success keeps whatever images uploaded.
+  let images: MashvisorImagesPayload;
+
+  if (providerImages.image_urls.length > 0) {
+    try {
+      await ensureImageBucket(supabase);
+      const { urlMap } = await importImages(
+        supabase,
+        propertyId,
+        enrichmentId,
+        providerImages.image_urls,
+      );
+      images = rewriteImagesPayload(providerImages, urlMap);
+    } catch (imgErr) {
+      // Non-fatal: if the whole import block throws, store empty images and
+      // let the UI fallback tile render rather than failing the enrichment.
+      console.error(
+        `[Mashvisor] Image import block failed for property ${propertyId}:`,
+        imgErr,
+      );
+      images = {
+        cover_image_url: null,
+        image_urls: [],
+        provider_image_urls: {
+          cover: providerImages.cover_image_url,
+          gallery: providerImages.image_urls,
+        },
+      };
+    }
+  } else {
+    images = providerImages;
   }
 
   await (supabase.from("property_enrichments") as any)

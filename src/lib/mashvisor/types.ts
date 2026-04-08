@@ -12,6 +12,15 @@ export type MashvisorNormalizedSummary = {
 export type MashvisorImagesPayload = {
   cover_image_url: string | null;
   image_urls: string[];
+  /**
+   * Original provider-hosted URLs preserved for debugging.
+   * These are NOT used by any UI surface — hosted URLs in
+   * cover_image_url / image_urls are always the FractPath-controlled copies.
+   */
+  provider_image_urls?: {
+    cover: string | null;
+    gallery: string[];
+  };
 };
 
 function num(v: unknown): number | null {
