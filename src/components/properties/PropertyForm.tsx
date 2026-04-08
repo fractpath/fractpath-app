@@ -506,45 +506,59 @@ export function PropertyForm(props: {
     !!resolved?.property_id &&
     !resolved?.has_blocking_deal;
 
-  async function handleSubmitOwner() {
-    if (!canSubmitOwner) return;
-    setSubmitting(true);
-    try {
-      if (isEdit) {
-        const fd = new FormData();
-        fd.set("address_line1", address_line1.trim());
-        fd.set("address_line2", address_line2.trim());
-        fd.set("city", city.trim());
-        fd.set("state", state.trim());
-        fd.set("postal_code", postal_code.trim());
+            async function handleSubmitOwner() {
+              if (!canSubmitOwner) return;
 
-        // Sprint 16 intake fields (optional during edit — only send if set)
-        if (ownershipType) fd.set("ownership_type", ownershipType);
-        if (occupancyUse) fd.set("occupancy_use", occupancyUse);
-        if (occupancyUseOther) fd.set("occupancy_use_other", occupancyUseOther);
-        if (majorConditionIssue) fd.set("major_condition_issue", majorConditionIssue);
-        if (majorConditionIssueDetails)
-          fd.set("major_condition_issue_details", majorConditionIssueDetails);
-        for (const v of knownLiensAndClaims)
-          fd.append("known_liens_and_claims", v);
-        if (totalKnownDebtAmountStr.trim())
-          fd.set("total_known_debt_amount", totalKnownDebtAmountStr.trim());
-        if (totalKnownDebtConfidence)
-          fd.set("total_known_debt_confidence", totalKnownDebtConfidence);
-        if (debtStatementAvailability)
-          fd.set("debt_statement_availability", debtStatementAvailability);
-        if (titleClaimsKnown) fd.set("title_claims_known", titleClaimsKnown);
-        if (titleClaimsDetails) fd.set("title_claims_details", titleClaimsDetails);
-        if (ownerStatedFmvStr.trim())
-          fd.set("owner_stated_fmv", ownerStatedFmvStr.trim());
-        if (ownerStatedFmvConfidence)
-          fd.set("owner_stated_fmv_confidence", ownerStatedFmvConfidence);
-        if (ownerStatedFmvSource)
-          fd.set("owner_stated_fmv_source", ownerStatedFmvSource);
-        if (ownerStatedFmvSourceOther)
-          fd.set("owner_stated_fmv_source_other", ownerStatedFmvSourceOther);
-        if (willingToProceed)
-          fd.set("willing_to_proceed_formal_review", willingToProceed);
+              if (!isEdit && resolved?.property_exists) {
+                const alreadyClaimed =
+                  resolved.ownership_status === "claimed" ||
+                  !!resolved.claimed_by_user_id;
+
+                const msg = alreadyClaimed
+                  ? "This property is already in FractPath. Open the existing property instead of creating a duplicate."
+                  : "This property is already in FractPath. Ask the homeowner to claim the existing property instead of creating a duplicate.";
+
+                t.error(msg);
+                return;
+              }
+
+              setSubmitting(true);
+              try {
+                if (isEdit) {
+                  const fd = new FormData();
+                  fd.set("address_line1", address_line1.trim());
+                  fd.set("address_line2", address_line2.trim());
+                  fd.set("city", city.trim());
+                  fd.set("state", state.trim());
+                  fd.set("postal_code", postal_code.trim());
+
+                  // Sprint 16 intake fields (optional during edit — only send if set)
+                  if (ownershipType) fd.set("ownership_type", ownershipType);
+                  if (occupancyUse) fd.set("occupancy_use", occupancyUse);
+                  if (occupancyUseOther) fd.set("occupancy_use_other", occupancyUseOther);
+                  if (majorConditionIssue) fd.set("major_condition_issue", majorConditionIssue);
+                  if (majorConditionIssueDetails)
+                    fd.set("major_condition_issue_details", majorConditionIssueDetails);
+                  for (const v of knownLiensAndClaims)
+                    fd.append("known_liens_and_claims", v);
+                  if (totalKnownDebtAmountStr.trim())
+                    fd.set("total_known_debt_amount", totalKnownDebtAmountStr.trim());
+                  if (totalKnownDebtConfidence)
+                    fd.set("total_known_debt_confidence", totalKnownDebtConfidence);
+                  if (debtStatementAvailability)
+                    fd.set("debt_statement_availability", debtStatementAvailability);
+                  if (titleClaimsKnown) fd.set("title_claims_known", titleClaimsKnown);
+                  if (titleClaimsDetails) fd.set("title_claims_details", titleClaimsDetails);
+                  if (ownerStatedFmvStr.trim())
+                    fd.set("owner_stated_fmv", ownerStatedFmvStr.trim());
+                  if (ownerStatedFmvConfidence)
+                    fd.set("owner_stated_fmv_confidence", ownerStatedFmvConfidence);
+                  if (ownerStatedFmvSource)
+                    fd.set("owner_stated_fmv_source", ownerStatedFmvSource);
+                  if (ownerStatedFmvSourceOther)
+                    fd.set("owner_stated_fmv_source_other", ownerStatedFmvSourceOther);
+                  if (willingToProceed)
+                    fd.set("willing_to_proceed_formal_review", willingToProceed);
 
         // Proposal preferences
         fd.set("proposal_interest_status", proposalInterest);
