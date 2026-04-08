@@ -71,9 +71,27 @@ function StatTile({ label, value }: { label: string; value: string }) {
   );
 }
 
+/** Shown in place of an image whose src failed to load. */
+function ImageUnavailableTile({ className }: { className?: string }) {
+  return (
+    <div
+      className={`flex items-center justify-center rounded border border-dashed border-muted-foreground/30 bg-muted/20 ${className ?? ""}`}
+      aria-label="Image unavailable"
+    >
+      <span className="text-[11px] text-muted-foreground select-none">
+        Image unavailable
+      </span>
+    </div>
+  );
+}
+
 // ─── Main shared component ─────────────────────────────────────────────────────
 
-export function EnrichedPropertyPreview({ enrichment, audience, valuationLabel = "Source value" }: Props) {
+export function EnrichedPropertyPreview({
+  enrichment,
+  audience,
+  valuationLabel = "Source value",
+}: Props) {
   const { summary, images } = enrichment;
   const coverUrl = images.cover_image_url ?? null;
 
@@ -86,6 +104,18 @@ export function EnrichedPropertyPreview({ enrichment, audience, valuationLabel =
     if (u !== coverUrl && !galleryUrls.includes(u)) galleryUrls.push(u);
   }
 
+  // Track which image URLs have failed to load so we can render a visible fallback.
+  // Keyed by URL string (stable across re-renders).
+  const [failedUrls, setFailedUrls] = useState<Set<string>>(new Set());
+
+  function markFailed(url: string) {
+    setFailedUrls((prev) => {
+      const next = new Set(prev);
+      next.add(url);
+      return next;
+    });
+  }
+
   // Lightbox state: index into allImageUrls
   const [lbOpen, setLbOpen] = useState(false);
   const [lbIndex, setLbIndex] = useState(0);
@@ -96,32 +126,31 @@ export function EnrichedPropertyPreview({ enrichment, audience, valuationLabel =
   }
 
   const isAdmin = audience === "admin";
-  const fetchedAt =
-    enrichment.fetchedAt ?? summary.fetched_at ?? null;
+  const fetchedAt = enrichment.fetchedAt ?? summary.fetched_at ?? null;
 
   return (
     <div className="space-y-4">
 
       {/* Hero image — clicking opens lightbox at index 0 */}
       {coverUrl && (
-        <button
-          type="button"
-          className="block w-full rounded-md overflow-hidden border bg-muted/30 aspect-video cursor-zoom-in focus:outline-none"
-          onClick={() => openLightbox(0)}
-          aria-label="View full-size property photo"
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={coverUrl}
-            alt="Property photo"
-            className="w-full h-full object-cover"
-            onError={(e) => {
-              const el = e.currentTarget as HTMLImageElement;
-              const btn = el.closest("button");
-              if (btn) btn.style.display = "none";
-            }}
-          />
-        </button>
+        failedUrls.has(coverUrl) ? (
+          <ImageUnavailableTile className="w-full aspect-video" />
+        ) : (
+          <button
+            type="button"
+            className="block w-full rounded-md overflow-hidden border bg-muted/30 aspect-video cursor-zoom-in focus:outline-none"
+            onClick={() => openLightbox(0)}
+            aria-label="View full-size property photo"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={coverUrl}
+              alt="Property photo"
+              className="w-full h-full object-cover"
+              onError={() => markFailed(coverUrl)}
+            />
+          </button>
+        )
       )}
 
       {/* Address + property type */}
@@ -167,10 +196,14 @@ export function EnrichedPropertyPreview({ enrichment, audience, valuationLabel =
           </p>
           <div className="flex gap-2 overflow-x-auto pb-1">
             {galleryUrls.slice(0, 8).map((u, i) => {
-              // Index into allImageUrls: cover is 0, gallery starts at 1
               const allIdx = allImageUrls.indexOf(u);
               const lbIdx = allIdx >= 0 ? allIdx : i + 1;
-              return (
+              return failedUrls.has(u) ? (
+                <ImageUnavailableTile
+                  key={i}
+                  className="shrink-0 w-20 h-14"
+                />
+              ) : (
                 <button
                   key={i}
                   type="button"
@@ -183,11 +216,7 @@ export function EnrichedPropertyPreview({ enrichment, audience, valuationLabel =
                     src={u}
                     alt={`Property photo ${i + 2}`}
                     className="w-full h-full object-cover"
-                    onError={(e) => {
-                      const el = e.currentTarget as HTMLImageElement;
-                      const btn = el.closest("button");
-                      if (btn) btn.style.display = "none";
-                    }}
+                    onError={() => markFailed(u)}
                   />
                 </button>
               );
@@ -207,7 +236,9 @@ export function EnrichedPropertyPreview({ enrichment, audience, valuationLabel =
           </div>
           <div className="flex justify-between px-3 py-2" suppressHydrationWarning>
             <span className="text-muted-foreground">Last fetched</span>
-            <span className="font-medium" suppressHydrationWarning>{fmtDate(fetchedAt)}</span>
+            <span className="font-medium" suppressHydrationWarning>
+              {fmtDate(fetchedAt)}
+            </span>
           </div>
           <div className="flex justify-between px-3 py-2">
             <span className="text-muted-foreground">Images stored</span>
