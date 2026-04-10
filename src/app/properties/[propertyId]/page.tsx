@@ -19,6 +19,15 @@ import type { PropertyRecord } from "@/lib/property/propertyRecord";
 import { normalizedProfileToRecord } from "@/lib/property/propertyRecord";
 import { PropertyRecordSections } from "@/components/property/PropertyRecordSections";
 import { PropertyHeroMedia } from "@/components/property/PropertyHeroMedia";
+import { PropertyPageHeader } from "@/components/property/PropertyPageHeader";
+import { ValuationCashSection } from "@/components/property/ValuationCashSection";
+import {
+  shouldShowOwnerVerifiedBadge,
+  shouldShowVerifiedAppraisalValueBadge,
+  isAppraisalBadgeExpired,
+  isAppraisalBadgeUnderReview,
+} from "@/lib/property/badges";
+import { deriveValuationLane } from "@/lib/property/statusLanes";
 
 export const runtime = "nodejs";
 
@@ -340,11 +349,52 @@ export default async function PropertyDetailPage({ params }: PageProps) {
   const heroLng = ownerPropertyRecord?.longitude ?? null;
   const heroAddress = ownerPropertyRecord?.formattedAddress ?? address_display ?? null;
 
+  // ── Badge computation for PropertyPageHeader ─────────────────────────────
+  const ownerValuationLaneForBadge = deriveValuationLane({
+    manualAppraisalStatus: workflowState.manualAppraisalStatus,
+    escalationAvmStatus: workflowState.escalationAvmStatus,
+    fmvVerificationSource: workflowState.fmvVerificationSource,
+    latestVerifiedFmv: workflowState.latestVerifiedFmv,
+  });
+  const showOwnerVerified = shouldShowOwnerVerifiedBadge(
+    row.verification_state ?? null,
+    row.owner_verification_removed_at ?? null,
+  );
+  const showAppraisalBadge = shouldShowVerifiedAppraisalValueBadge(
+    row.verified_appraisal_value_status ?? null,
+  );
+  const appraisalExpired = isAppraisalBadgeExpired(
+    row.verified_appraisal_value_status ?? null,
+  );
+  const appraisalUnderReview = isAppraisalBadgeUnderReview(
+    row.verified_appraisal_value_status ?? null,
+  );
+  const appraisalBadgeLabel =
+    appraisalUnderReview
+      ? "Appraisal under review"
+      : ownerValuationLaneForBadge.label === "Appraised"
+        ? "Appraised value"
+        : "Reviewed valuation basis";
+
   return (
     <div>
       <AppHeader />
       <main className="mx-auto max-w-3xl px-4 pb-12 pt-6 space-y-6">
-        {/* ── Hero media — images first, map-style placeholder when none ── */}
+        {/* ── A. Header — address H1 + badge row with tooltips ── */}
+        <PropertyPageHeader
+          address={heroAddress ?? address_display}
+          propertyStatus={row.status ?? null}
+          showOwnerVerified={showOwnerVerified}
+          showAppraisalBadge={showAppraisalBadge}
+          appraisalUnderReview={appraisalUnderReview}
+          appraisalExpired={appraisalExpired}
+          appraisalBadgeLabel={appraisalBadgeLabel}
+          expiresAt={row.property_review_expires_at ?? null}
+          ownershipStatus={row.ownership_status ?? null}
+          isParticipationApproved={row.status === "verified"}
+        />
+
+        {/* ── B. Hero media — images first, map-style placeholder when none ── */}
         <PropertyHeroMedia
           images={heroImages}
           lat={heroLat}
@@ -353,7 +403,45 @@ export default async function PropertyDetailPage({ params }: PageProps) {
           audience="owner"
         />
 
-        {/* ── Business logic sections (status, deal, valuation, ATTOM, docs) ── */}
+        {/* ── C. Valuation & cash position — consolidated section with tabs ── */}
+        {(workflowState.rentcastFmv != null ||
+          workflowState.escalationDepositStatus ||
+          workflowState.escalationAvmStatus ||
+          workflowState.ownerAttemptedAttom ||
+          workflowState.manualAppraisalStatus ||
+          workflowState.liveIneligiblePhase !== null ||
+          workflowState.fmvVerificationSource === "attom") && (
+          <ValuationCashSection
+            audience="owner"
+            avm={rentcastAvm}
+            securedDebt={row.secured_property_debt_amount ?? null}
+            propertyReviewExpiresAt={row.property_review_expires_at ?? null}
+            propertyId={property.id}
+            rentcastFmv={workflowState.rentcastFmv}
+            rentcastProvider={workflowState.rentcastProvider}
+            escalationDepositStatus={workflowState.escalationDepositStatus}
+            escalationAvmStatus={workflowState.escalationAvmStatus}
+            ownerAttemptedAttom={workflowState.ownerAttemptedAttom}
+            manualAppraisalStatus={workflowState.manualAppraisalStatus}
+            manualAppraisalFmv={workflowState.manualAppraisalFmv}
+            latestVerifiedFmv={workflowState.latestVerifiedFmv}
+            fmvVerificationSource={workflowState.fmvVerificationSource}
+            liveIneligiblePhase={workflowState.liveIneligiblePhase}
+            linkedDealId={linkedDeal?.deal_id ?? null}
+            attomScreeningCompletedAt={workflowState.attomScreeningCompletedAt}
+            attomEstimatedDebt={workflowState.attomEstimatedDebt}
+            ownerDeclaredDebt={workflowState.ownerDeclaredDebt}
+            debtDiscrepancySeverity={workflowState.debtDiscrepancySeverity}
+            debtDiscrepancyDelta={workflowState.debtDiscrepancyDelta}
+          />
+        )}
+
+        {/* ── D. Base property data (normalized from RentCast) ── */}
+        {ownerPropertyRecord && (
+          <PropertyRecordSections record={ownerPropertyRecord} audience="owner" />
+        )}
+
+        {/* ── E. Owner information & documents (workflow, deal, docs, intake) ── */}
         <PropertyDetailClient
           property={property}
           linkedDeal={linkedDeal}
@@ -361,12 +449,10 @@ export default async function PropertyDetailPage({ params }: PageProps) {
           workflowState={workflowState}
           activityEntries={activityEntries}
           enrichment={ownerEnrichment}
+          hideAddressCard
+          hideWorkflowWidget
+          hideValuationCards
         />
-
-        {/* ── Base property data (normalized from RentCast) ── */}
-        {ownerPropertyRecord && (
-          <PropertyRecordSections record={ownerPropertyRecord} audience="owner" />
-        )}
       </main>
     </div>
   );

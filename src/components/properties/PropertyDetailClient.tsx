@@ -95,6 +95,14 @@ type Props = {
   activityEntries?: PropertyAuditEntry[];
   /** Enriched property preview data — shown to owner when available */
   enrichment?: EnrichedPreviewData | null;
+  /**
+   * Layout suppression flags — used when the parent page renders these
+   * sections independently (e.g. PropertyPageHeader + ValuationCashSection).
+   * Does NOT remove any data or workflow logic.
+   */
+  hideAddressCard?: boolean;
+  hideWorkflowWidget?: boolean;
+  hideValuationCards?: boolean;
 };
 
 // ── Status badge ─────────────────────────────────────────────────────────────
@@ -310,6 +318,9 @@ export function PropertyDetailClient({
   workflowState,
   activityEntries = [],
   enrichment = null,
+  hideAddressCard = false,
+  hideWorkflowWidget = false,
+  hideValuationCards = false,
 }: Props) {
   const [editOpen, setEditOpen] = useState(false);
 
@@ -373,10 +384,13 @@ export function PropertyDetailClient({
       </div>
 
       {/* Early-stage property review status (before escalation/AVM) */}
-      {workflowState && <PropertyWorkflowWidget state={workflowState} />}
+      {!hideWorkflowWidget && workflowState && (
+        <PropertyWorkflowWidget state={workflowState} />
+      )}
 
       {/* Property valuations — distinct RentCast / ATTOM / Manual Appraisal sections */}
-      {workflowState &&
+      {!hideValuationCards &&
+        workflowState &&
         (workflowState.rentcastFmv != null ||
           workflowState.escalationDepositStatus ||
           workflowState.escalationAvmStatus ||
@@ -405,8 +419,9 @@ export function PropertyDetailClient({
           />
         )}
 
-      {/* Property summary */}
-      <div className="rounded-lg border p-5 space-y-3">
+      {/* Property summary — address card. Suppressed when PropertyPageHeader renders it above. */}
+      {!hideAddressCard && (
+        <div className="rounded-lg border p-5 space-y-3">
         <div className="flex items-start justify-between gap-3">
           <h1 className="text-lg font-semibold leading-tight">
             {property.address_display || property.address_line1}
@@ -479,6 +494,7 @@ export function PropertyDetailClient({
           </div>
         )}
       </div>
+      )}
 
       {/* Three-lane status block */}
       <PropertyStatusLanes
@@ -487,8 +503,8 @@ export function PropertyDetailClient({
         closingReadiness={ownerClosingReadinessLane}
       />
 
-      {/* Enriched property preview — shown to owner when enrichment is available */}
-      {enrichment && (
+      {/* Enriched property preview — shown when enrichment available and not replaced by ValuationCashSection */}
+      {!hideValuationCards && enrichment && (
         <div className="rounded-lg border overflow-hidden">
           <div className="bg-muted/40 px-4 py-2 border-b">
             <span className="text-sm font-medium">Property Preview</span>
@@ -514,8 +530,9 @@ export function PropertyDetailClient({
         </div>
       )}
 
-      {/* Valuation confirmed card — plain-language trust signal when appraisal badge is active */}
-      {showVerifiedAppraisalBadge && !appraisalUnderReview && !appraisalExpired && (
+      {/* Valuation confirmed card — plain-language trust signal when appraisal badge is active.
+          Suppressed when ValuationCashSection already shows reviewed basis in the summary row. */}
+      {!hideValuationCards && showVerifiedAppraisalBadge && !appraisalUnderReview && !appraisalExpired && (
         <div className="rounded-lg border border-violet-200 bg-violet-50 p-4 space-y-1.5">
           <div className="flex items-center gap-2">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4 text-violet-700 shrink-0">

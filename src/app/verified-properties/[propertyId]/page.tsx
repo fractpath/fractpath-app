@@ -1,26 +1,16 @@
 import { notFound } from "next/navigation";
 import { createServiceClient } from "@/lib/supabase/service";
 import { AppHeader } from "@/components/layout/AppHeader";
-import { EnrichedPropertyPreview } from "@/components/property/EnrichedPropertyPreview";
 import type { MashvisorImagesPayload } from "@/lib/mashvisor/types";
-import type { EnrichedPreviewData, PropertyAvm } from "@/components/property/EnrichedPropertyPreview";
+import type { PropertyAvm } from "@/components/property/EnrichedPropertyPreview";
 import type { NormalizedPropertyProfile } from "@/lib/property-review/providers/rentcast/types";
-import {
-  rentcastProfileToFacts,
-  reviewedBasisFromProperty,
-} from "@/lib/property/propertyFacts";
+import { reviewedBasisFromProperty } from "@/lib/property/propertyFacts";
 import type { PropertyRecord } from "@/lib/property/propertyRecord";
 import { normalizedProfileToRecord } from "@/lib/property/propertyRecord";
 import { PropertyRecordSections } from "@/components/property/PropertyRecordSections";
 import { PropertyHeroMedia } from "@/components/property/PropertyHeroMedia";
+import { PropertyPageHeader } from "@/components/property/PropertyPageHeader";
 import Link from "next/link";
-import { PropertyStatusLanes } from "@/components/properties/PropertyStatusLanes";
-import {
-  deriveClosingReadinessLane,
-  deriveParticipationLane,
-  deriveValuationLane,
-  valueLabelFromValuationLane,
-} from "@/lib/property/statusLanes";
 
 export const runtime = "nodejs";
 
@@ -52,34 +42,6 @@ function formatFullAddress(row: {
   return parts.join(", ");
 }
 
-function humanizeOccupancy(val: string | null | undefined): string | null {
-  if (!val) return null;
-  if (val === "primary_residence") return "Primary residence";
-  if (val === "secondary_residence") return "Secondary residence";
-  if (val === "rental_property") return "Rental property";
-  return val.replace(/_/g, " ");
-}
-
-function humanizeOwnership(val: string | null | undefined): string | null {
-  if (!val) return null;
-  if (val === "sole_owner") return "Sole owner";
-  if (val === "co_owner") return "Co-owner";
-  if (val === "trust") return "Trust";
-  if (val === "llc") return "LLC";
-  return val.replace(/_/g, " ");
-}
-
-function fmtVerifiedDate(val: string | null | undefined): string | null {
-  if (!val) return null;
-  try {
-    return new Date(val).toLocaleDateString("en-US", {
-      month: "long",
-      year: "numeric",
-    });
-  } catch {
-    return null;
-  }
-}
 
 export default async function PublicPropertyDetailPage({ params }: PageProps) {
   const { propertyId } = await params;
@@ -101,32 +63,10 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
   }
 
   const fullAddress = formatFullAddress(row);
-  const verifiedDate = fmtVerifiedDate(row.verified_at);
-  const occupancyLabel = humanizeOccupancy(row.occupancy_use);
-  const ownershipLabel = humanizeOwnership(row.ownership_type);
-
-  // Status lanes — participation is always "verified" (enforced above).
-  // Valuation is derived server-side from real DB fields so it aligns with the
-  // admin and owner surfaces.  Raw field values are NOT rendered in the HTML.
-  const publicParticipationLane = deriveParticipationLane("verified");
-  const publicValuationLane = deriveValuationLane({
-    manualAppraisalStatus: (row.manual_appraisal_status as string | null) ?? null,
-    escalationAvmStatus: (row.escalation_avm_status as string | null) ?? null,
-    fmvVerificationSource: (row.fmv_verification_source as string | null) ?? null,
-    latestVerifiedFmv: (row.latest_verified_fmv as number | null) ?? null,
-  });
-  const publicValuationLabel = valueLabelFromValuationLane(publicValuationLane.label);
-
-  const publicClosingReadinessLane = deriveClosingReadinessLane({
-    hasAcceptedDeal: false,
-    propertyReviewStatus: null,
-    closingReviewStatus: null,
-  });
   
   // Fetch RentCast property profile.
   // normalized_payload is the sole product-facing source of truth.
   // raw_payload is stored for auditability only and is not used for rendering.
-  let rentcastProfileFacts = null as ReturnType<typeof rentcastProfileToFacts> | null;
   let publicPropertyRecord: PropertyRecord | null = null;
   try {
     const { data: profileRun } = await (supabase.from("property_review_runs") as any)
@@ -139,7 +79,6 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
       .maybeSingle();
     if (profileRun?.normalized_payload) {
       const profile = profileRun.normalized_payload as NormalizedPropertyProfile;
-      rentcastProfileFacts = rentcastProfileToFacts(profile, profileRun.requested_at ?? null);
       publicPropertyRecord = normalizedProfileToRecord(profile, profileRun.requested_at ?? null);
     }
   } catch {
@@ -173,46 +112,20 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
     "Reviewed estimate",
   );
 
-  // Fetch Mashvisor enrichment for images (non-fatal, audience=buyer — hides provider IDs).
-  // Images go exclusively to the hero slot; facts/AVM go to the compact preview below.
-  let enrichment: EnrichedPreviewData | null = null;
+  // Fetch Mashvisor enrichment images for hero slot (non-fatal, buyer-safe)
   let publicHeroImages: MashvisorImagesPayload | null = null;
   try {
     const { data: enrichmentRow } = await (supabase
       .from("property_enrichments") as any)
-      .select("summary_payload, images_payload, fetched_at")
+      .select("images_payload")
       .eq("property_id", propertyId)
       .eq("provider", "mashvisor")
       .eq("is_current", true)
       .eq("status", "completed")
       .maybeSingle();
-
-    const images = enrichmentRow?.images_payload as MashvisorImagesPayload | null ?? null;
-    publicHeroImages = images;
-
-    if (rentcastProfileFacts || publicAvm || images) {
-      enrichment = {
-        // providerRecordId intentionally omitted for buyer audience
-        summary: enrichmentRow?.summary_payload ?? null,
-        // Images are omitted here — they appear in the hero instead.
-        images: null,
-        fetchedAt: enrichmentRow?.fetched_at ?? null,
-        facts: rentcastProfileFacts ?? undefined,
-        avm: publicAvm,
-        reviewedBasis: publicReviewedBasis,
-      };
-    }
+    publicHeroImages = (enrichmentRow?.images_payload as MashvisorImagesPayload | null) ?? null;
   } catch {
-    // non-fatal — fall through to simplified view
-  }
-
-  // If Mashvisor query failed but we have RentCast facts/AVM, still show them
-  if (!enrichment && (rentcastProfileFacts || publicAvm)) {
-    enrichment = {
-      facts: rentcastProfileFacts ?? undefined,
-      avm: publicAvm,
-      reviewedBasis: publicReviewedBasis,
-    };
+    // non-fatal
   }
 
   // Coordinates from normalized property record (for hero map fallback)
@@ -220,6 +133,11 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
   const publicHeroLng = publicPropertyRecord?.longitude ?? null;
   const publicHeroAddress =
     publicPropertyRecord?.formattedAddress ?? fullAddress ?? null;
+
+  // AVM summary tile helpers
+  function fmtUSD(n: number): string {
+    return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -248,7 +166,21 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
           All verified properties
         </Link>
 
-        {/* ── Hero media — images first, map-style placeholder when none ── */}
+        {/* ── A. Header — address H1 + Verified badge ── */}
+        <PropertyPageHeader
+          address={publicHeroAddress ?? fullAddress}
+          propertyStatus="verified"
+          showOwnerVerified={false}
+          showAppraisalBadge={false}
+          appraisalUnderReview={false}
+          appraisalExpired={false}
+          appraisalBadgeLabel=""
+          expiresAt={null}
+          ownershipStatus={null}
+          isParticipationApproved={true}
+        />
+
+        {/* ── B. Hero media — images first, map-style placeholder when none ── */}
         <PropertyHeroMedia
           images={publicHeroImages}
           lat={publicHeroLat}
@@ -257,99 +189,44 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
           audience="buyer"
         />
 
-        {/* Address + Verified badge */}
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
-              <svg
-                className="w-3 h-3"
-                fill="currentColor"
-                viewBox="0 0 20 20"
-                aria-hidden="true"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              Verified
-            </span>
-            {verifiedDate && (
-              <span className="text-xs text-muted-foreground" suppressHydrationWarning>
-                Since {verifiedDate}
-              </span>
-            )}
-          </div>
-          <h1 className="text-xl font-semibold leading-snug">{fullAddress}</h1>
-        </div>
-
-        {/* Property status lanes — public-safe: participation + valuation only */}
-        <PropertyStatusLanes
-          participation={publicParticipationLane}
-          valuation={publicValuationLane}
-          closingReadiness={publicClosingReadinessLane}
-          showClosingReadiness={false}
-        />
-
-        {/* Compact facts + valuation preview — buyer audience (no images, no provider IDs) */}
-        {enrichment ? (
-          <div className="space-y-1">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              Property overview
-            </p>
-            <EnrichedPropertyPreview
-              enrichment={enrichment}
-              audience="buyer"
-              valuationLabel={publicValuationLabel}
-            />
-          </div>
-        ) : (
-          /* No-enrichment fallback — intentional simplified state */
-          <div className="rounded-lg border bg-muted/20 px-5 py-5 space-y-3">
-            <div className="flex items-center gap-2">
-              <svg
-                className="w-5 h-5 text-muted-foreground/50 flex-shrink-0"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"
-                />
-              </svg>
-              <p className="text-sm font-medium">Property details</p>
+        {/* ── C. Valuation summary — buyer-safe (estimate + range + reviewed basis) ── */}
+        {publicAvm?.estimate != null && (
+          <section className="rounded-lg border bg-card">
+            <div className="px-4 py-3 border-b">
+              <h2 className="text-sm font-semibold">Estimated value</h2>
             </div>
-            <dl className="space-y-1.5 text-sm">
-              <div className="flex justify-between gap-4">
-                <dt className="text-muted-foreground">Address</dt>
-                <dd className="font-medium text-right">{fullAddress}</dd>
+            <div className="px-4 py-4">
+              <div className="flex flex-wrap gap-x-8 gap-y-4">
+                <div>
+                  <p className="text-2xl font-bold tabular-nums">
+                    {fmtUSD(publicAvm.estimate)}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Estimate</p>
+                </div>
+                {publicAvm.low != null && publicAvm.high != null && (
+                  <div>
+                    <p className="text-sm font-semibold tabular-nums">
+                      {fmtUSD(publicAvm.low)} – {fmtUSD(publicAvm.high)}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Range</p>
+                  </div>
+                )}
+                {publicReviewedBasis?.value != null && (
+                  <div>
+                    <p className="text-sm font-semibold tabular-nums">
+                      {fmtUSD(publicReviewedBasis.value)}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {publicReviewedBasis.label ?? "Reviewed estimate"}
+                    </p>
+                  </div>
+                )}
               </div>
-              {occupancyLabel && (
-                <div className="flex justify-between gap-4">
-                  <dt className="text-muted-foreground">Use</dt>
-                  <dd className="font-medium">{occupancyLabel}</dd>
-                </div>
-              )}
-              {ownershipLabel && (
-                <div className="flex justify-between gap-4">
-                  <dt className="text-muted-foreground">Ownership</dt>
-                  <dd className="font-medium">{ownershipLabel}</dd>
-                </div>
-              )}
-            </dl>
-            <p className="text-[11px] text-muted-foreground">
-              Detailed property data will be available once additional enrichment
-              is completed.
-            </p>
-          </div>
+            </div>
+          </section>
         )}
 
-        {/* ── Base property data (normalized from RentCast) — privacy-safe subset ── */}
+        {/* ── D. Base property data (normalized from RentCast) — privacy-safe subset ── */}
         {publicPropertyRecord && (
           <PropertyRecordSections record={publicPropertyRecord} audience="buyer" />
         )}

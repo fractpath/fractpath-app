@@ -51,6 +51,16 @@ import {
   deriveClosingReadinessLane,
   valueLabelFromValuationLane,
 } from "@/lib/property/statusLanes";
+import { PropertyPageHeader } from "@/components/property/PropertyPageHeader";
+import { ValuationCashSection } from "@/components/property/ValuationCashSection";
+import { PropertyHeroMedia } from "@/components/property/PropertyHeroMedia";
+import type { MashvisorImagesPayload } from "@/lib/mashvisor/types";
+import {
+  shouldShowOwnerVerifiedBadge,
+  shouldShowVerifiedAppraisalValueBadge,
+  isAppraisalBadgeExpired,
+  isAppraisalBadgeUnderReview,
+} from "@/lib/property/badges";
 
 function requirePreviewSecret(): string {
   const v = process.env.ADMIN_DOC_PREVIEW_SECRET;
@@ -510,6 +520,34 @@ export default async function AdminPropertyAuditPage({
     closingReviewStatus: (p.closing_review_status as string | null) ?? null,
   });
 
+  // ── Badge computation for PropertyPageHeader ─────────────────────────────
+  const adminShowOwnerVerified = shouldShowOwnerVerifiedBadge(
+    (p.verification_state as string | null) ?? null,
+    (p.owner_verification_removed_at as string | null) ?? null,
+  );
+  const adminShowAppraisalBadge = shouldShowVerifiedAppraisalValueBadge(
+    (p.verified_appraisal_value_status as string | null) ?? null,
+  );
+  const adminAppraisalExpired = isAppraisalBadgeExpired(
+    (p.verified_appraisal_value_status as string | null) ?? null,
+  );
+  const adminAppraisalUnderReview = isAppraisalBadgeUnderReview(
+    (p.verified_appraisal_value_status as string | null) ?? null,
+  );
+  const adminAppraisalBadgeLabel = adminAppraisalUnderReview
+    ? "Appraisal under review"
+    : adminValuationLane.label === "Appraised"
+      ? "Appraised value"
+      : "Reviewed valuation basis";
+
+  // ── Hero media data ───────────────────────────────────────────────────────
+  const adminHeroImages =
+    (currentEnrichment?.images_payload as MashvisorImagesPayload | null) ?? null;
+  const adminHeroLat = adminPropertyRecord?.latitude ?? null;
+  const adminHeroLng = adminPropertyRecord?.longitude ?? null;
+  const adminHeroAddress =
+    adminPropertyRecord?.formattedAddress ?? addressDisplay ?? null;
+
   return (
     <main className="mx-auto max-w-4xl p-6 space-y-6">
 
@@ -549,11 +587,59 @@ export default async function AdminPropertyAuditPage({
         </span>
       </div>
 
-      {/* ── Page heading ── */}
-      <div>
-        <h1 className="text-2xl font-semibold">Property review</h1>
-        <p className="text-sm text-muted-foreground">{addressDisplay || p.id}</p>
-      </div>
+      {/* ── A. Property page header — address H1 + badge row ── */}
+      <PropertyPageHeader
+        address={adminHeroAddress ?? addressDisplay}
+        propertyStatus={p.status ?? null}
+        showOwnerVerified={adminShowOwnerVerified}
+        showAppraisalBadge={adminShowAppraisalBadge}
+        appraisalUnderReview={adminAppraisalUnderReview}
+        appraisalExpired={adminAppraisalExpired}
+        appraisalBadgeLabel={adminAppraisalBadgeLabel}
+        expiresAt={(p.property_review_expires_at as string | null) ?? null}
+        ownershipStatus={(p.ownership_type as string | null) ?? null}
+        isParticipationApproved={p.status === "verified"}
+      />
+
+      {/* ── B. Hero media — images first, map-style placeholder when none ── */}
+      <PropertyHeroMedia
+        images={adminHeroImages}
+        lat={adminHeroLat}
+        lng={adminHeroLng}
+        address={adminHeroAddress}
+        audience="admin"
+      />
+
+      {/* ── C. Valuation & cash position — admin audience (shows secured debt) ── */}
+      <ValuationCashSection
+        audience="admin"
+        avm={adminPropertyAvm}
+        securedDebt={(p.secured_property_debt_amount as number | null) ?? null}
+        propertyReviewExpiresAt={(p.property_review_expires_at as string | null) ?? null}
+        propertyId={propertyId}
+        rentcastFmv={
+          adminPropertyAvm?.estimate != null ? adminPropertyAvm.estimate : null
+        }
+        rentcastProvider={null}
+        escalationDepositStatus={(p.escalation_deposit_status as string | null) ?? null}
+        escalationAvmStatus={(p.escalation_avm_status as string | null) ?? null}
+        ownerAttemptedAttom={false}
+        manualAppraisalStatus={(p.manual_appraisal_status as string | null) ?? null}
+        manualAppraisalFmv={(p.manual_appraisal_fmv as number | null) ?? null}
+        latestVerifiedFmv={(p.latest_verified_fmv as number | null) ?? null}
+        fmvVerificationSource={(p.fmv_verification_source as string | null) ?? null}
+        liveIneligiblePhase={null}
+        linkedDealId={linkedDeal?.id ?? null}
+        attomScreeningCompletedAt={null}
+        attomEstimatedDebt={null}
+        ownerDeclaredDebt={
+          p.has_secured_property_debt === true
+            ? ((p.secured_property_debt_amount as number | null) ?? null)
+            : null
+        }
+        debtDiscrepancySeverity={null}
+        debtDiscrepancyDelta={null}
+      />
 
       {/* ── Property overview ── */}
       <div className="rounded-lg border p-4 text-sm space-y-1">

@@ -81,6 +81,69 @@ function DefinitionRow({
   );
 }
 
+// ── Overview tiles ────────────────────────────────────────────────────────────
+
+function OverviewTile({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | null | undefined;
+}) {
+  if (!value) return null;
+  return (
+    <div className="flex flex-col items-center gap-0.5 text-center min-w-0">
+      <span className="text-base font-semibold leading-tight">{value}</span>
+      <span className="text-[11px] text-muted-foreground uppercase tracking-wide">
+        {label}
+      </span>
+    </div>
+  );
+}
+
+function OverviewTilesSection({ record }: { record: PropertyRecord }) {
+  const tiles: { label: string; value: string | null }[] = [
+    record.beds != null
+      ? { label: "Beds", value: String(record.beds) }
+      : null,
+    record.baths != null
+      ? { label: "Baths", value: String(record.baths) }
+      : null,
+    record.sqft != null
+      ? { label: "Sq ft", value: fmtNum(record.sqft) }
+      : null,
+    record.lotSize != null
+      ? {
+          label: "Lot",
+          value:
+            record.lotSize >= 43560
+              ? `${(record.lotSize / 43560).toFixed(2)} ac`
+              : `${fmtNum(record.lotSize)} sq ft`,
+        }
+      : null,
+    record.yearBuilt != null
+      ? { label: "Built", value: String(record.yearBuilt) }
+      : null,
+  ].filter(Boolean) as { label: string; value: string }[];
+
+  if (tiles.length === 0) return null;
+
+  return (
+    <section className="rounded-lg border bg-card">
+      <div className="px-4 py-3 border-b">
+        <h3 className="text-sm font-semibold">Property overview</h3>
+      </div>
+      <div className="px-4 py-4">
+        <div className="flex flex-wrap gap-x-8 gap-y-3 justify-start">
+          {tiles.map(({ label, value }) => (
+            <OverviewTile key={label} label={label} value={value} />
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ── Sections ──────────────────────────────────────────────────────────────────
 
 function PropertyDetailsSection({ record }: { record: PropertyRecord }) {
@@ -404,13 +467,23 @@ export function PropertyRecordSections({ record, audience }: Props) {
     record.ownerOccupied != null ||
     record.hoa?.fee != null;
 
+  const hasOverview =
+    record.beds != null ||
+    record.baths != null ||
+    record.sqft != null ||
+    record.lotSize != null ||
+    record.yearBuilt != null;
+
   const hasAnything =
-    hasPropertyDetails || hasFeatures || hasSaleHistory || hasTaxHistory;
+    hasOverview || hasPropertyDetails || hasFeatures || hasSaleHistory || hasTaxHistory;
 
   if (!hasAnything) return null;
 
   return (
     <div className="space-y-4">
+      {/* Overview tiles — beds, baths, sqft, lot, year */}
+      {hasOverview && <OverviewTilesSection record={record} />}
+
       {/* Property details */}
       {hasPropertyDetails && <PropertyDetailsSection record={record} />}
 

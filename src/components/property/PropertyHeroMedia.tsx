@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { MashvisorImagesPayload } from "@/lib/mashvisor/types";
 
-type Audience = "owner" | "buyer";
+type Audience = "owner" | "buyer" | "admin";
 
 type Props = {
   images: MashvisorImagesPayload | null;

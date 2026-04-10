@@ -17,8 +17,16 @@ import Link from "next/link";
  */
 export type LiveIneligiblePhase = "attom_required" | "void_renegotiable" | null;
 
+/**
+ * When set, only the matching sub-section is rendered.
+ * Used by ValuationCashSection's tab bar. Default (null) renders all sections.
+ */
+export type ValuationVisibleSection = "rentcast" | "attom" | "manual" | null;
+
 export type ValuationSectionsProps = {
   propertyId: string;
+  /** When set, only that sub-section renders. Default = null (all sections). */
+  visibleSection?: ValuationVisibleSection;
   /** RentCast AVM */
   rentcastFmv: number | null;
   rentcastProvider: string | null;
@@ -728,6 +736,7 @@ export function PropertyValuationSections(props: ValuationSectionsProps) {
     ownerDeclaredDebt,
     debtDiscrepancySeverity,
     debtDiscrepancyDelta,
+    visibleSection = null,
   } = props;
 
   const attomComplete = escalationAvmStatus === "completed";
@@ -757,12 +766,19 @@ export function PropertyValuationSections(props: ValuationSectionsProps) {
   // True when real ATTOM admin screening (not escalation sim) is the controlling source.
   const isRealAttomComplete = fmvVerificationSource === "attom";
 
+  const showAll = visibleSection === null;
+  const showRentcast = showAll || visibleSection === "rentcast";
+  const showAttom = showAll || visibleSection === "attom";
+  const showManual = showAll || visibleSection === "manual";
+
   return (
     <div className="space-y-3">
-      <h2 className="text-sm font-semibold text-foreground">Property valuations</h2>
+      {showAll && (
+        <h2 className="text-sm font-semibold text-foreground">Property valuations</h2>
+      )}
 
       {/* 1. RentCast — always show when fmv is available */}
-      {rentcastFmv != null && (
+      {showRentcast && rentcastFmv != null && (
         <RentCastSection
           fmv={rentcastFmv}
           provider={rentcastProvider}
@@ -772,7 +788,7 @@ export function PropertyValuationSections(props: ValuationSectionsProps) {
 
       {/* 2. ATTOM — show when AVM journey has started, real ATTOM is controlling,
                      rentcast is done, or deal requires ATTOM */}
-      {(attomStarted || attomIsControlling || rentcastFmv != null || liveIneligiblePhase !== null) && (
+      {showAttom && (attomStarted || attomIsControlling || rentcastFmv != null || liveIneligiblePhase !== null) && (
         <AttomSection
           propertyId={propertyId}
           escalationDepositStatus={escalationDepositStatus}
@@ -788,7 +804,7 @@ export function PropertyValuationSections(props: ValuationSectionsProps) {
       )}
 
       {/* Ineligible deal guidance — shown for either attom_required or void_renegotiable phase */}
-      {liveIneligiblePhase !== null && (
+      {showAttom && liveIneligiblePhase !== null && (
         <IneligibleGuidanceBlock
           linkedDealId={linkedDealId}
           manualAppraisalStatus={manualAppraisalStatus}
@@ -797,7 +813,7 @@ export function PropertyValuationSections(props: ValuationSectionsProps) {
       )}
 
       {/* 3. Manual appraisal — show when deal is ineligible, ATTOM is complete, or appraisal started */}
-      {(liveIneligiblePhase !== null || attomComplete || isRealAttomComplete || manualStarted) && (
+      {showManual && (liveIneligiblePhase !== null || attomComplete || isRealAttomComplete || manualStarted) && (
         <ManualAppraisalSection
           status={manualAppraisalStatus}
           fmv={manualAppraisalFmv}
@@ -809,7 +825,7 @@ export function PropertyValuationSections(props: ValuationSectionsProps) {
       )}
 
       {/* 4. Debt challenge — show when ATTOM is complete and a non-trivial discrepancy was flagged */}
-      {isRealAttomComplete &&
+      {showAttom && isRealAttomComplete &&
         debtDiscrepancySeverity &&
         debtDiscrepancySeverity !== "none" &&
         debtDiscrepancySeverity !== "minor" && (
