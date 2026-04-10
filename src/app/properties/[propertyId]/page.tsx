@@ -16,12 +16,8 @@ import {
   reviewedBasisFromProperty,
 } from "@/lib/property/propertyFacts";
 import type { PropertyRecord } from "@/lib/property/propertyRecord";
-import {
-  rentcastRecordToPropertyRecord,
-  normalizedProfileToRecord,
-} from "@/lib/property/propertyRecord";
+import { normalizedProfileToRecord } from "@/lib/property/propertyRecord";
 import { PropertyRecordSections } from "@/components/property/PropertyRecordSections";
-import type { RentcastPropertyRecord } from "@/lib/property-review/providers/rentcast/types";
 
 export const runtime = "nodejs";
 
@@ -269,34 +265,28 @@ export default async function PropertyDetailPage({ params }: PageProps) {
     }
   }
 
-  // Fetch current RentCast property profile (non-fatal — facts + full record source)
+  // Fetch current RentCast property profile.
+  // normalized_payload is the sole product-facing source of truth.
+  // raw_payload is stored for auditability only and is not used for rendering.
   let rentcastProfileFacts = null as ReturnType<typeof rentcastProfileToFacts> | null;
   let ownerPropertyRecord: PropertyRecord | null = null;
+  let debugProfileRunFound = false;
+  let debugNormalizedPresent = false;
   try {
     const { data: profileRun } = await (svc.from("property_review_runs") as any)
-      .select("normalized_payload, raw_payload, requested_at")
+      .select("normalized_payload, requested_at")
       .eq("property_id", propertyId)
       .eq("provider", "rentcast")
       .eq("artifact_type", "property_profile")
       .eq("is_current", true)
       .eq("status", "completed")
       .maybeSingle();
+    debugProfileRunFound = !!profileRun;
+    debugNormalizedPresent = !!profileRun?.normalized_payload;
     if (profileRun?.normalized_payload) {
-      rentcastProfileFacts = rentcastProfileToFacts(
-        profileRun.normalized_payload as NormalizedPropertyProfile,
-        profileRun.requested_at ?? null,
-      );
-    }
-    if (profileRun?.raw_payload) {
-      ownerPropertyRecord = rentcastRecordToPropertyRecord(
-        profileRun.raw_payload as RentcastPropertyRecord,
-        profileRun.requested_at ?? null,
-      );
-    } else if (profileRun?.normalized_payload) {
-      ownerPropertyRecord = normalizedProfileToRecord(
-        profileRun.normalized_payload as NormalizedPropertyProfile,
-        profileRun.requested_at ?? null,
-      );
+      const profile = profileRun.normalized_payload as NormalizedPropertyProfile;
+      rentcastProfileFacts = rentcastProfileToFacts(profile, profileRun.requested_at ?? null);
+      ownerPropertyRecord = normalizedProfileToRecord(profile, profileRun.requested_at ?? null);
     }
   } catch {
     // non-fatal — proceed without RentCast facts
@@ -356,6 +346,20 @@ export default async function PropertyDetailPage({ params }: PageProps) {
           activityEntries={activityEntries}
           enrichment={ownerEnrichment}
         />
+        {/* ── Temporary debug card — remove once UI is confirmed ── */}
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-xs space-y-1">
+          <p className="font-semibold text-amber-800 mb-1">Property record debug</p>
+          <ul className="space-y-0.5 text-amber-700 font-mono">
+            <li>property_profile run found: <strong>{debugProfileRunFound ? "true" : "false"}</strong></li>
+            <li>normalized_payload present: <strong>{debugNormalizedPresent ? "true" : "false"}</strong></li>
+            <li>record built from normalized_payload: <strong>{ownerPropertyRecord ? "true" : "false"}</strong></li>
+            <li>has property details: <strong>{ownerPropertyRecord && (ownerPropertyRecord.county || ownerPropertyRecord.subdivision || ownerPropertyRecord.zoning || ownerPropertyRecord.apn || ownerPropertyRecord.assessorId || ownerPropertyRecord.legalDescription || ownerPropertyRecord.ownerOccupied != null || ownerPropertyRecord.hoa?.fee != null) ? "true" : "false"}</strong></li>
+            <li>has features: <strong>{ownerPropertyRecord?.features && Object.values(ownerPropertyRecord.features).some(v => v != null) ? "true" : "false"}</strong></li>
+            <li>has sale history: <strong>{(ownerPropertyRecord?.saleHistory?.length ?? 0) > 0 || ownerPropertyRecord?.lastSaleDate != null ? "true" : "false"}</strong></li>
+            <li>has tax history: <strong>{(ownerPropertyRecord?.taxAssessments?.length ?? 0) > 0 || (ownerPropertyRecord?.propertyTaxes?.length ?? 0) > 0 ? "true" : "false"}</strong></li>
+          </ul>
+        </div>
+
         {ownerPropertyRecord && (
           <PropertyRecordSections record={ownerPropertyRecord} audience="owner" />
         )}

@@ -23,12 +23,8 @@ import {
   rentcastAvmToAvm,
   reviewedBasisFromProperty,
 } from "@/lib/property/propertyFacts";
-import {
-  rentcastRecordToPropertyRecord,
-  normalizedProfileToRecord,
-} from "@/lib/property/propertyRecord";
+import { normalizedProfileToRecord } from "@/lib/property/propertyRecord";
 import { PropertyRecordSections } from "@/components/property/PropertyRecordSections";
-import type { RentcastPropertyRecord } from "@/lib/property-review/providers/rentcast/types";
 import { AdminEscalationSimPanel } from "@/components/admin/AdminEscalationSimPanel";
 import { AdminManualAppraisalSimPanel } from "@/components/admin/AdminManualAppraisalSimPanel";
 import { AdminPropertyClosingPanel } from "@/components/admin/AdminPropertyClosingPanel";
@@ -381,14 +377,9 @@ export default async function AdminPropertyAuditPage({
   );
 
   // Build property record for the detailed sections panel.
-  // raw_payload is preferred (verbatim API response); normalized_payload is the
-  // fallback for runs that stored normalized data but not the raw response.
-  const adminPropertyRecord = currentProfileRun?.raw_payload
-    ? rentcastRecordToPropertyRecord(
-        currentProfileRun.raw_payload as RentcastPropertyRecord,
-        currentProfileRun.requested_at ?? null,
-      )
-    : currentProfileRun?.normalized_payload
+  // normalized_payload is the sole product-facing source of truth.
+  // raw_payload is retained in the DB for audit/reprocessing only.
+  const adminPropertyRecord = currentProfileRun?.normalized_payload
     ? normalizedProfileToRecord(
         currentProfileRun.normalized_payload as NormalizedPropertyProfile,
         currentProfileRun.requested_at ?? null,

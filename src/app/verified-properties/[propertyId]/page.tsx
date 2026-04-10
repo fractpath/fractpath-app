@@ -10,12 +10,8 @@ import {
   reviewedBasisFromProperty,
 } from "@/lib/property/propertyFacts";
 import type { PropertyRecord } from "@/lib/property/propertyRecord";
-import {
-  rentcastRecordToPropertyRecord,
-  normalizedProfileToRecord,
-} from "@/lib/property/propertyRecord";
+import { normalizedProfileToRecord } from "@/lib/property/propertyRecord";
 import { PropertyRecordSections } from "@/components/property/PropertyRecordSections";
-import type { RentcastPropertyRecord } from "@/lib/property-review/providers/rentcast/types";
 import Link from "next/link";
 import { PropertyStatusLanes } from "@/components/properties/PropertyStatusLanes";
 import {
@@ -126,12 +122,14 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
     closingReviewStatus: null,
   });
   
-  // Fetch RentCast property profile (non-fatal — facts + full record source)
+  // Fetch RentCast property profile.
+  // normalized_payload is the sole product-facing source of truth.
+  // raw_payload is stored for auditability only and is not used for rendering.
   let rentcastProfileFacts = null as ReturnType<typeof rentcastProfileToFacts> | null;
   let publicPropertyRecord: PropertyRecord | null = null;
   try {
     const { data: profileRun } = await (supabase.from("property_review_runs") as any)
-      .select("normalized_payload, raw_payload, requested_at")
+      .select("normalized_payload, requested_at")
       .eq("property_id", propertyId)
       .eq("provider", "rentcast")
       .eq("artifact_type", "property_profile")
@@ -139,21 +137,9 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
       .eq("status", "completed")
       .maybeSingle();
     if (profileRun?.normalized_payload) {
-      rentcastProfileFacts = rentcastProfileToFacts(
-        profileRun.normalized_payload as NormalizedPropertyProfile,
-        profileRun.requested_at ?? null,
-      );
-    }
-    if (profileRun?.raw_payload) {
-      publicPropertyRecord = rentcastRecordToPropertyRecord(
-        profileRun.raw_payload as RentcastPropertyRecord,
-        profileRun.requested_at ?? null,
-      );
-    } else if (profileRun?.normalized_payload) {
-      publicPropertyRecord = normalizedProfileToRecord(
-        profileRun.normalized_payload as NormalizedPropertyProfile,
-        profileRun.requested_at ?? null,
-      );
+      const profile = profileRun.normalized_payload as NormalizedPropertyProfile;
+      rentcastProfileFacts = rentcastProfileToFacts(profile, profileRun.requested_at ?? null);
+      publicPropertyRecord = normalizedProfileToRecord(profile, profileRun.requested_at ?? null);
     }
   } catch {
     // non-fatal
