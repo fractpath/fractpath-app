@@ -12,6 +12,7 @@ import {
 import type { PropertyRecord } from "@/lib/property/propertyRecord";
 import { normalizedProfileToRecord } from "@/lib/property/propertyRecord";
 import { PropertyRecordSections } from "@/components/property/PropertyRecordSections";
+import { PropertyHeroMedia } from "@/components/property/PropertyHeroMedia";
 import Link from "next/link";
 import { PropertyStatusLanes } from "@/components/properties/PropertyStatusLanes";
 import {
@@ -172,8 +173,10 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
     "Reviewed estimate",
   );
 
-  // Fetch Mashvisor enrichment for images (non-fatal, audience=buyer — hides provider IDs)
+  // Fetch Mashvisor enrichment for images (non-fatal, audience=buyer — hides provider IDs).
+  // Images go exclusively to the hero slot; facts/AVM go to the compact preview below.
   let enrichment: EnrichedPreviewData | null = null;
+  let publicHeroImages: MashvisorImagesPayload | null = null;
   try {
     const { data: enrichmentRow } = await (supabase
       .from("property_enrichments") as any)
@@ -185,12 +188,14 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
       .maybeSingle();
 
     const images = enrichmentRow?.images_payload as MashvisorImagesPayload | null ?? null;
+    publicHeroImages = images;
 
     if (rentcastProfileFacts || publicAvm || images) {
       enrichment = {
         // providerRecordId intentionally omitted for buyer audience
         summary: enrichmentRow?.summary_payload ?? null,
-        images: images ?? null,
+        // Images are omitted here — they appear in the hero instead.
+        images: null,
         fetchedAt: enrichmentRow?.fetched_at ?? null,
         facts: rentcastProfileFacts ?? undefined,
         avm: publicAvm,
@@ -210,11 +215,17 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
     };
   }
 
+  // Coordinates from normalized property record (for hero map fallback)
+  const publicHeroLat = publicPropertyRecord?.latitude ?? null;
+  const publicHeroLng = publicPropertyRecord?.longitude ?? null;
+  const publicHeroAddress =
+    publicPropertyRecord?.formattedAddress ?? fullAddress ?? null;
+
   return (
     <div className="min-h-screen bg-background">
       <AppHeader />
 
-      <main className="mx-auto max-w-2xl px-4 py-10 space-y-6">
+      <main className="mx-auto max-w-3xl px-4 pb-12 pt-6 space-y-6">
         {/* Back link */}
         <Link
           href="/verified-properties"
@@ -237,7 +248,16 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
           All verified properties
         </Link>
 
-        {/* Header — address + badge */}
+        {/* ── Hero media — images first, map-style placeholder when none ── */}
+        <PropertyHeroMedia
+          images={publicHeroImages}
+          lat={publicHeroLat}
+          lng={publicHeroLng}
+          address={publicHeroAddress}
+          audience="buyer"
+        />
+
+        {/* Address + Verified badge */}
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
@@ -272,11 +292,11 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
           showClosingReadiness={false}
         />
 
-        {/* Enriched preview if available — buyer audience (no provider IDs, no admin metadata) */}
+        {/* Compact facts + valuation preview — buyer audience (no images, no provider IDs) */}
         {enrichment ? (
           <div className="space-y-1">
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              Property preview
+              Property overview
             </p>
             <EnrichedPropertyPreview
               enrichment={enrichment}
@@ -329,7 +349,7 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
           </div>
         )}
 
-        {/* Property record sections */}
+        {/* ── Base property data (normalized from RentCast) — privacy-safe subset ── */}
         {publicPropertyRecord && (
           <PropertyRecordSections record={publicPropertyRecord} audience="buyer" />
         )}

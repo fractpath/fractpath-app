@@ -30,6 +30,9 @@ export type PropertyRecord = {
   yearBuilt: number | null;
   ownerOccupied: boolean | null;
 
+  latitude: number | null;
+  longitude: number | null;
+
   apn: string | null;
   assessorId: string | null;
   legalDescription: string | null;
@@ -158,6 +161,8 @@ export function rentcastRecordToPropertyRecord(
     lotSize: raw.lotSize ?? null,
     yearBuilt: raw.yearBuilt ?? null,
     ownerOccupied: raw.ownerOccupied ?? null,
+    latitude: raw.latitude ?? null,
+    longitude: raw.longitude ?? null,
     apn: raw.apn ?? null,
     assessorId: raw.assessorID ?? null,
     legalDescription: raw.legalDescription ?? null,
@@ -231,6 +236,8 @@ export function normalizedProfileToRecord(
     lotSize: profile.lotSize ?? null,
     yearBuilt: profile.yearBuilt ?? null,
     ownerOccupied: profile.ownerOccupied ?? null,
+    latitude: profile.latitude ?? null,
+    longitude: profile.longitude ?? null,
     apn: profile.apn ?? null,
     assessorId: profile.assessorId ?? null,
     legalDescription: profile.legalDescription ?? null,

@@ -18,6 +18,7 @@ import {
 import type { PropertyRecord } from "@/lib/property/propertyRecord";
 import { normalizedProfileToRecord } from "@/lib/property/propertyRecord";
 import { PropertyRecordSections } from "@/components/property/PropertyRecordSections";
+import { PropertyHeroMedia } from "@/components/property/PropertyHeroMedia";
 
 export const runtime = "nodejs";
 
@@ -270,8 +271,6 @@ export default async function PropertyDetailPage({ params }: PageProps) {
   // raw_payload is stored for auditability only and is not used for rendering.
   let rentcastProfileFacts = null as ReturnType<typeof rentcastProfileToFacts> | null;
   let ownerPropertyRecord: PropertyRecord | null = null;
-  let debugProfileRunFound = false;
-  let debugNormalizedPresent = false;
   try {
     const { data: profileRun } = await (svc.from("property_review_runs") as any)
       .select("normalized_payload, requested_at")
@@ -281,8 +280,6 @@ export default async function PropertyDetailPage({ params }: PageProps) {
       .eq("is_current", true)
       .eq("status", "completed")
       .maybeSingle();
-    debugProfileRunFound = !!profileRun;
-    debugNormalizedPresent = !!profileRun?.normalized_payload;
     if (profileRun?.normalized_payload) {
       const profile = profileRun.normalized_payload as NormalizedPropertyProfile;
       rentcastProfileFacts = rentcastProfileToFacts(profile, profileRun.requested_at ?? null);
@@ -298,8 +295,9 @@ export default async function PropertyDetailPage({ params }: PageProps) {
     row.fmv_verification_source ?? null,
   );
 
-  // Fetch Mashvisor enrichment for images (non-fatal — fallback image source)
+  // Fetch Mashvisor enrichment for images (non-fatal — images go to hero; facts/AVM go to compact preview)
   let ownerEnrichment: EnrichedPreviewData | null = null;
+  let heroImages: MashvisorImagesPayload | null = null;
   try {
     const { data: enrichmentRow } = await (svc.from("property_enrichments") as any)
       .select("summary_payload, images_payload, fetched_at")
@@ -310,11 +308,14 @@ export default async function PropertyDetailPage({ params }: PageProps) {
       .maybeSingle();
 
     const images = enrichmentRow?.images_payload as MashvisorImagesPayload | null ?? null;
+    heroImages = images;
 
     if (rentcastProfileFacts || rentcastAvm || images) {
       ownerEnrichment = {
         summary: enrichmentRow?.summary_payload ?? null,
-        images: images ?? null,
+        // Images are intentionally omitted here — they appear in the hero instead.
+        // This prevents gallery duplication between the hero slot and the compact preview.
+        images: null,
         fetchedAt: enrichmentRow?.fetched_at ?? null,
         facts: rentcastProfileFacts ?? undefined,
         avm: rentcastAvm,
@@ -334,10 +335,25 @@ export default async function PropertyDetailPage({ params }: PageProps) {
     };
   }
 
+  // Coordinates from normalized property record (for hero map fallback)
+  const heroLat = ownerPropertyRecord?.latitude ?? null;
+  const heroLng = ownerPropertyRecord?.longitude ?? null;
+  const heroAddress = ownerPropertyRecord?.formattedAddress ?? address_display ?? null;
+
   return (
     <div>
       <AppHeader />
-      <main className="mx-auto max-w-2xl p-6 space-y-6">
+      <main className="mx-auto max-w-3xl px-4 pb-12 pt-6 space-y-6">
+        {/* ── Hero media — images first, map-style placeholder when none ── */}
+        <PropertyHeroMedia
+          images={heroImages}
+          lat={heroLat}
+          lng={heroLng}
+          address={heroAddress}
+          audience="owner"
+        />
+
+        {/* ── Business logic sections (status, deal, valuation, ATTOM, docs) ── */}
         <PropertyDetailClient
           property={property}
           linkedDeal={linkedDeal}
@@ -346,20 +362,8 @@ export default async function PropertyDetailPage({ params }: PageProps) {
           activityEntries={activityEntries}
           enrichment={ownerEnrichment}
         />
-        {/* ── Temporary debug card — remove once UI is confirmed ── */}
-        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-xs space-y-1">
-          <p className="font-semibold text-amber-800 mb-1">Property record debug</p>
-          <ul className="space-y-0.5 text-amber-700 font-mono">
-            <li>property_profile run found: <strong>{debugProfileRunFound ? "true" : "false"}</strong></li>
-            <li>normalized_payload present: <strong>{debugNormalizedPresent ? "true" : "false"}</strong></li>
-            <li>record built from normalized_payload: <strong>{ownerPropertyRecord ? "true" : "false"}</strong></li>
-            <li>has property details: <strong>{ownerPropertyRecord && (ownerPropertyRecord.county || ownerPropertyRecord.subdivision || ownerPropertyRecord.zoning || ownerPropertyRecord.apn || ownerPropertyRecord.assessorId || ownerPropertyRecord.legalDescription || ownerPropertyRecord.ownerOccupied != null || ownerPropertyRecord.hoa?.fee != null) ? "true" : "false"}</strong></li>
-            <li>has features: <strong>{ownerPropertyRecord?.features && Object.values(ownerPropertyRecord.features).some(v => v != null) ? "true" : "false"}</strong></li>
-            <li>has sale history: <strong>{(ownerPropertyRecord?.saleHistory?.length ?? 0) > 0 || ownerPropertyRecord?.lastSaleDate != null ? "true" : "false"}</strong></li>
-            <li>has tax history: <strong>{(ownerPropertyRecord?.taxAssessments?.length ?? 0) > 0 || (ownerPropertyRecord?.propertyTaxes?.length ?? 0) > 0 ? "true" : "false"}</strong></li>
-          </ul>
-        </div>
 
+        {/* ── Base property data (normalized from RentCast) ── */}
         {ownerPropertyRecord && (
           <PropertyRecordSections record={ownerPropertyRecord} audience="owner" />
         )}
