@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { MashvisorNormalizedSummary, MashvisorImagesPayload } from "@/lib/mashvisor/types";
 import { EnrichedPropertyPreview } from "@/components/property/EnrichedPropertyPreview";
+import type { PropertyFacts } from "@/lib/property/propertyFacts";
 
 type Enrichment = {
   id: string;
@@ -19,6 +20,12 @@ type Props = {
   propertyId: string;
   hasAddress: boolean;
   enrichment: Enrichment | null;
+  /**
+   * Provider-agnostic facts from RentCast property_review_runs.
+   * When present, overrides Mashvisor summary fields (beds/baths/sqft/address/type)
+   * in the preview and is surfaced as a "Facts source: RentCast" row in admin metadata.
+   */
+  rentcastFacts?: PropertyFacts | null;
   /**
    * Label shown for the numeric value estimate in the property preview stats row.
    * Should match the active valuation lane on this property (e.g. "Reviewed value",
@@ -41,7 +48,7 @@ function Spinner() {
   );
 }
 
-export function AdminMashvisorPanel({ propertyId, hasAddress, enrichment, valuationLabel = "Source value" }: Props) {
+export function AdminMashvisorPanel({ propertyId, hasAddress, enrichment, rentcastFacts, valuationLabel = "Source value" }: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -139,15 +146,16 @@ export function AdminMashvisorPanel({ propertyId, hasAddress, enrichment, valuat
         )}
 
         {/* Shared enriched property preview */}
-        {summary && images ? (
+        {(rentcastFacts || (summary && images)) ? (
           <EnrichedPropertyPreview
             audience="admin"
             enrichment={{
-              summary,
-              images,
+              summary: summary ?? null,
+              images: images ?? null,
               fetchedAt: current?.fetched_at ?? null,
               providerRecordId: current?.provider_record_id ?? null,
-              imageCount: images.image_urls?.length ?? 0,
+              imageCount: images?.image_urls?.length ?? 0,
+              facts: rentcastFacts ?? undefined,
             }}
             valuationLabel={valuationLabel}
           />

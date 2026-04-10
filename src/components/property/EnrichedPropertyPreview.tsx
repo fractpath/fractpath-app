@@ -6,15 +6,38 @@ import type {
   MashvisorImagesPayload,
 } from "@/lib/mashvisor/types";
 import { Lightbox } from "@/components/admin/Lightbox";
+import type { PropertyFacts } from "@/lib/property/propertyFacts";
+
+export type { PropertyFacts };
 
 export type EnrichedPreviewAudience = "admin" | "owner" | "buyer";
 
+/**
+ * Combined property enrichment data passed to EnrichedPropertyPreview.
+ *
+ * Facts resolution priority (highest → lowest):
+ *   1. `facts`   — provider-agnostic shape (RentCast in Phase 2+)
+ *   2. `summary` — Mashvisor-specific legacy shape (for value_estimate + backward compat)
+ *
+ * Image resolution: `images` — Mashvisor-hosted URLs (or null/empty when unavailable).
+ *
+ * Both `summary` and `images` are optional to support facts-only scenarios
+ * (no Mashvisor row yet) and images-only scenarios cleanly.
+ */
 export type EnrichedPreviewData = {
-  summary: MashvisorNormalizedSummary;
-  images: MashvisorImagesPayload;
+  /** Legacy Mashvisor summary — kept for value_estimate and backward compat. */
+  summary?: MashvisorNormalizedSummary | null;
+  /** Mashvisor-hosted image URLs. Null/absent when no images have been fetched. */
+  images?: MashvisorImagesPayload | null;
   fetchedAt?: string | null;
   providerRecordId?: string | null;
   imageCount?: number;
+  /**
+   * Provider-agnostic facts (beds/baths/sqft etc.).
+   * When present, overrides the equivalent fields from `summary`.
+   * Populated from RentCast property_review_runs in Phase 2+.
+   */
+  facts?: PropertyFacts;
 };
 
 type Props = {
@@ -92,11 +115,21 @@ export function EnrichedPropertyPreview({
   audience,
   valuationLabel = "Source value",
 }: Props) {
-  const { summary, images } = enrichment;
-  const coverUrl = images.cover_image_url ?? null;
+  const { summary, images, facts } = enrichment;
+
+  // Facts resolution: prefer provider-agnostic `facts` over legacy Mashvisor `summary`
+  const beds = facts?.beds ?? summary?.beds ?? null;
+  const baths = facts?.baths ?? summary?.baths ?? null;
+  const sqft = facts?.sqft ?? summary?.sqft ?? null;
+  const displayAddress = facts?.address ?? summary?.address ?? null;
+  const displayPropertyType = facts?.propertyType ?? summary?.property_type ?? null;
+  // value_estimate still comes from Mashvisor summary (Phase 2: no RentCast AVM override here)
+  const valueEstimate = summary?.value_estimate ?? null;
+
+  const coverUrl = images?.cover_image_url ?? null;
 
   // All stored image URLs in display order (cover first, then gallery)
-  const allImageUrls: string[] = images.image_urls ?? [];
+  const allImageUrls: string[] = images?.image_urls ?? [];
 
   // Gallery URLs: everything after the cover, de-duplicated
   const galleryUrls: string[] = [];
@@ -126,7 +159,11 @@ export function EnrichedPropertyPreview({
   }
 
   const isAdmin = audience === "admin";
-  const fetchedAt = enrichment.fetchedAt ?? summary.fetched_at ?? null;
+  const fetchedAt =
+    enrichment.fetchedAt ??
+    facts?.fetchedAt ??
+    summary?.fetched_at ??
+    null;
 
   return (
     <div className="space-y-4">
@@ -155,12 +192,12 @@ export function EnrichedPropertyPreview({
 
       {/* Address + property type */}
       <div>
-        {summary.address && (
-          <p className="text-sm font-semibold leading-snug">{summary.address}</p>
+        {displayAddress && (
+          <p className="text-sm font-semibold leading-snug">{displayAddress}</p>
         )}
-        {summary.property_type && (
+        {displayPropertyType && (
           <p className="text-xs text-muted-foreground mt-0.5 capitalize">
-            {summary.property_type}
+            {displayPropertyType}
           </p>
         )}
         {/* Show fetched timestamp to admin and owner, but NOT buyer */}
@@ -175,16 +212,16 @@ export function EnrichedPropertyPreview({
       <div className="flex flex-wrap gap-2">
         <StatTile
           label="Beds"
-          value={summary.beds != null ? String(summary.beds) : "—"}
+          value={beds != null ? String(beds) : "—"}
         />
         <StatTile
           label="Baths"
-          value={summary.baths != null ? String(summary.baths) : "—"}
+          value={baths != null ? String(baths) : "—"}
         />
-        <StatTile label="Sq ft" value={fmtNum(summary.sqft)} />
+        <StatTile label="Sq ft" value={fmtNum(sqft)} />
         <StatTile
           label={valuationLabel}
-          value={fmtCurrency(summary.value_estimate)}
+          value={fmtCurrency(valueEstimate)}
         />
       </div>
 
@@ -228,10 +265,18 @@ export function EnrichedPropertyPreview({
       {/* Admin-only metadata block */}
       {isAdmin && (
         <div className="rounded border bg-muted/20 divide-y text-xs">
+          {facts?.source && (
+            <div className="flex justify-between px-3 py-2">
+              <span className="text-muted-foreground">Facts source</span>
+              <span className="font-medium capitalize">
+                {facts.source === "rentcast" ? "RentCast" : "Mashvisor"}
+              </span>
+            </div>
+          )}
           <div className="flex justify-between px-3 py-2">
             <span className="text-muted-foreground">Provider property ID</span>
             <span className="font-mono font-medium">
-              {enrichment.providerRecordId ?? summary.mashvisor_property_id ?? "—"}
+              {enrichment.providerRecordId ?? summary?.mashvisor_property_id ?? "—"}
             </span>
           </div>
           <div className="flex justify-between px-3 py-2" suppressHydrationWarning>

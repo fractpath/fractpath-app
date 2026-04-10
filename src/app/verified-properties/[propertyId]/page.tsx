@@ -2,11 +2,10 @@ import { notFound } from "next/navigation";
 import { createServiceClient } from "@/lib/supabase/service";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { EnrichedPropertyPreview } from "@/components/property/EnrichedPropertyPreview";
-import type {
-  MashvisorNormalizedSummary,
-  MashvisorImagesPayload,
-} from "@/lib/mashvisor/types";
+import type { MashvisorImagesPayload } from "@/lib/mashvisor/types";
 import type { EnrichedPreviewData } from "@/components/property/EnrichedPropertyPreview";
+import type { NormalizedPropertyProfile } from "@/lib/property-review/providers/rentcast/types";
+import { rentcastProfileToFacts } from "@/lib/property/propertyFacts";
 import Link from "next/link";
 import { PropertyStatusLanes } from "@/components/properties/PropertyStatusLanes";
 import {
@@ -117,7 +116,28 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
     closingReviewStatus: null,
   });
   
-  // Fetch current enrichment (non-fatal, audience=buyer — hides provider IDs)
+  // Fetch RentCast property profile (non-fatal — facts source for Phase 2+)
+  let rentcastProfileFacts = null as ReturnType<typeof rentcastProfileToFacts> | null;
+  try {
+    const { data: profileRun } = await (supabase.from("property_review_runs") as any)
+      .select("normalized_payload, requested_at")
+      .eq("property_id", propertyId)
+      .eq("provider", "rentcast")
+      .eq("artifact_type", "property_profile")
+      .eq("is_current", true)
+      .eq("status", "completed")
+      .maybeSingle();
+    if (profileRun?.normalized_payload) {
+      rentcastProfileFacts = rentcastProfileToFacts(
+        profileRun.normalized_payload as NormalizedPropertyProfile,
+        profileRun.requested_at ?? null,
+      );
+    }
+  } catch {
+    // non-fatal
+  }
+
+  // Fetch Mashvisor enrichment for images (non-fatal, audience=buyer — hides provider IDs)
   let enrichment: EnrichedPreviewData | null = null;
   try {
     const { data: enrichmentRow } = await (supabase
@@ -129,20 +149,24 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
       .eq("status", "completed")
       .maybeSingle();
 
-    if (enrichmentRow) {
-      const summary = enrichmentRow.summary_payload as MashvisorNormalizedSummary | null;
-      const images = enrichmentRow.images_payload as MashvisorImagesPayload | null;
-      if (summary && images) {
-        enrichment = {
-          summary,
-          images,
-          fetchedAt: enrichmentRow.fetched_at ?? summary.fetched_at ?? null,
-          // Intentionally omit providerRecordId and imageCount for buyer audience
-        };
-      }
+    const images = enrichmentRow?.images_payload as MashvisorImagesPayload | null ?? null;
+
+    if (rentcastProfileFacts || images) {
+      enrichment = {
+        // summary retained for backward-compat value_estimate; providerRecordId intentionally omitted for buyer
+        summary: enrichmentRow?.summary_payload ?? null,
+        images: images ?? null,
+        fetchedAt: enrichmentRow?.fetched_at ?? null,
+        facts: rentcastProfileFacts ?? undefined,
+      };
     }
   } catch {
     // non-fatal — fall through to simplified view
+  }
+
+  // If Mashvisor query failed but we have RentCast facts, still show them
+  if (!enrichment && rentcastProfileFacts) {
+    enrichment = { facts: rentcastProfileFacts };
   }
 
   return (

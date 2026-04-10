@@ -8,11 +8,10 @@ import type { HomeownerReviewRequest } from "@/components/properties/ReviewReque
 import type { PropertyWorkflowState } from "@/components/properties/PropertyDetailClient";
 import type { LiveIneligiblePhase } from "@/components/properties/PropertyValuationSections";
 import type { PropertyAuditEntry } from "@/components/properties/PropertyActivityTimeline";
-import type {
-  MashvisorNormalizedSummary,
-  MashvisorImagesPayload,
-} from "@/lib/mashvisor/types";
+import type { MashvisorImagesPayload } from "@/lib/mashvisor/types";
 import type { EnrichedPreviewData } from "@/components/property/EnrichedPropertyPreview";
+import type { NormalizedPropertyProfile } from "@/lib/property-review/providers/rentcast/types";
+import { rentcastProfileToFacts } from "@/lib/property/propertyFacts";
 
 export const runtime = "nodejs";
 
@@ -250,7 +249,28 @@ export default async function PropertyDetailPage({ params }: PageProps) {
     }
   }
 
-  // Fetch current enrichment for this property (non-fatal)
+  // Fetch current RentCast property profile (non-fatal — facts source for Phase 2+)
+  let rentcastProfileFacts = null as ReturnType<typeof rentcastProfileToFacts> | null;
+  try {
+    const { data: profileRun } = await (svc.from("property_review_runs") as any)
+      .select("normalized_payload, requested_at")
+      .eq("property_id", propertyId)
+      .eq("provider", "rentcast")
+      .eq("artifact_type", "property_profile")
+      .eq("is_current", true)
+      .eq("status", "completed")
+      .maybeSingle();
+    if (profileRun?.normalized_payload) {
+      rentcastProfileFacts = rentcastProfileToFacts(
+        profileRun.normalized_payload as NormalizedPropertyProfile,
+        profileRun.requested_at ?? null,
+      );
+    }
+  } catch {
+    // non-fatal — proceed without RentCast facts
+  }
+
+  // Fetch Mashvisor enrichment for images (non-fatal — fallback image source)
   let ownerEnrichment: EnrichedPreviewData | null = null;
   try {
     const { data: enrichmentRow } = await (svc.from("property_enrichments") as any)
@@ -261,19 +281,26 @@ export default async function PropertyDetailPage({ params }: PageProps) {
       .eq("status", "completed")
       .maybeSingle();
 
-    if (enrichmentRow) {
-      const summary = enrichmentRow.summary_payload as MashvisorNormalizedSummary | null;
-      const images = enrichmentRow.images_payload as MashvisorImagesPayload | null;
-      if (summary && images) {
-        ownerEnrichment = {
-          summary,
-          images,
-          fetchedAt: enrichmentRow.fetched_at ?? summary.fetched_at ?? null,
-        };
-      }
+    const images = enrichmentRow?.images_payload as MashvisorImagesPayload | null ?? null;
+
+    if (rentcastProfileFacts || images) {
+      ownerEnrichment = {
+        // summary retained only for backward-compat value_estimate display
+        summary: enrichmentRow?.summary_payload ?? null,
+        images: images ?? null,
+        fetchedAt: enrichmentRow?.fetched_at ?? null,
+        facts: rentcastProfileFacts ?? undefined,
+      };
     }
   } catch {
     // non-fatal — proceed without enrichment
+  }
+
+  // If Mashvisor query failed but we have RentCast facts, still show them
+  if (!ownerEnrichment && rentcastProfileFacts) {
+    ownerEnrichment = {
+      facts: rentcastProfileFacts,
+    };
   }
 
   return (

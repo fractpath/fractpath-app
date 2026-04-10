@@ -18,6 +18,7 @@ import { AdminVendorReviewPanel } from "@/components/admin/AdminVendorReviewPane
 import { AdminAttomScreeningPanel } from "@/components/admin/AdminAttomScreeningPanel";
 import { AdminDebtBasisPanel } from "@/components/admin/AdminDebtBasisPanel";
 import { AdminMashvisorPanel } from "@/components/admin/AdminMashvisorPanel";
+import { rentcastProfileToFacts } from "@/lib/property/propertyFacts";
 import { AdminEscalationSimPanel } from "@/components/admin/AdminEscalationSimPanel";
 import { AdminManualAppraisalSimPanel } from "@/components/admin/AdminManualAppraisalSimPanel";
 import { AdminPropertyClosingPanel } from "@/components/admin/AdminPropertyClosingPanel";
@@ -1049,6 +1050,14 @@ export default async function AdminPropertyAuditPage({
         propertyId={propertyId}
         hasAddress={!!(p.address_line1 && p.city && p.state)}
         enrichment={currentEnrichment}
+        rentcastFacts={
+          persistedProfileDetails
+            ? rentcastProfileToFacts(
+                persistedProfileDetails,
+                currentProfileRun?.requested_at ?? null,
+              )
+            : null
+        }
         valuationLabel={valueLabelFromValuationLane(adminValuationLane.label)}
       />
 
