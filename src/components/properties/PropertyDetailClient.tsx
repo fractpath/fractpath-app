@@ -193,8 +193,22 @@ function fmtDateShort(iso: string | null | undefined): string | null {
   }
 }
 
-function canEdit(status: string): boolean {
+/**
+ * Owner may edit property address and intake facts only while the property is
+ * unverified.  Once it enters the review pipeline the facts are locked.
+ */
+function canEditFacts(status: string): boolean {
   return status === "unverified";
+}
+
+/**
+ * Owner may upload/replace verification documents and supporting files as long
+ * as the property has not been archived.  Upload access is intentionally
+ * decoupled from fact-edit access so owners can keep documents current while a
+ * review is in progress or after a deal is accepted.
+ */
+function canUploadPhotos(status: string): boolean {
+  return status !== "archived";
 }
 
 // ── Row ───────────────────────────────────────────────────────────────────────
@@ -397,7 +411,7 @@ export function PropertyDetailClient({
           <h1 className="text-lg font-semibold leading-tight">
             {property.address_display || property.address_line1}
           </h1>
-          {canEdit(property.status) && (
+          {canEditFacts(property.status) && (
             <button
               type="button"
               onClick={() => setEditOpen(true)}
@@ -485,6 +499,17 @@ export function PropertyDetailClient({
               enrichment={enrichment}
               valuationLabel={valueLabelFromValuationLane(ownerValuationLane.label)}
             />
+          </div>
+          {/* Challenge link — owner can flag stale or inaccurate facts */}
+          <div className="px-4 pb-3 border-t pt-2">
+            <a
+              href={`mailto:ownersupport@fractpath.com?subject=${encodeURIComponent(
+                `Challenge property facts — ${property.address_display || property.address_line1 || property.id}`,
+              )}`}
+              className="text-xs text-muted-foreground hover:text-foreground underline"
+            >
+              Something look wrong? Challenge property facts
+            </a>
           </div>
         </div>
       )}
@@ -605,7 +630,7 @@ export function PropertyDetailClient({
           <h2 className="text-sm font-semibold mb-2">Submitted property details</h2>
           <p className="text-sm text-muted-foreground">
             No intake details have been submitted yet.{" "}
-            {canEdit(property.status) && (
+            {canEditFacts(property.status) && (
               <button
                 type="button"
                 onClick={() => setEditOpen(true)}
@@ -649,7 +674,7 @@ export function PropertyDetailClient({
         ) : (
           <p className="text-sm text-muted-foreground">
             You have not enabled proposals for this property.{" "}
-            {canEdit(property.status) && (
+            {canEditFacts(property.status) && (
               <button
                 type="button"
                 onClick={() => setEditOpen(true)}
@@ -676,7 +701,7 @@ export function PropertyDetailClient({
       <PropertyDocumentsPanel
         propertyId={property.id}
         onOpenEdit={() => setEditOpen(true)}
-        editAllowed={canEdit(property.status)}
+        editAllowed={canUploadPhotos(property.status)}
       />
 
       {/* Linked deal */}
@@ -716,7 +741,7 @@ export function PropertyDetailClient({
 
       {/* Actions */}
       <div className="flex gap-3 flex-wrap">
-        {canEdit(property.status) && (
+        {canEditFacts(property.status) && (
           <button
             type="button"
             onClick={() => setEditOpen(true)}
