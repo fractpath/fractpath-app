@@ -14,12 +14,9 @@ import {
 } from "@/components/admin/AdminReviewRequestPanel";
 import { AdminPropertyReviewControls } from "@/components/admin/AdminPropertyReviewControls";
 import type { PropertyReviewStatus } from "@/components/admin/AdminPropertyReviewControls";
-import { AdminVendorReviewPanel } from "@/components/admin/AdminVendorReviewPanel";
 import { AdminAttomScreeningPanel } from "@/components/admin/AdminAttomScreeningPanel";
 import { AdminDebtBasisPanel } from "@/components/admin/AdminDebtBasisPanel";
-import { AdminMashvisorPanel } from "@/components/admin/AdminMashvisorPanel";
 import {
-  rentcastProfileToFacts,
   rentcastAvmToAvm,
   reviewedBasisFromProperty,
 } from "@/lib/property/propertyFacts";
@@ -44,12 +41,10 @@ import {
   DEVIATION_ESCALATION_THRESHOLD_PCT,
   type AvmEligibilityCard,
 } from "@/lib/avmEligibility";
-import { PropertyStatusLanes } from "@/components/properties/PropertyStatusLanes";
 import {
   deriveParticipationLane,
   deriveValuationLane,
   deriveClosingReadinessLane,
-  valueLabelFromValuationLane,
 } from "@/lib/property/statusLanes";
 import { PropertyPageHeader } from "@/components/property/PropertyPageHeader";
 import { ValuationCashSection } from "@/components/property/ValuationCashSection";
@@ -601,7 +596,21 @@ export default async function AdminPropertyAuditPage({
         isParticipationApproved={p.status === "verified"}
       />
 
-      {/* ── B. Hero media — images first, map-style placeholder when none ── */}
+      {/* ── B-admin. Owner verification status — admin-only controls near top ── */}
+      <div className="rounded-lg border overflow-hidden">
+        <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b">
+          Owner verification status
+        </div>
+        <div className="p-4 space-y-3">
+          <AdminPropertyActions propertyId={propertyId} status={p.status} />
+          <AdminPropertyStatusControls
+            propertyId={propertyId}
+            currentStatus={p.status}
+          />
+        </div>
+      </div>
+
+      {/* ── C. Hero media — images first, map-style placeholder when none ── */}
       <PropertyHeroMedia
         images={adminHeroImages}
         lat={adminHeroLat}
@@ -641,23 +650,56 @@ export default async function AdminPropertyAuditPage({
         debtDiscrepancyDelta={null}
       />
 
-      {/* ── Property overview ── */}
-      <div className="rounded-lg border p-4 text-sm space-y-1">
-        {/* Three-lane status block */}
-        <div className="mb-3">
-          <PropertyStatusLanes
-            participation={adminParticipationLane}
-            valuation={adminValuationLane}
-            closingReadiness={adminClosingReadinessLane}
-          />
+      {/* ── Secured debt ── */}
+      {(p.has_secured_property_debt != null || (p.secured_property_debt_amount as number | null) != null) && (
+        <div className="rounded-lg border overflow-hidden">
+          <div className="bg-muted/40 px-4 py-3 border-b">
+            <h2 className="text-sm font-semibold">Secured debt</h2>
+          </div>
+          <div className="p-4 grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+            <div>
+              <div className="text-muted-foreground text-xs">Secured debt declared</div>
+              <div className="font-medium">
+                {p.has_secured_property_debt === true
+                  ? "Yes"
+                  : p.has_secured_property_debt === false
+                    ? "None"
+                    : "Not declared"}
+              </div>
+            </div>
+            {(p.secured_property_debt_amount as number | null) != null && (
+              <div>
+                <div className="text-muted-foreground text-xs">Outstanding balance</div>
+                <div className="font-medium">{formatCurrency(p.secured_property_debt_amount as number)}</div>
+              </div>
+            )}
+            {(p.current_controlling_secured_debt_amount as number | null) != null && (
+              <div>
+                <div className="text-muted-foreground text-xs">Controlling debt basis</div>
+                <div className="font-medium">{formatCurrency(p.current_controlling_secured_debt_amount as number)}</div>
+              </div>
+            )}
+            {(p.max_accessible_cash_current as number | null) != null && (
+              <div>
+                <div className="text-muted-foreground text-xs">Max accessible cash</div>
+                <div className="font-medium">{formatCurrency(p.max_accessible_cash_current as number)}</div>
+              </div>
+            )}
+            {(p.secured_debt_basis_reason as string | null) && (
+              <div className="col-span-2">
+                <div className="text-muted-foreground text-xs">Basis reason</div>
+                <div className="font-medium">{p.secured_debt_basis_reason as string}</div>
+              </div>
+            )}
+          </div>
         </div>
+      )}
+
+      {/* ── Property admin metadata ── */}
+      <div className="rounded-lg border p-4 text-sm space-y-1">
         <div>
           <span className="text-muted-foreground">Owner:</span>{" "}
           <span className="font-mono text-xs break-all">{p.owner_user_id}</span>
-        </div>
-        <div>
-          <span className="text-muted-foreground">Address:</span>{" "}
-          {addressDisplay || "—"}
         </div>
         <div>
           <span className="text-muted-foreground">Created:</span>{" "}
@@ -716,17 +758,6 @@ export default async function AdminPropertyAuditPage({
                   : "No milestone — accepted/pending review banner"}
             </span>
           </div>
-          {linkedDeal && (
-            <div className="flex gap-2">
-              <span className="text-muted-foreground min-w-[120px]">Linked deal:</span>
-              <a
-                href={`/admin/deals/${linkedDeal.id}`}
-                className="underline text-muted-foreground hover:text-foreground text-xs"
-              >
-                View deal review →
-              </a>
-            </div>
-          )}
         </div>
       </div>
 
@@ -1130,15 +1161,6 @@ export default async function AdminPropertyAuditPage({
         </div>
       </div>
 
-      {/* ── Vendor review data (RentCast profile + AVM) ── */}
-      <AdminVendorReviewPanel
-        propertyId={propertyId}
-        initialSummary={vendorSummary}
-        lastProfileError={lastProfileError}
-        lastAvmError={lastAvmError}
-        initialProfileDetails={persistedProfileDetails}
-      />
-
       {/* ── ATTOM enhanced screening ── */}
       {/*
         Real ATTOM data integration: property detail + AVM fetched in parallel from
@@ -1167,30 +1189,6 @@ export default async function AdminPropertyAuditPage({
         eligibleCashCap={(p.current_fractpath_eligible_cash_cap as number | null) ?? null}
       />
 
-      {/* ── Mashvisor enrichment ── */}
-      {/*
-        Manual admin-only enrichment fetch from Mashvisor.
-        Does not auto-trigger; does not affect owner-facing surfaces.
-        Stored in property_enrichments (provider: mashvisor).
-        Requires MASHVISOR_API_KEY to be configured.
-      */}
-      <AdminMashvisorPanel
-        propertyId={propertyId}
-        hasAddress={!!(p.address_line1 && p.city && p.state)}
-        enrichment={currentEnrichment}
-        rentcastFacts={
-          persistedProfileDetails
-            ? rentcastProfileToFacts(
-                persistedProfileDetails,
-                currentProfileRun?.requested_at ?? null,
-              )
-            : null
-        }
-        rentcastFetchedAt={currentProfileRun?.requested_at ?? null}
-        rentcastRecordId={rentcastRecordId}
-        avm={adminPropertyAvm}
-        reviewedBasis={adminReviewedBasis}
-      />
 
       {/* ── Property record (RentCast full record) ── */}
       {adminPropertyRecord && (
@@ -1385,139 +1383,6 @@ export default async function AdminPropertyAuditPage({
         </div>
       </div>
 
-      {/* ── Linked deal ── */}
-      {/* Shows the downstream deal-eligibility impact of this property's valuation state.
-          Deposit/escalation actions are never surfaced here — they live in the section above. */}
-      <div className="rounded-lg border overflow-hidden">
-        <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b flex items-center gap-2 flex-wrap">
-          <span>Linked deal</span>
-          {linkedDeal?.triage_status && (() => {
-            const b = TRIAGE_BADGE[linkedDeal!.triage_status!];
-            return b ? (
-              <span className={`text-xs rounded-full px-2 py-0.5 font-normal ${b.cls}`}>
-                {b.label}
-              </span>
-            ) : null;
-          })()}
-          {linkedDeal && (
-            <a
-              href={`/admin/deals/${linkedDeal.id}`}
-              className="ml-auto text-xs underline text-muted-foreground hover:text-foreground font-normal"
-            >
-              Admin deal review →
-            </a>
-          )}
-        </div>
-        <div className="p-4 text-sm">
-          {!linkedDeal ? (
-            <p className="text-muted-foreground text-xs">
-              No accepted deal linked to this property yet.
-            </p>
-          ) : (
-            <div className="space-y-3">
-              <div className="space-y-0.5">
-                <div className="font-medium">{addressDisplay || "Address not available"}</div>
-                <div className="text-xs text-muted-foreground font-mono">
-                  Deal {linkedDeal.id.slice(0, 8)}…
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-x-6 gap-y-2">
-                <div>
-                  <div className="text-muted-foreground text-xs">Deal review status</div>
-                  <div className="font-medium">
-                    {linkedDeal.triage_status
-                      ? (TRIAGE_BADGE[linkedDeal.triage_status]?.label ?? linkedDeal.triage_status.replace(/_/g, " "))
-                      : <span className="text-muted-foreground">Accepted — pending review</span>}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground text-xs">Accepted</div>
-                  <div className="font-medium">{formatDate(linkedDeal.accepted_at)}</div>
-                </div>
-              </div>
-
-              {/* Deal eligibility context — derived from the shared AVM helper */}
-              {linkedDealAvmEligibility && (() => {
-                const { result } = linkedDealAvmEligibility;
-                type EligCtx = { label: string; cls: string; detail: string };
-                let ctx: EligCtx | null = null;
-                if (result === "blocked_pending_fmv") {
-                  ctx = {
-                    label: "Deal blocked — awaiting property valuation",
-                    cls: "bg-yellow-50 border-yellow-200 text-yellow-800",
-                    detail: linkedDealAvmEligibility.isFmvExpired
-                      ? "The verified AVM has expired. Deal-term eligibility cannot be assessed until a fresh AVM is run on this property."
-                      : "No verified AVM is on file. Deal-term eligibility is blocked until an AVM run completes.",
-                  };
-                } else if (result === "escalated_review_required") {
-                  ctx = {
-                    label: "Deal blocked — escalated valuation review required",
-                    cls: "bg-red-50 border-red-200 text-red-800",
-                    detail: `AVM deviation (${linkedDealAvmEligibility.deviationPct?.toFixed(1)}%) exceeds the ${DEVIATION_ESCALATION_THRESHOLD_PCT}% escalation threshold. Deal-term eligibility is blocked pending a stronger valuation review. Use the stronger valuation pathway above.`,
-                  };
-                } else if (result === "manual_review_required") {
-                  ctx = {
-                    label: "Deal review — admin acknowledgment required",
-                    cls: "bg-orange-50 border-orange-200 text-orange-800",
-                    detail: `AVM deviation (${linkedDealAvmEligibility.deviationPct?.toFixed(1)}%) requires admin acknowledgment on the deal review page before the deal can advance to ready for signatures.`,
-                  };
-                } else if (result === "ineligible_ltv") {
-                  ctx = {
-                    label: "Deal blocked — terms exceed LTV eligibility",
-                    cls: "bg-red-50 border-red-200 text-red-800",
-                    detail: `Proposed cash (${formatCurrency(linkedDealAvmEligibility.requestedCash)}) exceeds the maximum eligible amount (${formatCurrency(linkedDealAvmEligibility.maxEligibleCash)}) under the LTV policy. Deal terms must be revised or countered.`,
-                  };
-                } else if (result === "eligible") {
-                  ctx = {
-                    label: "Deal eligible for signatures",
-                    cls: "bg-green-50 border-green-200 text-green-800",
-                    detail: "Property valuation and deal terms both pass eligibility checks. The deal may be advanced to ready for signatures on the deal review page.",
-                  };
-                }
-                return ctx ? (
-                  <div className={`rounded-md border px-3 py-2.5 text-xs space-y-0.5 ${ctx.cls}`}>
-                    <div className="font-semibold">{ctx.label}</div>
-                    <div>{ctx.detail}</div>
-                  </div>
-                ) : null;
-              })()}
-
-              {linkedDeal.triage_reason_tags && linkedDeal.triage_reason_tags.length > 0 && (
-                <div>
-                  <div className="text-muted-foreground text-xs mb-1.5">Triage reason tags</div>
-                  <div className="flex flex-wrap gap-1">
-                    {linkedDeal.triage_reason_tags.map((tag) => (
-                      <span
-                        key={tag}
-                        className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-muted text-muted-foreground font-mono"
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="flex items-center gap-4 pt-1">
-                <a
-                  href="/admin/deals"
-                  className="text-xs underline text-muted-foreground hover:text-foreground"
-                >
-                  View triage queue →
-                </a>
-                <a
-                  href={`/admin/deals/${linkedDeal.id}`}
-                  className="text-xs underline text-muted-foreground hover:text-foreground"
-                >
-                  Go to deal review →
-                </a>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
       {/* ── Technical details (secondary) ── */}
       <details className="rounded-lg border overflow-hidden group">
         <summary className="bg-muted/40 px-4 py-2 text-sm font-medium cursor-pointer select-none flex items-center justify-between">
@@ -1650,20 +1515,6 @@ export default async function AdminPropertyAuditPage({
           </div>
         </div>
       </details>
-
-      {/* ── Admin verification controls ── */}
-      <div className="rounded-lg border overflow-hidden">
-        <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b">
-          Verification controls
-        </div>
-        <div className="p-4 space-y-3">
-          <AdminPropertyActions propertyId={propertyId} status={p.status} />
-          <AdminPropertyStatusControls
-            propertyId={propertyId}
-            currentStatus={p.status}
-          />
-        </div>
-      </div>
 
       {/* ── Underwriting snapshots ── */}
       {underwritingRows.length > 0 && (

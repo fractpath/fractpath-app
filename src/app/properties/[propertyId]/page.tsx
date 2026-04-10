@@ -436,7 +436,34 @@ export default async function PropertyDetailPage({ params }: PageProps) {
           />
         )}
 
-        {/* ── D. Base property data (normalized from RentCast) ── */}
+        {/* ── D. Secured debt summary — owner only ── */}
+        {row.has_secured_property_debt === true && (
+          <div className="rounded-lg border overflow-hidden">
+            <div className="bg-muted/40 px-4 py-3 border-b">
+              <h2 className="text-sm font-semibold">Secured debt</h2>
+            </div>
+            <div className="p-4 grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+              <div>
+                <div className="text-muted-foreground text-xs">Secured debt declared</div>
+                <div className="font-medium">Yes</div>
+              </div>
+              {row.secured_property_debt_amount != null && (
+                <div>
+                  <div className="text-muted-foreground text-xs">Outstanding balance</div>
+                  <div className="font-medium">
+                    {new Intl.NumberFormat("en-US", {
+                      style: "currency",
+                      currency: "USD",
+                      maximumFractionDigits: 0,
+                    }).format(row.secured_property_debt_amount)}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── E. Base property data (normalized from RentCast) ── */}
         {ownerPropertyRecord && (
           <PropertyRecordSections record={ownerPropertyRecord} audience="owner" />
         )}

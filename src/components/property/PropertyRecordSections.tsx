@@ -146,14 +146,14 @@ function OverviewTilesSection({ record }: { record: PropertyRecord }) {
 
 // ── Sections ──────────────────────────────────────────────────────────────────
 
-function PropertyDetailsSection({ record }: { record: PropertyRecord }) {
+function PropertyDetailsSection({ record, audience }: { record: PropertyRecord; audience: Audience }) {
   const rows: { label: string; value: string | null }[] = [
     record.county ? { label: "County", value: record.county } : null,
     record.subdivision ? { label: "Subdivision", value: record.subdivision } : null,
     record.zoning ? { label: "Zoning", value: record.zoning } : null,
     record.apn ? { label: "Parcel number (APN)", value: record.apn } : null,
-    record.assessorId ? { label: "Assessor ID", value: record.assessorId } : null,
-    record.legalDescription
+    audience !== "buyer" && record.assessorId ? { label: "Assessor ID", value: record.assessorId } : null,
+    audience !== "buyer" && record.legalDescription
       ? { label: "Legal description", value: record.legalDescription }
       : null,
     record.ownerOccupied != null
@@ -485,7 +485,7 @@ export function PropertyRecordSections({ record, audience }: Props) {
       {hasOverview && <OverviewTilesSection record={record} />}
 
       {/* Property details */}
-      {hasPropertyDetails && <PropertyDetailsSection record={record} />}
+      {hasPropertyDetails && <PropertyDetailsSection record={record} audience={audience} />}
 
       {/* Home features */}
       {hasFeatures && record.features && (
