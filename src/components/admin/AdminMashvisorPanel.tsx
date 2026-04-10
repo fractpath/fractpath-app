@@ -4,7 +4,11 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { MashvisorNormalizedSummary, MashvisorImagesPayload } from "@/lib/mashvisor/types";
 import { EnrichedPropertyPreview } from "@/components/property/EnrichedPropertyPreview";
-import type { PropertyFacts } from "@/lib/property/propertyFacts";
+import type {
+  PropertyFacts,
+  PropertyAvm,
+  PropertyReviewedBasis,
+} from "@/lib/property/propertyFacts";
 
 type Enrichment = {
   id: string;
@@ -20,16 +24,15 @@ type Props = {
   propertyId: string;
   hasAddress: boolean;
   enrichment: Enrichment | null;
-  /**
-   * Provider-agnostic facts from RentCast property_review_runs.
-   * When present, overrides Mashvisor summary fields (beds/baths/sqft/address/type)
-   * in the preview and is surfaced as a "Facts source: RentCast" row in admin metadata.
-   */
+  /** Provider-agnostic facts from RentCast property_review_runs. */
   rentcastFacts?: PropertyFacts | null;
+  /** RentCast AVM estimate + range + confidence. */
+  avm?: PropertyAvm | null;
+  /** Reviewed/controlling FMV basis (ATTOM, manual appraisal, etc.). */
+  reviewedBasis?: PropertyReviewedBasis | null;
   /**
-   * Label shown for the numeric value estimate in the property preview stats row.
-   * Should match the active valuation lane on this property (e.g. "Reviewed value",
-   * "Appraised value"). Defaults to "Source value".
+   * @deprecated Kept for backward compat — no longer rendered in the preview.
+   * Pass `avm` and `reviewedBasis` instead.
    */
   valuationLabel?: string;
 };
@@ -48,7 +51,14 @@ function Spinner() {
   );
 }
 
-export function AdminMashvisorPanel({ propertyId, hasAddress, enrichment, rentcastFacts, valuationLabel = "Source value" }: Props) {
+export function AdminMashvisorPanel({
+  propertyId,
+  hasAddress,
+  enrichment,
+  rentcastFacts,
+  avm,
+  reviewedBasis,
+}: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -146,7 +156,7 @@ export function AdminMashvisorPanel({ propertyId, hasAddress, enrichment, rentca
         )}
 
         {/* Shared enriched property preview */}
-        {(rentcastFacts || (summary && images)) ? (
+        {(rentcastFacts || avm || (summary && images)) ? (
           <EnrichedPropertyPreview
             audience="admin"
             enrichment={{
@@ -156,8 +166,9 @@ export function AdminMashvisorPanel({ propertyId, hasAddress, enrichment, rentca
               providerRecordId: current?.provider_record_id ?? null,
               imageCount: images?.image_urls?.length ?? 0,
               facts: rentcastFacts ?? undefined,
+              avm: avm ?? null,
+              reviewedBasis: reviewedBasis ?? null,
             }}
-            valuationLabel={valuationLabel}
           />
         ) : !loading && current?.status !== "failed" ? (
           <div className="space-y-2">

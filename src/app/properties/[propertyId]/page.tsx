@@ -9,9 +9,12 @@ import type { PropertyWorkflowState } from "@/components/properties/PropertyDeta
 import type { LiveIneligiblePhase } from "@/components/properties/PropertyValuationSections";
 import type { PropertyAuditEntry } from "@/components/properties/PropertyActivityTimeline";
 import type { MashvisorImagesPayload } from "@/lib/mashvisor/types";
-import type { EnrichedPreviewData } from "@/components/property/EnrichedPropertyPreview";
+import type { EnrichedPreviewData, PropertyAvm } from "@/components/property/EnrichedPropertyPreview";
 import type { NormalizedPropertyProfile } from "@/lib/property-review/providers/rentcast/types";
-import { rentcastProfileToFacts } from "@/lib/property/propertyFacts";
+import {
+  rentcastProfileToFacts,
+  reviewedBasisFromProperty,
+} from "@/lib/property/propertyFacts";
 
 export const runtime = "nodejs";
 
@@ -71,14 +74,24 @@ export default async function PropertyDetailPage({ params }: PageProps) {
   // Fetch AVM summary for the property (non-fatal)
   let rentcastFmv: number | null = null;
   let rentcastProvider: string | null = null;
+  let rentcastAvm: PropertyAvm | null = null;
   try {
     const { data: summary } = await (svc.from("property_review_summary") as any)
-      .select("fmv_provider, fmv_amount")
+      .select("fmv_provider, fmv_amount, fmv_low, fmv_high, fmv_confidence, fmv_fetched_at")
       .eq("property_id", propertyId)
       .maybeSingle();
     if (summary) {
       rentcastFmv = summary.fmv_amount ?? null;
       rentcastProvider = summary.fmv_provider ?? null;
+      if (summary.fmv_amount != null) {
+        rentcastAvm = {
+          estimate: summary.fmv_amount,
+          low: summary.fmv_low ?? null,
+          high: summary.fmv_high ?? null,
+          confidence: summary.fmv_confidence ?? null,
+          fetchedAt: summary.fmv_fetched_at ?? null,
+        };
+      }
     }
   } catch {
     // non-fatal
@@ -270,6 +283,12 @@ export default async function PropertyDetailPage({ params }: PageProps) {
     // non-fatal — proceed without RentCast facts
   }
 
+  // Build reviewed/controlling basis for the preview card
+  const ownerReviewedBasis = reviewedBasisFromProperty(
+    row.latest_verified_fmv ?? null,
+    row.fmv_verification_source ?? null,
+  );
+
   // Fetch Mashvisor enrichment for images (non-fatal — fallback image source)
   let ownerEnrichment: EnrichedPreviewData | null = null;
   try {
@@ -283,23 +302,26 @@ export default async function PropertyDetailPage({ params }: PageProps) {
 
     const images = enrichmentRow?.images_payload as MashvisorImagesPayload | null ?? null;
 
-    if (rentcastProfileFacts || images) {
+    if (rentcastProfileFacts || rentcastAvm || images) {
       ownerEnrichment = {
-        // summary retained only for backward-compat value_estimate display
         summary: enrichmentRow?.summary_payload ?? null,
         images: images ?? null,
         fetchedAt: enrichmentRow?.fetched_at ?? null,
         facts: rentcastProfileFacts ?? undefined,
+        avm: rentcastAvm,
+        reviewedBasis: ownerReviewedBasis,
       };
     }
   } catch {
     // non-fatal — proceed without enrichment
   }
 
-  // If Mashvisor query failed but we have RentCast facts, still show them
-  if (!ownerEnrichment && rentcastProfileFacts) {
+  // If Mashvisor query failed but we have RentCast facts/AVM, still show them
+  if (!ownerEnrichment && (rentcastProfileFacts || rentcastAvm)) {
     ownerEnrichment = {
-      facts: rentcastProfileFacts,
+      facts: rentcastProfileFacts ?? undefined,
+      avm: rentcastAvm,
+      reviewedBasis: ownerReviewedBasis,
     };
   }
 

@@ -18,7 +18,11 @@ import { AdminVendorReviewPanel } from "@/components/admin/AdminVendorReviewPane
 import { AdminAttomScreeningPanel } from "@/components/admin/AdminAttomScreeningPanel";
 import { AdminDebtBasisPanel } from "@/components/admin/AdminDebtBasisPanel";
 import { AdminMashvisorPanel } from "@/components/admin/AdminMashvisorPanel";
-import { rentcastProfileToFacts } from "@/lib/property/propertyFacts";
+import {
+  rentcastProfileToFacts,
+  rentcastAvmToAvm,
+  reviewedBasisFromProperty,
+} from "@/lib/property/propertyFacts";
 import { AdminEscalationSimPanel } from "@/components/admin/AdminEscalationSimPanel";
 import { AdminManualAppraisalSimPanel } from "@/components/admin/AdminManualAppraisalSimPanel";
 import { AdminPropertyClosingPanel } from "@/components/admin/AdminPropertyClosingPanel";
@@ -29,6 +33,7 @@ import {
 } from "@/lib/workflow/milestones";
 import { computeLtvPolicy } from "@/lib/ltvPolicy";
 import type { NormalizedPropertyProfile } from "@/lib/property-review/providers/rentcast";
+import type { NormalizedAvm } from "@/lib/property-review/providers/rentcast/types";
 import {
   computeAvmEligibility,
   extractAvmDealTerms,
@@ -349,6 +354,25 @@ export default async function AdminPropertyAuditPage({
     ) ?? null;
   const persistedProfileDetails =
     (currentProfileRun?.normalized_payload as NormalizedPropertyProfile | null) ?? null;
+
+  // Build PropertyAvm from the latest completed AVM run (non-fatal path — null when absent)
+  const currentAvmRun =
+    recentRuns.find(
+      (r) => r.artifact_type === "avm" && r.is_current && r.status === "completed",
+    ) ?? null;
+  const adminPropertyAvm =
+    currentAvmRun?.normalized_payload
+      ? rentcastAvmToAvm(
+          currentAvmRun.normalized_payload as NormalizedAvm,
+          currentAvmRun.requested_at ?? null,
+        )
+      : null;
+
+  // Build reviewed/controlling basis for the preview card
+  const adminReviewedBasis = reviewedBasisFromProperty(
+    (p.latest_verified_fmv as number | null) ?? null,
+    (p.fmv_verification_source as string | null) ?? null,
+  );
 
   // Mint short-lived per-doc tokens (10 minutes) for ALL doc types
   const docs: DocRow[] = ((docsRes.data ?? []) as any[]).map((d) => ({
@@ -1058,7 +1082,8 @@ export default async function AdminPropertyAuditPage({
               )
             : null
         }
-        valuationLabel={valueLabelFromValuationLane(adminValuationLane.label)}
+        avm={adminPropertyAvm}
+        reviewedBasis={adminReviewedBasis}
       />
 
       {/* ── Debt basis management ── */}

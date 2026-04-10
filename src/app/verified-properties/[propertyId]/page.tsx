@@ -3,9 +3,12 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { EnrichedPropertyPreview } from "@/components/property/EnrichedPropertyPreview";
 import type { MashvisorImagesPayload } from "@/lib/mashvisor/types";
-import type { EnrichedPreviewData } from "@/components/property/EnrichedPropertyPreview";
+import type { EnrichedPreviewData, PropertyAvm } from "@/components/property/EnrichedPropertyPreview";
 import type { NormalizedPropertyProfile } from "@/lib/property-review/providers/rentcast/types";
-import { rentcastProfileToFacts } from "@/lib/property/propertyFacts";
+import {
+  rentcastProfileToFacts,
+  reviewedBasisFromProperty,
+} from "@/lib/property/propertyFacts";
 import Link from "next/link";
 import { PropertyStatusLanes } from "@/components/properties/PropertyStatusLanes";
 import {
@@ -137,6 +140,33 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
     // non-fatal
   }
 
+  // Fetch RentCast AVM summary (non-fatal — used in value section)
+  let publicAvm: PropertyAvm | null = null;
+  try {
+    const { data: avmSummary } = await (supabase.from("property_review_summary") as any)
+      .select("fmv_amount, fmv_low, fmv_high, fmv_confidence, fmv_fetched_at")
+      .eq("property_id", propertyId)
+      .maybeSingle();
+    if (avmSummary?.fmv_amount != null) {
+      publicAvm = {
+        estimate: avmSummary.fmv_amount,
+        low: avmSummary.fmv_low ?? null,
+        high: avmSummary.fmv_high ?? null,
+        confidence: avmSummary.fmv_confidence ?? null,
+        fetchedAt: avmSummary.fmv_fetched_at ?? null,
+      };
+    }
+  } catch {
+    // non-fatal
+  }
+
+  // Build reviewed basis — generic label for buyer (hides internal source name)
+  const publicReviewedBasis = reviewedBasisFromProperty(
+    (row.latest_verified_fmv as number | null) ?? null,
+    (row.fmv_verification_source as string | null) ?? null,
+    "Reviewed estimate",
+  );
+
   // Fetch Mashvisor enrichment for images (non-fatal, audience=buyer — hides provider IDs)
   let enrichment: EnrichedPreviewData | null = null;
   try {
@@ -151,22 +181,28 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
 
     const images = enrichmentRow?.images_payload as MashvisorImagesPayload | null ?? null;
 
-    if (rentcastProfileFacts || images) {
+    if (rentcastProfileFacts || publicAvm || images) {
       enrichment = {
-        // summary retained for backward-compat value_estimate; providerRecordId intentionally omitted for buyer
+        // providerRecordId intentionally omitted for buyer audience
         summary: enrichmentRow?.summary_payload ?? null,
         images: images ?? null,
         fetchedAt: enrichmentRow?.fetched_at ?? null,
         facts: rentcastProfileFacts ?? undefined,
+        avm: publicAvm,
+        reviewedBasis: publicReviewedBasis,
       };
     }
   } catch {
     // non-fatal — fall through to simplified view
   }
 
-  // If Mashvisor query failed but we have RentCast facts, still show them
-  if (!enrichment && rentcastProfileFacts) {
-    enrichment = { facts: rentcastProfileFacts };
+  // If Mashvisor query failed but we have RentCast facts/AVM, still show them
+  if (!enrichment && (rentcastProfileFacts || publicAvm)) {
+    enrichment = {
+      facts: rentcastProfileFacts ?? undefined,
+      avm: publicAvm,
+      reviewedBasis: publicReviewedBasis,
+    };
   }
 
   return (
