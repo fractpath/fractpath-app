@@ -26,6 +26,10 @@ type Props = {
   enrichment: Enrichment | null;
   /** Provider-agnostic facts from RentCast property_review_runs. */
   rentcastFacts?: PropertyFacts | null;
+  /** Timestamp of the current RentCast property_profile run (requested_at). */
+  rentcastFetchedAt?: string | null;
+  /** RentCast provider property ID (raw_payload.id). */
+  rentcastRecordId?: string | null;
   /** RentCast AVM estimate + range + confidence. */
   avm?: PropertyAvm | null;
   /** Reviewed/controlling FMV basis (ATTOM, manual appraisal, etc.). */
@@ -56,6 +60,8 @@ export function AdminMashvisorPanel({
   hasAddress,
   enrichment,
   rentcastFacts,
+  rentcastFetchedAt,
+  rentcastRecordId,
   avm,
   reviewedBasis,
 }: Props) {
@@ -105,6 +111,12 @@ export function AdminMashvisorPanel({
     }
   }
 
+  // Metadata priority: RentCast is the facts source; Mashvisor is image-only fallback.
+  // fetchedAt and providerRecordId reflect the current RentCast profile run when available.
+  const effectiveFetchedAt = rentcastFetchedAt ?? rentcastFacts?.fetchedAt ?? current?.fetched_at ?? null;
+  const effectiveRecordId = rentcastRecordId ?? current?.provider_record_id ?? null;
+  const factsSourceLabel = rentcastFacts ? "RentCast" : completed ? "Mashvisor" : null;
+
   return (
     <div className="rounded-lg border overflow-hidden">
 
@@ -112,9 +124,12 @@ export function AdminMashvisorPanel({
       <div className="bg-muted/40 px-4 py-2 border-b flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">Property Preview</span>
-          <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-            Mashvisor
-          </span>
+          {factsSourceLabel && (
+            <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+              {factsSourceLabel}
+              {rentcastFacts && completed && " · Mashvisor images"}
+            </span>
+          )}
         </div>
 
         {hasAddress && (
@@ -162,8 +177,11 @@ export function AdminMashvisorPanel({
             enrichment={{
               summary: summary ?? null,
               images: images ?? null,
-              fetchedAt: current?.fetched_at ?? null,
-              providerRecordId: current?.provider_record_id ?? null,
+              // fetchedAt: RentCast profile run timestamp takes priority over
+              // Mashvisor enrichment row timestamp.
+              fetchedAt: effectiveFetchedAt,
+              // providerRecordId: RentCast record ID takes priority over Mashvisor property ID.
+              providerRecordId: effectiveRecordId,
               imageCount: images?.image_urls?.length ?? 0,
               facts: rentcastFacts ?? undefined,
               avm: avm ?? null,

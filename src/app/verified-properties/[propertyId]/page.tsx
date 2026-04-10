@@ -10,7 +10,10 @@ import {
   reviewedBasisFromProperty,
 } from "@/lib/property/propertyFacts";
 import type { PropertyRecord } from "@/lib/property/propertyRecord";
-import { rentcastRecordToPropertyRecord } from "@/lib/property/propertyRecord";
+import {
+  rentcastRecordToPropertyRecord,
+  normalizedProfileToRecord,
+} from "@/lib/property/propertyRecord";
 import { PropertyRecordSections } from "@/components/property/PropertyRecordSections";
 import type { RentcastPropertyRecord } from "@/lib/property-review/providers/rentcast/types";
 import Link from "next/link";
@@ -144,6 +147,11 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
     if (profileRun?.raw_payload) {
       publicPropertyRecord = rentcastRecordToPropertyRecord(
         profileRun.raw_payload as RentcastPropertyRecord,
+        profileRun.requested_at ?? null,
+      );
+    } else if (profileRun?.normalized_payload) {
+      publicPropertyRecord = normalizedProfileToRecord(
+        profileRun.normalized_payload as NormalizedPropertyProfile,
         profileRun.requested_at ?? null,
       );
     }

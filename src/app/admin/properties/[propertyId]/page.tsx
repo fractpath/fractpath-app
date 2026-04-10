@@ -23,7 +23,10 @@ import {
   rentcastAvmToAvm,
   reviewedBasisFromProperty,
 } from "@/lib/property/propertyFacts";
-import { rentcastRecordToPropertyRecord } from "@/lib/property/propertyRecord";
+import {
+  rentcastRecordToPropertyRecord,
+  normalizedProfileToRecord,
+} from "@/lib/property/propertyRecord";
 import { PropertyRecordSections } from "@/components/property/PropertyRecordSections";
 import type { RentcastPropertyRecord } from "@/lib/property-review/providers/rentcast/types";
 import { AdminEscalationSimPanel } from "@/components/admin/AdminEscalationSimPanel";
@@ -377,13 +380,25 @@ export default async function AdminPropertyAuditPage({
     (p.fmv_verification_source as string | null) ?? null,
   );
 
-  // Build property record for the detailed sections panel
-  const adminPropertyRecord =
+  // Build property record for the detailed sections panel.
+  // raw_payload is preferred (verbatim API response); normalized_payload is the
+  // fallback for runs that stored normalized data but not the raw response.
+  const adminPropertyRecord = currentProfileRun?.raw_payload
+    ? rentcastRecordToPropertyRecord(
+        currentProfileRun.raw_payload as RentcastPropertyRecord,
+        currentProfileRun.requested_at ?? null,
+      )
+    : currentProfileRun?.normalized_payload
+    ? normalizedProfileToRecord(
+        currentProfileRun.normalized_payload as NormalizedPropertyProfile,
+        currentProfileRun.requested_at ?? null,
+      )
+    : null;
+
+  // RentCast provider record ID (stored in raw_payload.id when available)
+  const rentcastRecordId: string | null =
     currentProfileRun?.raw_payload
-      ? rentcastRecordToPropertyRecord(
-          currentProfileRun.raw_payload as RentcastPropertyRecord,
-          currentProfileRun.requested_at ?? null,
-        )
+      ? ((currentProfileRun.raw_payload as any)?.id ?? null)
       : null;
 
   // Mint short-lived per-doc tokens (10 minutes) for ALL doc types
@@ -1094,6 +1109,8 @@ export default async function AdminPropertyAuditPage({
               )
             : null
         }
+        rentcastFetchedAt={currentProfileRun?.requested_at ?? null}
+        rentcastRecordId={rentcastRecordId}
         avm={adminPropertyAvm}
         reviewedBasis={adminReviewedBasis}
       />
