@@ -38,12 +38,61 @@ function normalizeComparable(comp: RentcastAvmComparable) {
 export function normalizeRentcastPropertyProfile(
   record: RentcastPropertyRecord | null | undefined,
 ): NormalizedPropertyProfile {
+  // Normalize taxAssessments: Record<year, entry> → sorted array
+  const taxAssessments: NormalizedPropertyProfile["taxAssessments"] = [];
+  if (record?.taxAssessments) {
+    for (const entry of Object.values(record.taxAssessments)) {
+      if (entry.year != null) {
+        taxAssessments.push({
+          year: entry.year,
+          value: entry.value ?? null,
+          land: entry.land ?? null,
+          improvements: entry.improvements ?? null,
+        });
+      }
+    }
+    taxAssessments.sort((a, b) => b.year - a.year);
+  }
+
+  // Normalize propertyTaxes: Record<year, entry> → sorted array
+  const propertyTaxes: NormalizedPropertyProfile["propertyTaxes"] = [];
+  if (record?.propertyTaxes) {
+    for (const entry of Object.values(record.propertyTaxes)) {
+      if (entry.year != null) {
+        propertyTaxes.push({
+          year: entry.year,
+          total: entry.total ?? null,
+        });
+      }
+    }
+    propertyTaxes.sort((a, b) => b.year - a.year);
+  }
+
+  // Normalize history: Record<date, entry> → sorted array (newest first)
+  const saleHistory: NormalizedPropertyProfile["saleHistory"] = [];
+  if (record?.history) {
+    for (const [date, entry] of Object.entries(record.history)) {
+      saleHistory.push({
+        date,
+        event: entry.event ?? null,
+        price: entry.price ?? null,
+        listingType: entry.listingType ?? null,
+        daysOnMarket: entry.daysOnMarket ?? null,
+      });
+    }
+    saleHistory.sort(
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+    );
+  }
+
   return {
     address: {
       line1: record?.addressLine1 ?? null,
+      line2: record?.addressLine2 ?? null,
       city: record?.city ?? null,
       state: record?.state ?? null,
       zip: record?.zipCode ?? null,
+      county: record?.county ?? null,
       formatted: record?.formattedAddress ?? null,
     },
     propertyType: record?.propertyType ?? null,
@@ -56,9 +105,38 @@ export function normalizeRentcastPropertyProfile(
     lastSaleDate: record?.lastSaleDate ?? null,
     lastSalePrice: record?.lastSalePrice ?? null,
     apn: record?.apn ?? null,
+    assessorId: record?.assessorID ?? null,
+    legalDescription: record?.legalDescription ?? null,
+    subdivision: record?.subdivision ?? null,
+    zoning: record?.zoning ?? null,
     county: record?.county ?? null,
     latitude: record?.latitude ?? null,
     longitude: record?.longitude ?? null,
+    hoa: record?.hoa
+      ? {
+          fee: record.hoa.fee ?? null,
+          type: record.hoa.type ?? null,
+          frequency: record.hoa.frequency ?? null,
+        }
+      : null,
+    features: record?.features
+      ? {
+          architectureType: record.features.architectureType ?? null,
+          hasCooling: record.features.cooling ?? null,
+          coolingType: record.features.coolingType ?? null,
+          exteriorType: record.features.exteriorType ?? null,
+          hasGarage: record.features.garage ?? null,
+          garageType: record.features.garageType ?? null,
+          hasHeating: record.features.heating ?? null,
+          heatingType: record.features.heatingType ?? null,
+          hasPool: record.features.pool ?? null,
+          roofType: record.features.roofType ?? null,
+          unitCount: record.features.unitCount ?? null,
+        }
+      : null,
+    taxAssessments: taxAssessments.length > 0 ? taxAssessments : null,
+    propertyTaxes: propertyTaxes.length > 0 ? propertyTaxes : null,
+    saleHistory: saleHistory.length > 0 ? saleHistory : null,
   };
 }
 

@@ -23,6 +23,9 @@ import {
   rentcastAvmToAvm,
   reviewedBasisFromProperty,
 } from "@/lib/property/propertyFacts";
+import { rentcastRecordToPropertyRecord } from "@/lib/property/propertyRecord";
+import { PropertyRecordSections } from "@/components/property/PropertyRecordSections";
+import type { RentcastPropertyRecord } from "@/lib/property-review/providers/rentcast/types";
 import { AdminEscalationSimPanel } from "@/components/admin/AdminEscalationSimPanel";
 import { AdminManualAppraisalSimPanel } from "@/components/admin/AdminManualAppraisalSimPanel";
 import { AdminPropertyClosingPanel } from "@/components/admin/AdminPropertyClosingPanel";
@@ -373,6 +376,15 @@ export default async function AdminPropertyAuditPage({
     (p.latest_verified_fmv as number | null) ?? null,
     (p.fmv_verification_source as string | null) ?? null,
   );
+
+  // Build property record for the detailed sections panel
+  const adminPropertyRecord =
+    currentProfileRun?.raw_payload
+      ? rentcastRecordToPropertyRecord(
+          currentProfileRun.raw_payload as RentcastPropertyRecord,
+          currentProfileRun.requested_at ?? null,
+        )
+      : null;
 
   // Mint short-lived per-doc tokens (10 minutes) for ALL doc types
   const docs: DocRow[] = ((docsRes.data ?? []) as any[]).map((d) => ({
@@ -1085,6 +1097,17 @@ export default async function AdminPropertyAuditPage({
         avm={adminPropertyAvm}
         reviewedBasis={adminReviewedBasis}
       />
+
+      {/* ── Property record (RentCast full record) ── */}
+      {adminPropertyRecord && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 px-1">
+            <h2 className="text-sm font-semibold">Property record</h2>
+            <span className="text-[11px] text-muted-foreground">RentCast</span>
+          </div>
+          <PropertyRecordSections record={adminPropertyRecord} audience="admin" />
+        </div>
+      )}
 
       {/* ── Debt basis management ── */}
       {/*
