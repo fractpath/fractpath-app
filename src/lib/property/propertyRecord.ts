@@ -42,14 +42,22 @@ export type PropertyRecord = {
     architectureType: string | null;
     exteriorType: string | null;
     roofType: string | null;
+    foundationType: string | null;
     hasHeating: boolean | null;
     heatingType: string | null;
     hasCooling: boolean | null;
     coolingType: string | null;
+    hasFireplace: boolean | null;
+    fireplaceType: string | null;
     hasGarage: boolean | null;
+    garageSpaces: number | null;
     garageType: string | null;
     hasPool: boolean | null;
+    poolType: string | null;
+    floorCount: number | null;
+    roomCount: number | null;
     unitCount: number | null;
+    viewType: string | null;
   } | null;
 
   lastSaleDate: string | null;
@@ -167,14 +175,22 @@ export function rentcastRecordToPropertyRecord(
           architectureType: raw.features.architectureType ?? null,
           exteriorType: raw.features.exteriorType ?? null,
           roofType: raw.features.roofType ?? null,
+          foundationType: raw.features.foundationType ?? null,
           hasHeating: raw.features.heating ?? null,
           heatingType: raw.features.heatingType ?? null,
           hasCooling: raw.features.cooling ?? null,
           coolingType: raw.features.coolingType ?? null,
+          hasFireplace: raw.features.fireplace ?? null,
+          fireplaceType: raw.features.fireplaceType ?? null,
           hasGarage: raw.features.garage ?? null,
+          garageSpaces: raw.features.garageSpaces ?? null,
           garageType: raw.features.garageType ?? null,
           hasPool: raw.features.pool ?? null,
+          poolType: raw.features.poolType ?? null,
+          floorCount: raw.features.floorCount ?? null,
+          roomCount: raw.features.roomCount ?? null,
           unitCount: raw.features.unitCount ?? null,
+          viewType: raw.features.viewType ?? null,
         }
       : null,
     lastSaleDate: raw.lastSaleDate ?? null,

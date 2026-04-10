@@ -11,13 +11,21 @@ export type RentcastPropertyFeatures = {
   cooling?: boolean | null;
   coolingType?: string | null;
   exteriorType?: string | null;
+  fireplace?: boolean | null;
+  fireplaceType?: string | null;
+  floorCount?: number | null;
+  foundationType?: string | null;
   garage?: boolean | null;
+  garageSpaces?: number | null;
   garageType?: string | null;
   heating?: boolean | null;
   heatingType?: string | null;
   pool?: boolean | null;
+  poolType?: string | null;
+  roomCount?: number | null;
   roofType?: string | null;
   unitCount?: number | null;
+  viewType?: string | null;
 };
 
 export type RentcastTaxAssessmentEntry = {
@@ -136,13 +144,21 @@ export type NormalizedPropertyProfile = {
     hasCooling: boolean | null;
     coolingType: string | null;
     exteriorType: string | null;
+    hasFireplace: boolean | null;
+    fireplaceType: string | null;
+    floorCount: number | null;
+    foundationType: string | null;
     hasGarage: boolean | null;
+    garageSpaces: number | null;
     garageType: string | null;
     hasHeating: boolean | null;
     heatingType: string | null;
     hasPool: boolean | null;
+    poolType: string | null;
+    roomCount: number | null;
     roofType: string | null;
     unitCount: number | null;
+    viewType: string | null;
   } | null;
   taxAssessments?: Array<{
     year: number;

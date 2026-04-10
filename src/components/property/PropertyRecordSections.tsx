@@ -126,6 +126,9 @@ function HomeFeaturesSection({ features }: { features: NonNullable<PropertyRecor
       ? { label: "Exterior", value: capitalize(features.exteriorType) }
       : null,
     features.roofType ? { label: "Roof type", value: capitalize(features.roofType) } : null,
+    features.foundationType
+      ? { label: "Foundation", value: capitalize(features.foundationType) }
+      : null,
     features.heatingType || features.hasHeating != null
       ? {
           label: "Heating",
@@ -142,19 +145,42 @@ function HomeFeaturesSection({ features }: { features: NonNullable<PropertyRecor
             : fmtBool(features.hasCooling),
         }
       : null,
-    features.garageType || features.hasGarage != null
+    features.fireplaceType || features.hasFireplace != null
       ? {
-          label: "Garage",
-          value: features.garageType
-            ? capitalize(features.garageType)
-            : fmtBool(features.hasGarage),
+          label: "Fireplace",
+          value: features.fireplaceType
+            ? capitalize(features.fireplaceType)
+            : fmtBool(features.hasFireplace),
         }
       : null,
-    features.hasPool != null
-      ? { label: "Pool", value: fmtBool(features.hasPool) }
+    features.garageType || features.hasGarage != null || features.garageSpaces != null
+      ? {
+          label: "Garage",
+          value: [
+            features.garageType ? capitalize(features.garageType) : features.hasGarage != null ? fmtBool(features.hasGarage) : null,
+            features.garageSpaces != null ? `${features.garageSpaces} space${features.garageSpaces !== 1 ? "s" : ""}` : null,
+          ]
+            .filter(Boolean)
+            .join(", ") || "—",
+        }
+      : null,
+    features.poolType || features.hasPool != null
+      ? {
+          label: "Pool",
+          value: features.poolType ? capitalize(features.poolType) : fmtBool(features.hasPool),
+        }
+      : null,
+    features.floorCount != null
+      ? { label: "Floors", value: String(features.floorCount) }
+      : null,
+    features.roomCount != null
+      ? { label: "Rooms", value: String(features.roomCount) }
       : null,
     features.unitCount != null
       ? { label: "Units", value: String(features.unitCount) }
+      : null,
+    features.viewType
+      ? { label: "View", value: capitalize(features.viewType) }
       : null,
   ].filter(Boolean) as { label: string; value: string }[];
 
