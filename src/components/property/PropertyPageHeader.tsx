@@ -1,38 +1,4 @@
-import type { ReactNode } from "react";
-
-// ── Inline badge helper with accessible tooltip ────────────────────────────────
-
-function Badge({
-  cls,
-  tooltip,
-  children,
-}: {
-  cls: string;
-  tooltip?: string;
-  children: ReactNode;
-}) {
-  return (
-    <span className="relative group inline-flex">
-      <span
-        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium border cursor-default select-none ${cls}`}
-        tabIndex={tooltip ? 0 : undefined}
-        title={tooltip}
-      >
-        {children}
-      </span>
-
-      {tooltip && (
-        <span
-          role="tooltip"
-          className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 w-56 rounded bg-gray-900 px-2.5 py-1.5 text-xs text-white shadow-lg opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-150 whitespace-normal leading-snug"
-        >
-          {tooltip}
-          <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
-        </span>
-      )}
-    </span>
-  );
-}
+import { StatusBadge } from "@/components/property/StatusBadge";
 
 // ── Check SVG ─────────────────────────────────────────────────────────────────
 
@@ -82,8 +48,7 @@ const STATUS_BADGE: Record<
   verified: {
     label: "Verified",
     hint: "Property ownership and core records have been verified.",
-    className:
-      "bg-emerald-100 text-emerald-800 border-emerald-200",
+    className: "bg-emerald-100 text-emerald-800 border-emerald-200",
   },
   unverified: {
     label: "Unverified",
@@ -164,36 +129,36 @@ export function PropertyPageHeader({
 
       <div className="flex flex-wrap items-center gap-2">
         {/* Status badge */}
-        <Badge cls={badge.className} tooltip={badge.hint}>
+        <StatusBadge className={badge.className} tooltip={badge.hint}>
           {badge.label}
-        </Badge>
+        </StatusBadge>
 
         {/* Approved for participation */}
         {isParticipationApproved && (
-          <Badge
-            cls="bg-emerald-100 text-emerald-800 border-emerald-200"
+          <StatusBadge
+            className="bg-emerald-100 text-emerald-800 border-emerald-200"
             tooltip="This property currently meets participation requirements."
           >
             <CheckIcon />
             Approved for participation
-          </Badge>
+          </StatusBadge>
         )}
 
         {/* Owner Verified */}
         {showOwnerVerified && (
-          <Badge
-            cls="bg-emerald-100 text-emerald-800 border-emerald-200"
+          <StatusBadge
+            className="bg-emerald-100 text-emerald-800 border-emerald-200"
             tooltip="Homeowner identity has been confirmed."
           >
             <CheckIcon />
             Owner Verified
-          </Badge>
+          </StatusBadge>
         )}
 
         {/* Reviewed valuation basis / appraisal */}
         {showAppraisalBadge && !appraisalExpired && (
-          <Badge
-            cls={
+          <StatusBadge
+            className={
               appraisalUnderReview
                 ? "bg-blue-50 text-blue-800 border-blue-200"
                 : "bg-violet-100 text-violet-800 border-violet-200"
@@ -202,16 +167,16 @@ export function PropertyPageHeader({
           >
             <AppraisalIcon />
             {appraisalBadgeLabel ?? "Reviewed valuation basis"}
-          </Badge>
+          </StatusBadge>
         )}
 
         {appraisalExpired && (
-          <Badge
-            cls="bg-orange-100 text-orange-800 border-orange-200"
+          <StatusBadge
+            className="bg-orange-100 text-orange-800 border-orange-200"
             tooltip="The reviewed valuation basis has expired and requires renewal."
           >
             Appraisal expired
-          </Badge>
+          </StatusBadge>
         )}
 
         {/* Valid-until hint */}

@@ -1,4 +1,5 @@
 import type { StatusLane, LaneVariant } from "@/lib/property/statusLanes";
+import { StatusBadge } from "@/components/property/StatusBadge";
 
 type Props = {
   participation: StatusLane;
@@ -44,13 +45,13 @@ function Lane({
       <span className="text-xs text-muted-foreground min-w-[120px]">
         {laneLabel}
       </span>
-      <span
-        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${BADGE_CLS[lane.variant]}`}
-        title={lane.tooltip}
+      <StatusBadge
+        className={BADGE_CLS[lane.variant]}
+        tooltip={lane.tooltip}
       >
         {lane.label}
         <InfoIcon />
-      </span>
+      </StatusBadge>
     </div>
   );
 }
