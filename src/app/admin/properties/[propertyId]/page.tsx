@@ -48,8 +48,10 @@ import {
 } from "@/lib/property/statusLanes";
 import { PropertyPageHeader } from "@/components/property/PropertyPageHeader";
 import { ValuationCashSection } from "@/components/property/ValuationCashSection";
-import { PropertyHeroMedia } from "@/components/property/PropertyHeroMedia";
+import { PropertyMediaSection } from "@/components/property/PropertyMediaSection";
+import { AdminFactCorrectionPanel } from "@/components/property/AdminFactCorrectionPanel";
 import type { MashvisorImagesPayload } from "@/lib/mashvisor/types";
+import type { OwnerPhoto, PropertyFactCorrection } from "@/lib/property/photos";
 import {
   shouldShowOwnerVerifiedBadge,
   shouldShowVerifiedAppraisalValueBadge,
@@ -543,6 +545,32 @@ export default async function AdminPropertyAuditPage({
   const adminHeroAddress =
     adminPropertyRecord?.formattedAddress ?? addressDisplay ?? null;
 
+  // Fetch owner photos (non-fatal)
+  let adminOwnerPhotos: OwnerPhoto[] = [];
+  try {
+    const { data: photoRows } = await (supabase.from("property_photos") as any)
+      .select("*")
+      .eq("property_id", propertyId)
+      .is("removed_at", null)
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true });
+    adminOwnerPhotos = photoRows ?? [];
+  } catch {
+    // non-fatal
+  }
+
+  // Fetch corrections for admin review (non-fatal)
+  let adminCorrections: PropertyFactCorrection[] = [];
+  try {
+    const { data: corrRows } = await (supabase.from("property_fact_corrections") as any)
+      .select("*")
+      .eq("property_id", propertyId)
+      .order("created_at", { ascending: false });
+    adminCorrections = corrRows ?? [];
+  } catch {
+    // non-fatal
+  }
+
   return (
     <main className="mx-auto max-w-4xl p-6 space-y-6">
 
@@ -610,13 +638,16 @@ export default async function AdminPropertyAuditPage({
         </div>
       </div>
 
-      {/* ── C. Hero media — images first, map-style placeholder when none ── */}
-      <PropertyHeroMedia
+      {/* ── C. Hero media — owner photos first, vendor fallback, then map ── */}
+      <PropertyMediaSection
+        propertyId={propertyId}
+        initialPhotos={adminOwnerPhotos}
         images={adminHeroImages}
         lat={adminHeroLat}
         lng={adminHeroLng}
         address={adminHeroAddress}
         audience="admin"
+        canManagePhotos={(p.status as string) !== "archived"}
       />
 
       {/* ── C. Valuation & cash position — admin audience (shows secured debt) ── */}
@@ -1200,6 +1231,24 @@ export default async function AdminPropertyAuditPage({
           <PropertyRecordSections record={adminPropertyRecord} audience="admin" />
         </div>
       )}
+
+      {/* ── Owner-submitted fact corrections ── */}
+      <div className="rounded-xl border overflow-hidden">
+        <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b flex items-center justify-between">
+          <span>Owner fact corrections</span>
+          {adminCorrections.filter((c) => c.review_status === "pending").length > 0 && (
+            <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-amber-100 text-amber-800">
+              {adminCorrections.filter((c) => c.review_status === "pending").length} pending
+            </span>
+          )}
+        </div>
+        <div className="p-4">
+          <AdminFactCorrectionPanel
+            propertyId={propertyId}
+            initialCorrections={adminCorrections}
+          />
+        </div>
+      </div>
 
       {/* ── Debt basis management ── */}
       {/*

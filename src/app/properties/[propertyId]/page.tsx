@@ -18,9 +18,11 @@ import {
 import type { PropertyRecord } from "@/lib/property/propertyRecord";
 import { normalizedProfileToRecord } from "@/lib/property/propertyRecord";
 import { PropertyRecordSections } from "@/components/property/PropertyRecordSections";
-import { PropertyHeroMedia } from "@/components/property/PropertyHeroMedia";
+import { PropertyMediaSection } from "@/components/property/PropertyMediaSection";
 import { PropertyPageHeader } from "@/components/property/PropertyPageHeader";
 import { ValuationCashSection } from "@/components/property/ValuationCashSection";
+import { OwnerPropertyEditControls } from "@/components/property/OwnerPropertyEditControls";
+import type { OwnerPhoto, PropertyFactCorrection } from "@/lib/property/photos";
 import {
   shouldShowOwnerVerifiedBadge,
   shouldShowVerifiedAppraisalValueBadge,
@@ -344,6 +346,42 @@ export default async function PropertyDetailPage({ params }: PageProps) {
     };
   }
 
+  // Fetch owner photos (non-fatal)
+  let ownerPhotos: OwnerPhoto[] = [];
+  try {
+    const { data: photoRows } = await (svc.from("property_photos") as any)
+      .select("*")
+      .eq("property_id", propertyId)
+      .is("removed_at", null)
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true });
+    ownerPhotos = photoRows ?? [];
+  } catch {
+    // non-fatal
+  }
+
+  // Fetch owner corrections (non-fatal)
+  let ownerCorrections: PropertyFactCorrection[] = [];
+  try {
+    const { data: corrRows } = await (svc.from("property_fact_corrections") as any)
+      .select("*")
+      .eq("property_id", propertyId)
+      .order("created_at", { ascending: false });
+    ownerCorrections = corrRows ?? [];
+  } catch {
+    // non-fatal
+  }
+
+  // Build canonical values for the correction modal from normalized record
+  const canonicalValues: Record<string, string | number | null> = {
+    bedrooms: ownerPropertyRecord?.beds ?? null,
+    bathrooms: ownerPropertyRecord?.baths ?? null,
+    sqft_living: ownerPropertyRecord?.sqft ?? null,
+    lot_sqft: ownerPropertyRecord?.lotSize ?? null,
+    year_built: ownerPropertyRecord?.yearBuilt ?? null,
+    owner_occupied: row.occupancy_use ?? null,
+  };
+
   // Coordinates from normalized property record (for hero map fallback)
   const heroLat = ownerPropertyRecord?.latitude ?? null;
   const heroLng = ownerPropertyRecord?.longitude ?? null;
@@ -394,13 +432,26 @@ export default async function PropertyDetailPage({ params }: PageProps) {
           isParticipationApproved={row.status === "verified"}
         />
 
-        {/* ── B. Hero media — images first, map-style placeholder when none ── */}
-        <PropertyHeroMedia
+        {/* ── B. Hero media — owner photos first, vendor fallback, then map ── */}
+        <PropertyMediaSection
+          propertyId={propertyId}
+          initialPhotos={ownerPhotos}
           images={heroImages}
           lat={heroLat}
           lng={heroLng}
           address={heroAddress}
           audience="owner"
+          canManagePhotos={row.status !== "archived"}
+        />
+
+        {/* ── B2. Owner property edit controls (settings + corrections) ── */}
+        <OwnerPropertyEditControls
+          propertyId={propertyId}
+          currentVisibility={row.visibility_preference ?? "private"}
+          currentProposalStatus={row.proposal_interest_status ?? "not_interested"}
+          initialCorrections={ownerCorrections}
+          canonicalValues={canonicalValues}
+          propertyStatus={row.status ?? ""}
         />
 
         {/* ── C. Valuation & cash position — consolidated section with tabs ── */}

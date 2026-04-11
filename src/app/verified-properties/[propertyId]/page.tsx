@@ -10,6 +10,7 @@ import { normalizedProfileToRecord } from "@/lib/property/propertyRecord";
 import { PropertyRecordSections } from "@/components/property/PropertyRecordSections";
 import { PropertyHeroMedia } from "@/components/property/PropertyHeroMedia";
 import { PropertyPageHeader } from "@/components/property/PropertyPageHeader";
+import type { OwnerPhoto } from "@/lib/property/photos";
 import Link from "next/link";
 
 export const runtime = "nodejs";
@@ -128,6 +129,21 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
     // non-fatal
   }
 
+  // Fetch owner photos for buyer hero display (non-fatal)
+  let publicOwnerPhotos: OwnerPhoto[] = [];
+  try {
+    const { data: photoRows } = await (supabase
+      .from("property_photos") as any)
+      .select("*")
+      .eq("property_id", propertyId)
+      .is("removed_at", null)
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true });
+    publicOwnerPhotos = photoRows ?? [];
+  } catch {
+    // non-fatal
+  }
+
   // Coordinates from normalized property record (for hero map fallback)
   const publicHeroLat = publicPropertyRecord?.latitude ?? null;
   const publicHeroLng = publicPropertyRecord?.longitude ?? null;
@@ -180,8 +196,9 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
           isParticipationApproved={true}
         />
 
-        {/* ── B. Hero media — images first, map-style placeholder when none ── */}
+        {/* ── B. Hero media — owner photos first, vendor fallback, then map ── */}
         <PropertyHeroMedia
+          ownerPhotos={publicOwnerPhotos}
           images={publicHeroImages}
           lat={publicHeroLat}
           lng={publicHeroLng}
