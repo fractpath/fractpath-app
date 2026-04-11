@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
+import sharp from "sharp";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
-import { enforceLimitsAndProcess } from "@/lib/uploads/documentProcessing";
+import { enforceLimitsAndProcess, isHeicBuffer } from "@/lib/uploads/documentProcessing";
 import { PHOTO_BUCKET, photoPublicUrl } from "@/lib/property/photos";
 
 export const runtime = "nodejs";
@@ -95,7 +96,17 @@ export async function POST(
   const file = formData.get("file") as File | null;
   if (!file) return jsonError("No file provided", 400);
 
-  const rawBuf = Buffer.from(await file.arrayBuffer());
+  let rawBuf = Buffer.from(await file.arrayBuffer());
+
+  // HEIC/HEIF: convert to JPEG first so documentProcessing can handle it
+  if (isHeicBuffer(rawBuf)) {
+    try {
+      rawBuf = Buffer.from(await sharp(rawBuf).rotate().jpeg({ quality: 90, mozjpeg: true }).toBuffer());
+    } catch {
+      return jsonError("Could not process HEIC/HEIF file. Please upload a JPG, PNG, or WebP instead.", 415);
+    }
+  }
+
   const result = await enforceLimitsAndProcess(rawBuf, file.type);
   if (!result.ok) return jsonError(result.error, result.status);
 

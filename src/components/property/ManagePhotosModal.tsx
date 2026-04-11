@@ -197,13 +197,13 @@ export function ManagePhotosModal({
               {uploading ? "Uploading…" : "Click to upload photos"}
             </span>
             <span className="text-xs text-muted-foreground/70">
-              JPG, PNG, or WebP · max 10 MB each
+              JPG, PNG, WebP, or HEIC · max 10 MB each
             </span>
           </button>
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/jpeg,image/png,image/webp"
+            accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
             multiple
             className="sr-only"
             onChange={(e) => handleUpload(e.target.files)}

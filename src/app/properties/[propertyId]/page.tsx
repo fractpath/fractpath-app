@@ -428,7 +428,6 @@ export default async function PropertyDetailPage({ params }: PageProps) {
           appraisalExpired={appraisalExpired}
           appraisalBadgeLabel={appraisalBadgeLabel}
           expiresAt={row.property_review_expires_at ?? null}
-          ownershipStatus={row.ownership_status ?? null}
           isParticipationApproved={row.status === "verified"}
         />
 
