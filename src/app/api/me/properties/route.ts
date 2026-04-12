@@ -348,6 +348,43 @@ export async function GET() {
     }
   }
 
+  // Enrich with owner hero photo — priority over vendor enrichment thumbnail
+  // Hero priority: owner-designated hero > first active owner photo > cover_image_url (enrichment)
+  {
+    const ownedIds = rows.map((r: any) => r.id).filter(Boolean);
+    if (ownedIds.length > 0) {
+      try {
+        const { data: photoRows } = await (svc.from("property_photos") as any)
+          .select("property_id, public_url, is_hero, sort_order, created_at")
+          .in("property_id", ownedIds)
+          .is("removed_at", null)
+          .order("sort_order", { ascending: true })
+          .order("created_at", { ascending: true });
+
+        const heroByPropertyId = new Map<string, string>();
+        const firstByPropertyId = new Map<string, string>();
+        for (const photo of photoRows ?? []) {
+          if (!photo?.property_id) continue;
+          if (photo.is_hero && !heroByPropertyId.has(photo.property_id)) {
+            heroByPropertyId.set(photo.property_id, photo.public_url);
+          }
+          if (!firstByPropertyId.has(photo.property_id)) {
+            firstByPropertyId.set(photo.property_id, photo.public_url);
+          }
+        }
+
+        if (heroByPropertyId.size > 0 || firstByPropertyId.size > 0) {
+          rows = rows.map((r: any) => {
+            const heroUrl = heroByPropertyId.get(r.id) ?? firstByPropertyId.get(r.id) ?? null;
+            return heroUrl ? { ...r, hero_photo_url: heroUrl } : r;
+          });
+        }
+      } catch {
+        // best-effort — do not fail the response
+      }
+    }
+  }
+
   return NextResponse.json({ ok: true, properties: rows });
 }
 

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -382,6 +383,33 @@ export default async function PropertyDetailPage({ params }: PageProps) {
     owner_occupied: row.occupancy_use ?? null,
   };
 
+  // Apply approved corrections to the ownerPropertyRecord display
+  // Approved corrections override the RentCast canonical values for owner/public display surfaces.
+  // The canonical RentCast value is always preserved in canonicalValues above for admin comparison.
+  if (ownerPropertyRecord && ownerCorrections.length > 0) {
+    const fieldMap: Record<string, keyof typeof ownerPropertyRecord> = {
+      bedrooms: "beds",
+      bathrooms: "baths",
+      sqft_living: "sqft",
+      lot_sqft: "lotSize",
+      year_built: "yearBuilt",
+    };
+    const approved = ownerCorrections.filter((c) => c.review_status === "approved");
+    if (approved.length > 0) {
+      const patchedRecord = { ...ownerPropertyRecord };
+      for (const correction of approved) {
+        const recordKey = fieldMap[correction.field_key];
+        if (recordKey) {
+          const numVal = Number(correction.owner_submitted_value);
+          if (!isNaN(numVal)) {
+            (patchedRecord as any)[recordKey] = numVal;
+          }
+        }
+      }
+      ownerPropertyRecord = patchedRecord;
+    }
+  }
+
   // Coordinates from normalized property record (for hero map fallback)
   const heroLat = ownerPropertyRecord?.latitude ?? null;
   const heroLng = ownerPropertyRecord?.longitude ?? null;
@@ -418,6 +446,16 @@ export default async function PropertyDetailPage({ params }: PageProps) {
     <div>
       <AppHeader />
       <main className="mx-auto max-w-3xl px-4 pb-12 pt-6 space-y-6">
+        {/* ── Back link — above everything ── */}
+        <div>
+          <Link
+            href="/me"
+            className="text-sm text-muted-foreground hover:text-foreground underline"
+          >
+            ← Back to my account
+          </Link>
+        </div>
+
         {/* ── A. Header — address H1 + badge row with tooltips ── */}
         <PropertyPageHeader
           address={heroAddress ?? address_display}
@@ -529,6 +567,7 @@ export default async function PropertyDetailPage({ params }: PageProps) {
           hideAddressCard
           hideWorkflowWidget
           hideValuationCards
+          hideBackLink
         />
       </main>
     </div>

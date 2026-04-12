@@ -104,6 +104,7 @@ type Props = {
   hideAddressCard?: boolean;
   hideWorkflowWidget?: boolean;
   hideValuationCards?: boolean;
+  hideBackLink?: boolean;
 };
 
 // ── Status badge ─────────────────────────────────────────────────────────────
@@ -322,6 +323,7 @@ export function PropertyDetailClient({
   hideAddressCard = false,
   hideWorkflowWidget = false,
   hideValuationCards = false,
+  hideBackLink = false,
 }: Props) {
   const [editOpen, setEditOpen] = useState(false);
 
@@ -375,14 +377,16 @@ export function PropertyDetailClient({
   return (
     <div className="space-y-6">
       {/* Back link */}
-      <div>
-        <Link
-          href="/dashboard"
-          className="text-sm text-muted-foreground hover:text-foreground underline"
-        >
-          ← Back to dashboard
-        </Link>
-      </div>
+      {!hideBackLink && (
+        <div>
+          <Link
+            href="/dashboard"
+            className="text-sm text-muted-foreground hover:text-foreground underline"
+          >
+            ← Back to dashboard
+          </Link>
+        </div>
+      )}
 
       {/* Early-stage property review status (before escalation/AVM) */}
       {!hideWorkflowWidget && workflowState && (

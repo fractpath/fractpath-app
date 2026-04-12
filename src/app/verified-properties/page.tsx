@@ -15,12 +15,14 @@ type PropertyRow = {
   verified_at: string | null;
   ownership_type: string | null;
   occupancy_use: string | null;
-  // Enrichment (merged in)
-  cover_image_url?: string | null;
+  // Hero image — owner photo takes priority over vendor enrichment
+  hero_image_url?: string | null;
   property_type?: string | null;
   beds?: number | null;
   baths?: number | null;
   sqft?: number | null;
+  lot_size?: number | null;
+  year_built?: number | null;
   value_estimate?: number | null;
 };
 
@@ -87,9 +89,11 @@ export default async function VerifiedPropertiesPage() {
 
   let rows: PropertyRow[] = error ? [] : ((data ?? []) as PropertyRow[]);
 
-  // Batch-fetch enrichment for all eligible properties (no API calls — persisted data only)
+  // Batch-fetch enrichment, RentCast canonical facts, owner photos, and approved corrections
   if (rows.length > 0) {
     const ids = rows.map((r) => r.id);
+
+    // 1. Mashvisor enrichment (vendor image + summary fallback)
     const { data: enrichmentRows } = await (supabase
       .from("property_enrichments") as any)
       .select("property_id, images_payload, summary_payload")
@@ -103,17 +107,113 @@ export default async function VerifiedPropertiesPage() {
       enrichMap.set(e.property_id, e);
     }
 
+    // 2. RentCast canonical property profile (beds/baths/sqft/lot/year_built)
+    const { data: rentcastRows } = await (supabase
+      .from("property_review_runs") as any)
+      .select("property_id, normalized_payload")
+      .in("property_id", ids)
+      .eq("provider", "rentcast")
+      .eq("artifact_type", "property_profile")
+      .eq("is_current", true)
+      .eq("status", "completed");
+
+    type RentcastFactsMap = {
+      beds: number | null;
+      baths: number | null;
+      sqft: number | null;
+      lot_size: number | null;
+      year_built: number | null;
+      property_type: string | null;
+    };
+    const rentcastMap = new Map<string, RentcastFactsMap>();
+    for (const run of rentcastRows ?? []) {
+      if (!run?.property_id || !run?.normalized_payload) continue;
+      const p = run.normalized_payload as any;
+      rentcastMap.set(run.property_id, {
+        beds: p.bedrooms ?? null,
+        baths: p.bathrooms ?? null,
+        sqft: p.squareFootage ?? null,
+        lot_size: p.lotSize ?? null,
+        year_built: p.yearBuilt ?? null,
+        property_type: p.propertyType ?? null,
+      });
+    }
+
+    // 3. Owner hero photos — hero priority rule
+    const { data: photoRows } = await (supabase
+      .from("property_photos") as any)
+      .select("property_id, public_url, is_hero, sort_order, created_at")
+      .in("property_id", ids)
+      .is("removed_at", null)
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true });
+
+    const heroPhotoMap = new Map<string, string>();
+    const firstPhotoMap = new Map<string, string>();
+    for (const photo of photoRows ?? []) {
+      if (!photo?.property_id) continue;
+      if (photo.is_hero && !heroPhotoMap.has(photo.property_id)) {
+        heroPhotoMap.set(photo.property_id, photo.public_url);
+      }
+      if (!firstPhotoMap.has(photo.property_id)) {
+        firstPhotoMap.set(photo.property_id, photo.public_url);
+      }
+    }
+
+    // 4. Approved corrections — override canonical displayed values
+    const { data: correctionRows } = await (supabase
+      .from("property_fact_corrections") as any)
+      .select("property_id, field_key, owner_submitted_value, review_status")
+      .in("property_id", ids)
+      .eq("review_status", "approved");
+
+    type CorrectionsMap = Record<string, string>;
+    const correctionMap = new Map<string, CorrectionsMap>();
+    for (const c of correctionRows ?? []) {
+      if (!c?.property_id) continue;
+      const existing = correctionMap.get(c.property_id) ?? {};
+      existing[c.field_key] = c.owner_submitted_value;
+      correctionMap.set(c.property_id, existing);
+    }
+
     rows = rows.map((row) => {
       const e = enrichMap.get(row.id);
-      if (!e) return row;
+      const rc = rentcastMap.get(row.id);
+      const corrections = correctionMap.get(row.id) ?? {};
+
+      // Resolve hero image with priority: owner hero > first owner photo > vendor cover image
+      const ownerHero = heroPhotoMap.get(row.id) ?? firstPhotoMap.get(row.id) ?? null;
+      const vendorCover = e?.images_payload?.cover_image_url ?? null;
+      const hero_image_url = ownerHero ?? vendorCover;
+
+      // Resolve facts: RentCast canonical > Mashvisor summary fallback, then apply approved corrections
+      const applyCorrection = (field: string, value: number | null): number | null => {
+        const corrected = corrections[field];
+        if (corrected !== undefined) {
+          const n = Number(corrected);
+          return isNaN(n) ? value : n;
+        }
+        return value;
+      };
+
+      const beds = applyCorrection("bedrooms", rc?.beds ?? e?.summary_payload?.beds ?? null);
+      const baths = applyCorrection("bathrooms", rc?.baths ?? e?.summary_payload?.baths ?? null);
+      const sqft = applyCorrection("sqft_living", rc?.sqft ?? e?.summary_payload?.sqft ?? null);
+      const lot_size = applyCorrection("lot_sqft", rc?.lot_size ?? null);
+      const year_built = applyCorrection("year_built", rc?.year_built ?? null);
+      const property_type = rc?.property_type ?? e?.summary_payload?.property_type ?? null;
+      const value_estimate = e?.summary_payload?.value_estimate ?? null;
+
       return {
         ...row,
-        cover_image_url: e.images_payload?.cover_image_url ?? null,
-        property_type: e.summary_payload?.property_type ?? null,
-        beds: e.summary_payload?.beds ?? null,
-        baths: e.summary_payload?.baths ?? null,
-        sqft: e.summary_payload?.sqft ?? null,
-        value_estimate: e.summary_payload?.value_estimate ?? null,
+        hero_image_url,
+        property_type,
+        beds,
+        baths,
+        sqft,
+        lot_size,
+        year_built,
+        value_estimate,
       };
     });
   }
@@ -141,7 +241,7 @@ export default async function VerifiedPropertiesPage() {
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {rows.map((row) => {
               const address = formatAddress(row);
-              const hasStats = row.beds || row.baths || row.sqft || row.value_estimate;
+              const hasStats = row.beds || row.baths || row.sqft || row.lot_size || row.year_built || row.value_estimate;
               const occupancyLabel = humanizeOccupancy(row.occupancy_use);
               const typeLabel = row.property_type
                 ? row.property_type
@@ -152,11 +252,11 @@ export default async function VerifiedPropertiesPage() {
                   key={row.id}
                   className="rounded-xl border bg-card overflow-hidden shadow-sm flex flex-col"
                 >
-                  {/* Thumbnail or placeholder */}
+                  {/* Thumbnail — owner hero priority */}
                   <div className="relative h-44 bg-muted/40 flex-shrink-0">
-                    {row.cover_image_url ? (
+                    {row.hero_image_url ? (
                       <Image
-                        src={row.cover_image_url}
+                        src={row.hero_image_url}
                         alt={`Property at ${row.address_line1 ?? "verified property"}`}
                         fill
                         className="object-cover"
@@ -215,7 +315,7 @@ export default async function VerifiedPropertiesPage() {
                       )}
                     </div>
 
-                    {/* Enrichment stats — only when available */}
+                    {/* Canonical stats strip — RentCast facts with approved-correction overlay */}
                     {hasStats && (
                       <div className="flex flex-wrap gap-3 text-sm">
                         {row.beds != null && (
@@ -234,6 +334,18 @@ export default async function VerifiedPropertiesPage() {
                           <div className="text-center">
                             <div className="font-semibold">{fmtNum(row.sqft)}</div>
                             <div className="text-[11px] text-muted-foreground">Sq ft</div>
+                          </div>
+                        )}
+                        {row.lot_size != null && (
+                          <div className="text-center">
+                            <div className="font-semibold">{fmtNum(row.lot_size)}</div>
+                            <div className="text-[11px] text-muted-foreground">Lot sq ft</div>
+                          </div>
+                        )}
+                        {row.year_built != null && (
+                          <div className="text-center">
+                            <div className="font-semibold">{row.year_built}</div>
+                            <div className="text-[11px] text-muted-foreground">Built</div>
                           </div>
                         )}
                         {row.value_estimate != null && (

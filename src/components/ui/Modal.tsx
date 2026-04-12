@@ -78,21 +78,21 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={`w-full ${SIZE_CLASSES[size]} rounded-xl border bg-background shadow-xl`}
+        className={`w-full ${SIZE_CLASSES[size]} rounded-xl border bg-background shadow-xl flex flex-col max-h-[90vh]`}
       >
-        <div className="border-b px-6 py-4">
+        <div className="border-b px-6 py-4 flex-shrink-0">
           <h2 className="text-lg font-semibold">{title}</h2>
           {description ? (
             <p className="mt-1 text-sm text-muted-foreground">{description}</p>
           ) : null}
         </div>
 
-        {children ? <div className="px-6 py-4">{children}</div> : null}
+        {children ? <div className="px-6 py-4 overflow-y-auto flex-1">{children}</div> : null}
 
         {footer ? (
-          <div className="border-t px-6 py-4">{footer}</div>
+          <div className="border-t px-6 py-4 flex-shrink-0">{footer}</div>
         ) : (primaryLabel || secondaryLabel) ? (
-          <div className="flex items-center justify-end gap-3 border-t px-6 py-4">
+          <div className="flex items-center justify-end gap-3 border-t px-6 py-4 flex-shrink-0">
             {secondaryLabel ? (
               <button
                 type="button"

@@ -133,15 +133,15 @@ export function AdminFactCorrectionPanel({
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-1 min-w-0">
                     <p className="text-sm font-semibold">{c.display_label}</p>
-                    <div className="flex items-center gap-4 text-sm">
+                    <div className="flex items-center gap-4 text-sm flex-wrap">
                       <span>
-                        <span className="text-muted-foreground">Recorded: </span>
+                        <span className="text-muted-foreground">Canonical (RentCast): </span>
                         <span className="font-medium">
                           {c.canonical_value ?? "—"}
                         </span>
                       </span>
                       <span>
-                        <span className="text-muted-foreground">Suggested: </span>
+                        <span className="text-muted-foreground">Owner-submitted: </span>
                         <span className="font-semibold text-foreground">
                           {c.owner_submitted_value}
                         </span>
@@ -240,21 +240,28 @@ export function AdminFactCorrectionPanel({
           {resolved.map((c) => (
             <div
               key={c.id}
-              className="rounded-lg border bg-muted/20 p-4 flex items-start justify-between gap-4"
+              className="rounded-lg border bg-muted/20 p-4 space-y-2"
             >
-              <div className="space-y-0.5 min-w-0">
-                <p className="text-sm font-medium">{c.display_label}</p>
-                <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                  <span>Recorded: {c.canonical_value ?? "—"}</span>
-                  <span>Suggested: {c.owner_submitted_value}</span>
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-0.5 min-w-0">
+                  <p className="text-sm font-medium">{c.display_label}</p>
+                  <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
+                    <span>Canonical (RentCast): {c.canonical_value ?? "—"}</span>
+                    <span>Owner-submitted: {c.owner_submitted_value}</span>
+                  </div>
+                  {c.review_status === "approved" && (
+                    <p className="text-xs font-medium text-green-700 mt-1">
+                      ✓ Adopted for display — owner/public surfaces show: {c.owner_submitted_value}
+                    </p>
+                  )}
+                  {c.reviewer_note && (
+                    <p className="text-xs text-muted-foreground italic mt-1">
+                      Admin note: {c.reviewer_note}
+                    </p>
+                  )}
                 </div>
-                {c.reviewer_note && (
-                  <p className="text-xs text-muted-foreground italic mt-1">
-                    Note: {c.reviewer_note}
-                  </p>
-                )}
+                <StatusBadge status={c.review_status} />
               </div>
-              <StatusBadge status={c.review_status} />
             </div>
           ))}
         </div>

@@ -27,6 +27,8 @@ type Property = {
   claim_thread_status?: string | null;
   // Enrichment thumbnail — merged in by API from property_enrichments
   cover_image_url?: string | null;
+  // Owner hero photo — priority over vendor enrichment thumbnail
+  hero_photo_url?: string | null;
   // Review request status — set when an open/submitted request exists for a linked deal
   review_request_status?: "open" | "submitted" | null;
   // Proposal preferences
@@ -211,11 +213,11 @@ export function PropertyList() {
             return (
               <li key={p.id} className="rounded-md border overflow-hidden">
                 <div className="flex gap-3 p-3">
-                  {/* Thumbnail — only when enrichment image is available */}
-                  {p.cover_image_url && (
+                  {/* Thumbnail — owner hero photo takes priority over vendor enrichment image */}
+                  {(p.hero_photo_url || p.cover_image_url) && (
                     <div className="relative h-16 w-24 flex-shrink-0 rounded overflow-hidden bg-muted/40">
                       <Image
-                        src={p.cover_image_url}
+                        src={p.hero_photo_url ?? p.cover_image_url!}
                         alt="Property thumbnail"
                         fill
                         className="object-cover"
