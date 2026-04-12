@@ -11,6 +11,7 @@ import { PropertyRecordSections } from "@/components/property/PropertyRecordSect
 import { PropertyHeroMedia } from "@/components/property/PropertyHeroMedia";
 import { PropertyPageHeader } from "@/components/property/PropertyPageHeader";
 import type { OwnerPhoto } from "@/lib/property/photos";
+import { propertyHasActiveDeal } from "@/lib/deal/activeDealCheck";
 import Link from "next/link";
 
 export const runtime = "nodejs";
@@ -129,6 +130,16 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
     // non-fatal
   }
 
+  // ── Active-deal check — determines whether "Create deal" CTA is shown ──
+  // Non-fatal: on error we conservatively hide the CTA (fail-closed).
+  let hasActiveDeal = false;
+  try {
+    hasActiveDeal = await propertyHasActiveDeal(supabase, propertyId);
+  } catch {
+    hasActiveDeal = true; // fail-closed: hide CTA when check is uncertain
+  }
+  const canCreateDeal = !hasActiveDeal;
+
   // Fetch owner photos for buyer hero display (non-fatal)
   let publicOwnerPhotos: OwnerPhoto[] = [];
   try {
@@ -206,7 +217,26 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
           audience="buyer"
         />
 
-        {/* ── C. Valuation summary — buyer-safe (estimate + range + reviewed basis) ── */}
+        {/* ── C. Deal CTA — only when no active deal exists for this property ── */}
+        {canCreateDeal ? (
+          <div className="flex items-center justify-between rounded-lg border bg-card px-4 py-4">
+            <p className="text-sm text-muted-foreground">
+              Interested in exploring a home equity agreement for this property?
+            </p>
+            <Link
+              href={`/deal/new?propertyId=${propertyId}`}
+              className="ml-4 shrink-0 rounded-md bg-foreground px-4 py-2 text-sm font-semibold text-background hover:opacity-90 transition-opacity"
+            >
+              Create deal
+            </Link>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground px-1">
+            This property already has an active deal in progress.
+          </p>
+        )}
+
+        {/* ── D. Valuation summary — buyer-safe (estimate + range + reviewed basis) ── */}
         {publicAvm?.estimate != null && (
           <section className="rounded-lg border bg-card">
             <div className="px-4 py-3 border-b">
@@ -243,7 +273,7 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
           </section>
         )}
 
-        {/* ── D. Base property data (normalized from RentCast) — privacy-safe subset ── */}
+        {/* ── E. Base property data (normalized from RentCast) — privacy-safe subset ── */}
         {publicPropertyRecord && (
           <PropertyRecordSections record={publicPropertyRecord} audience="buyer" />
         )}
