@@ -362,11 +362,15 @@ export async function POST(
     }
   }
 
-  // owner_to_buyer with a known buyer email — create invite for the buyer
+  // owner_to_buyer with a known buyer email — create invite for the buyer.
+  // The raw token is captured so it can be embedded in the invite email URL.
+  let ownerToBuyerRawToken: string | null = null;
+
   if (mode === "owner_to_buyer" && knownInviteeEmail) {
     const crypto = await import("crypto");
     const token = crypto.randomBytes(32).toString("hex");
     const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    ownerToBuyerRawToken = token;
 
     await (svc.from("thread_invites") as any).insert({
       thread_id: thread.id,
@@ -512,6 +516,14 @@ export async function POST(
 
   const homeownerActionUrl = `${APP}/deal/${dealId}#offer`;
 
+  // For owner→buyer invites: link the buyer directly to the authenticated claim
+  // page so they must sign in / sign up before the token is redeemed and their
+  // account is bound to the thread.  Falls back to the plain deal URL only
+  // when no raw token was captured (should never happen in normal flow).
+  const buyerInviteClaimUrl = ownerToBuyerRawToken
+    ? `${APP}/invites/claim?token=${ownerToBuyerRawToken}`
+    : homeownerActionUrl;
+
   console.log("SUBMIT_EMAIL_ROUTING", {
     dealId,
     mode,
@@ -562,7 +574,7 @@ export async function POST(
               "fractpath-buyer-deal-received",
             variables: {
               property_address: propertyAddress,
-              ACTION_URL: homeownerActionUrl,
+              ACTION_URL: buyerInviteClaimUrl,
             },
           },
         });
