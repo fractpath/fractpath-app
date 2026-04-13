@@ -116,10 +116,10 @@ function PropertyCard({
           </div>
         )}
 
-        {property.latest_verified_fmv != null && (
+        {property.rentcast_avm != null && (
           <div>
             <span className="text-base font-bold tabular-nums text-foreground">
-              {fmtCurrency(property.latest_verified_fmv)}
+              {fmtCurrency(property.rentcast_avm)}
             </span>
             <span className="ml-1.5 text-[11px] text-muted-foreground">Est. value</span>
           </div>
@@ -172,14 +172,14 @@ export function VerifiedPropertiesClient({
 
     switch (sort) {
       case "value_desc":
-        result.sort((a, b) => (b.latest_verified_fmv ?? -1) - (a.latest_verified_fmv ?? -1));
+        result.sort((a, b) => (b.rentcast_avm ?? -1) - (a.rentcast_avm ?? -1));
         break;
       case "value_asc":
         result.sort((a, b) => {
-          if (a.latest_verified_fmv == null && b.latest_verified_fmv == null) return 0;
-          if (a.latest_verified_fmv == null) return 1;
-          if (b.latest_verified_fmv == null) return -1;
-          return a.latest_verified_fmv - b.latest_verified_fmv;
+          if (a.rentcast_avm == null && b.rentcast_avm == null) return 0;
+          if (a.rentcast_avm == null) return 1;
+          if (b.rentcast_avm == null) return -1;
+          return a.rentcast_avm - b.rentcast_avm;
         });
         break;
       default:

@@ -14,7 +14,7 @@ export default async function VerifiedPropertiesPage() {
   // Nulls sorted last so properties with a stamped date appear first.
   const { data, error } = await (supabase.from("properties") as any)
     .select(
-      "id, address_line1, city, state, postal_code, verified_at, latitude, longitude, latest_verified_fmv",
+      "id, address_line1, city, state, postal_code, verified_at, latitude, longitude",
     )
     .eq("status", "verified")
     .eq("visibility_preference", "public")
@@ -28,37 +28,45 @@ export default async function VerifiedPropertiesPage() {
     const ids = baseRows.map((r: any) => r.id);
 
     // Parallel enrichment fetches
-    const [photoResult, enrichResult, rentcastResult, correctionResult] = await Promise.all([
-      // 1. Owner photos (hero priority)
-      (supabase.from("property_photos") as any)
-        .select("property_id, public_url, is_hero, sort_order, created_at")
-        .in("property_id", ids)
-        .is("removed_at", null)
-        .order("sort_order", { ascending: true })
-        .order("created_at", { ascending: true }),
+    const [photoResult, enrichResult, rentcastResult, correctionResult, avmResult] =
+      await Promise.all([
+        // 1. Owner photos (hero priority)
+        (supabase.from("property_photos") as any)
+          .select("property_id, public_url, is_hero, sort_order, created_at")
+          .in("property_id", ids)
+          .is("removed_at", null)
+          .order("sort_order", { ascending: true })
+          .order("created_at", { ascending: true }),
 
-      // 2. Mashvisor cover image (fallback only — not used for valuation)
-      (supabase.from("property_enrichments") as any)
-        .select("property_id, images_payload")
-        .in("property_id", ids)
-        .eq("is_current", true)
-        .eq("provider", "mashvisor"),
+        // 2. Mashvisor cover image (hero fallback only — not used for valuation)
+        (supabase.from("property_enrichments") as any)
+          .select("property_id, images_payload")
+          .in("property_id", ids)
+          .eq("is_current", true)
+          .eq("provider", "mashvisor"),
 
-      // 3. RentCast canonical property profile (beds/baths/sqft/year_built/type)
-      (supabase.from("property_review_runs") as any)
-        .select("property_id, normalized_payload")
-        .in("property_id", ids)
-        .eq("provider", "rentcast")
-        .eq("artifact_type", "property_profile")
-        .eq("is_current", true)
-        .eq("status", "completed"),
+        // 3. RentCast canonical property profile (beds/baths/sqft/year_built/type)
+        (supabase.from("property_review_runs") as any)
+          .select("property_id, normalized_payload")
+          .in("property_id", ids)
+          .eq("provider", "rentcast")
+          .eq("artifact_type", "property_profile")
+          .eq("is_current", true)
+          .eq("status", "completed"),
 
-      // 4. Approved owner corrections
-      (supabase.from("property_fact_corrections") as any)
-        .select("property_id, field_key, owner_submitted_value")
-        .in("property_id", ids)
-        .eq("review_status", "approved"),
-    ]);
+        // 4. Approved owner corrections
+        (supabase.from("property_fact_corrections") as any)
+          .select("property_id, field_key, owner_submitted_value")
+          .in("property_id", ids)
+          .eq("review_status", "approved"),
+
+        // 5. RentCast AVM — public browse-card est value source.
+        //    ATTOM controlling FMV (properties.latest_verified_fmv) is intentionally excluded
+        //    from this public-facing surface.
+        (supabase.from("property_review_summary") as any)
+          .select("property_id, fmv_amount")
+          .in("property_id", ids),
+      ]);
 
     // Hero photo maps
     const heroMap = new Map<string, string>();
@@ -78,7 +86,7 @@ export default async function VerifiedPropertiesPage() {
       if (cover) vendorCoverMap.set(e.property_id, cover);
     }
 
-    // RentCast facts map
+    // RentCast canonical facts map
     type RCFacts = {
       beds: number | null;
       baths: number | null;
@@ -108,6 +116,14 @@ export default async function VerifiedPropertiesPage() {
       correctionMap.set(c.property_id, existing);
     }
 
+    // RentCast AVM map — browse-card est value
+    const avmMap = new Map<string, number>();
+    for (const row of avmResult.data ?? []) {
+      if (row?.property_id && typeof row.fmv_amount === "number") {
+        avmMap.set(row.property_id, row.fmv_amount);
+      }
+    }
+
     function applyNumericCorrection(
       propertyId: string,
       field: string,
@@ -127,35 +143,27 @@ export default async function VerifiedPropertiesPage() {
       const heroPhotoUrl =
         heroMap.get(row.id) ?? firstMap.get(row.id) ?? vendorCoverMap.get(row.id) ?? null;
 
-      // lat/lng: from properties table directly
-      const lat = typeof row.latitude === "number" ? row.latitude : null;
-      const lng = typeof row.longitude === "number" ? row.longitude : null;
-
-      const entry: DiscoveryProperty & { latitude: number | null; longitude: number | null } = {
+      return {
         id: row.id,
         address_line1: row.address_line1 ?? null,
         city: row.city ?? null,
         state: row.state ?? null,
         postal_code: row.postal_code ?? null,
-        latitude: lat,
-        longitude: lng,
+        latitude: typeof row.latitude === "number" ? row.latitude : null,
+        longitude: typeof row.longitude === "number" ? row.longitude : null,
         status: "verified",
         verified_at: row.verified_at ?? null,
-        // Est value: properties.latest_verified_fmv — the canonical, review-stamped FMV.
-        // Mashvisor-derived value_estimate is NOT used here.
-        latest_verified_fmv: typeof row.latest_verified_fmv === "number" ? row.latest_verified_fmv : null,
+        // RentCast AVM — public browse est value.
+        // Null when no RentCast review has run; est value is omitted from card in that case.
+        rentcast_avm: avmMap.get(row.id) ?? null,
         hero_photo_url: heroPhotoUrl,
         beds: applyNumericCorrection(row.id, "bedrooms", rc?.beds ?? null),
         baths: applyNumericCorrection(row.id, "bathrooms", rc?.baths ?? null),
         sqft: applyNumericCorrection(row.id, "sqft_living", rc?.sqft ?? null),
         year_built: applyNumericCorrection(row.id, "year_built", rc?.year_built ?? null),
         property_type: rc?.property_type ?? null,
-      };
-      return entry;
+      } satisfies DiscoveryProperty;
     });
-
-    // Filter map-eligible entries (lat/lng required for markers)
-    // Cards show all; map only shows those with coordinates — handled client-side.
   }
 
   return (

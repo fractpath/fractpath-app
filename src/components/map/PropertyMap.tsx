@@ -76,7 +76,8 @@ export function PropertyMap({ token }: { token: string }) {
             "mapbox-raster": {
               type: "raster",
               tiles: [
-                `https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/{z}/{x}/{y}?access_token=${token}`,
+                // /512/ is required by the Mapbox Styles API for 512px tile requests.
+                `https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/512/{z}/{x}/{y}?access_token=${token}`,
               ],
               tileSize: 512,
               attribution:

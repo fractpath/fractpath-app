@@ -14,7 +14,8 @@ export type DiscoveryProperty = {
   status: string;
   verified_at: string | null;
   hero_photo_url: string | null;
-  latest_verified_fmv: number | null;
+  /** RentCast AVM estimate from property_review_summary.fmv_amount — null when unavailable. */
+  rentcast_avm: number | null;
   beds: number | null;
   baths: number | null;
   sqft: number | null;
@@ -22,6 +23,7 @@ export type DiscoveryProperty = {
   property_type: string | null;
 };
 
+/** @deprecated Use DiscoveryProperty */
 export type MapProperty = DiscoveryProperty;
 
 export async function GET() {
@@ -29,7 +31,7 @@ export async function GET() {
 
   const { data: rows, error } = await (supabase.from("properties") as any)
     .select(
-      "id, address_line1, city, state, postal_code, latitude, longitude, status, verified_at, latest_verified_fmv",
+      "id, address_line1, city, state, postal_code, latitude, longitude, status, verified_at",
     )
     .eq("status", "verified")
     .eq("visibility_preference", "public")
@@ -49,33 +51,43 @@ export async function GET() {
 
   const ids = properties.map((p) => p.id);
 
-  const [photoResult, enrichResult, rentcastResult, correctionResult] = await Promise.all([
-    (supabase.from("property_photos") as any)
-      .select("property_id, public_url, is_hero, sort_order, created_at")
-      .in("property_id", ids)
-      .is("removed_at", null)
-      .order("sort_order", { ascending: true })
-      .order("created_at", { ascending: true }),
+  const [photoResult, enrichResult, rentcastResult, correctionResult, avmResult] =
+    await Promise.all([
+      // 1. Owner hero photos
+      (supabase.from("property_photos") as any)
+        .select("property_id, public_url, is_hero, sort_order, created_at")
+        .in("property_id", ids)
+        .is("removed_at", null)
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true }),
 
-    (supabase.from("property_enrichments") as any)
-      .select("property_id, images_payload")
-      .in("property_id", ids)
-      .eq("provider", "mashvisor")
-      .eq("is_current", true),
+      // 2. Mashvisor cover image (fallback only — not used for valuation)
+      (supabase.from("property_enrichments") as any)
+        .select("property_id, images_payload")
+        .in("property_id", ids)
+        .eq("provider", "mashvisor")
+        .eq("is_current", true),
 
-    (supabase.from("property_review_runs") as any)
-      .select("property_id, normalized_payload")
-      .in("property_id", ids)
-      .eq("provider", "rentcast")
-      .eq("artifact_type", "property_profile")
-      .eq("is_current", true)
-      .eq("status", "completed"),
+      // 3. RentCast canonical property profile (beds/baths/sqft/year_built/type)
+      (supabase.from("property_review_runs") as any)
+        .select("property_id, normalized_payload")
+        .in("property_id", ids)
+        .eq("provider", "rentcast")
+        .eq("artifact_type", "property_profile")
+        .eq("is_current", true)
+        .eq("status", "completed"),
 
-    (supabase.from("property_fact_corrections") as any)
-      .select("property_id, field_key, owner_submitted_value")
-      .in("property_id", ids)
-      .eq("review_status", "approved"),
-  ]);
+      // 4. Approved owner corrections
+      (supabase.from("property_fact_corrections") as any)
+        .select("property_id, field_key, owner_submitted_value")
+        .in("property_id", ids)
+        .eq("review_status", "approved"),
+
+      // 5. RentCast AVM — public browse-card est value source
+      (supabase.from("property_review_summary") as any)
+        .select("property_id, fmv_amount")
+        .in("property_id", ids),
+    ]);
 
   const heroMap = new Map<string, string>();
   const firstMap = new Map<string, string>();
@@ -121,6 +133,14 @@ export async function GET() {
     correctionMap.set(c.property_id, existing);
   }
 
+  // RentCast AVM map — browse-card estimated value (not ATTOM controlling FMV)
+  const avmMap = new Map<string, number>();
+  for (const row of avmResult.data ?? []) {
+    if (row?.property_id && typeof row.fmv_amount === "number") {
+      avmMap.set(row.property_id, row.fmv_amount);
+    }
+  }
+
   function applyCorrection(
     propertyId: string,
     field: string,
@@ -147,7 +167,9 @@ export async function GET() {
       longitude: p.longitude,
       status: p.status,
       verified_at: p.verified_at,
-      latest_verified_fmv: p.latest_verified_fmv ?? null,
+      // RentCast AVM — public browse-card est value; null when RentCast hasn't run yet.
+      // ATTOM controlling FMV (properties.latest_verified_fmv) is intentionally excluded.
+      rentcast_avm: avmMap.get(p.id) ?? null,
       hero_photo_url:
         heroMap.get(p.id) ?? firstMap.get(p.id) ?? vendorCoverMap.get(p.id) ?? null,
       beds: applyCorrection(p.id, "bedrooms", rc?.beds ?? null),

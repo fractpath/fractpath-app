@@ -35,8 +35,8 @@ function buildPopupHtml(p: DiscoveryProperty): string {
     .join(" · ");
 
   const fmvHtml =
-    p.latest_verified_fmv != null
-      ? `<div style="font-size:13px;font-weight:700;color:#166534;margin-bottom:6px;">${fmtCurrency(p.latest_verified_fmv)}</div>`
+    p.rentcast_avm != null
+      ? `<div style="font-size:13px;font-weight:700;color:#166534;margin-bottom:6px;">${fmtCurrency(p.rentcast_avm)}</div>`
       : "";
 
   return `
@@ -97,8 +97,10 @@ export function PropertyMapEmbed({
           sources: {
             "mapbox-raster": {
               type: "raster",
+              // /512/ is the required tileSize segment for the Mapbox Styles API.
+              // Omitting it causes the CDN to return 403 for 512px tile requests.
               tiles: [
-                `https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/{z}/{x}/{y}?access_token=${token}`,
+                `https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/512/{z}/{x}/{y}?access_token=${token}`,
               ],
               tileSize: 512,
               attribution: "© Mapbox © OpenStreetMap",
@@ -114,7 +116,13 @@ export function PropertyMapEmbed({
         },
         center: ANNAPOLIS,
         zoom: DEFAULT_ZOOM,
+        // Disable scroll-wheel zoom so the map doesn't hijack page scrolling.
+        // Users zoom via the NavigationControl buttons added below.
+        scrollZoom: false,
       });
+
+      // Visible +/- zoom buttons — replaces scroll-wheel zoom as the primary zoom gesture.
+      map.addControl(new ml.NavigationControl({ showCompass: false }), "top-right");
 
       mapRef.current = map;
       map.on("load", () => {
