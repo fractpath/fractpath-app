@@ -34,6 +34,8 @@ type Props = {
   ownerProposalId?: string | null;
   ownerProposalStatus?: string | null;
   ownerTermsSnapshot?: AnyRecord | null;
+  // Current authenticated user — forwarded for submit direction detection
+  currentUserId?: string | null;
 };
 
 export function DealPageShell({
@@ -49,6 +51,7 @@ export function DealPageShell({
   ownerProposalId,
   ownerProposalStatus,
   ownerTermsSnapshot,
+  currentUserId,
 }: Props) {
   const [propertyId, setPropertyId] = useState<string | null>(
     initialProperty?.property_id ?? null,
@@ -70,6 +73,7 @@ export function DealPageShell({
           ownerTermsSnapshot={ownerTermsSnapshot ?? null}
           activeThreadId={activeThread?.id ?? null}
           activeThreadStatus={activeThread?.status ?? null}
+          currentUserId={currentUserId ?? null}
         />
       </div>
 

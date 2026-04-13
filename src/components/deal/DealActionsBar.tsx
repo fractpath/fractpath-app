@@ -25,6 +25,8 @@ type Props = {
   // Thread context
   activeThreadId?: string | null;
   activeThreadStatus?: string | null;
+  // Current authenticated user — forwarded to SubmitOfferModal for direction detection
+  currentUserId?: string | null;
 };
 
 export function DealActionsBar({
@@ -40,6 +42,7 @@ export function DealActionsBar({
   ownerTermsSnapshot,
   activeThreadId,
   activeThreadStatus,
+  currentUserId,
 }: Props) {
   const router = useRouter();
   const [openSubmit, setOpenSubmit] = useState(false);
@@ -203,6 +206,7 @@ export function DealActionsBar({
             dealId={dealId}
             propertyId={propertyId}
             effectiveSnapshot={effectiveSnapshot}
+            currentUserId={currentUserId ?? null}
           />
           <ShareDealModal
             open={openShare}

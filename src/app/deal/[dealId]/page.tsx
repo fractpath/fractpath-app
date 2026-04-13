@@ -657,6 +657,7 @@ export default async function DealPage(ctx: PageProps) {
             ownerProposalId={negState.currentProposal?.id ?? null}
             ownerProposalStatus={negState.currentProposal?.status ?? null}
             ownerTermsSnapshot={negState.currentProposal?.terms_snapshot ?? null}
+            currentUserId={user.id}
           />
 
           {/* Linked property — hero + gallery sourced from property record by property_id */}
@@ -1456,6 +1457,7 @@ export default async function DealPage(ctx: PageProps) {
             ownerProposalId={negState.currentProposal?.id ?? null}
             ownerProposalStatus={negState.currentProposal?.status ?? null}
             ownerTermsSnapshot={negState.currentProposal?.terms_snapshot ?? null}
+            currentUserId={user.id}
           />
 
           {/* Linked property — hero + gallery sourced from property record by property_id */}

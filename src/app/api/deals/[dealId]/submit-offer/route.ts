@@ -60,9 +60,9 @@ export async function POST(
   }
 
   const mode = body?.mode;
-  if (!["verified_owner", "known_email", "outreach"].includes(mode)) {
+  if (!["verified_owner", "known_email", "outreach", "owner_to_buyer"].includes(mode)) {
     return json(422, {
-      error: "mode must be verified_owner, known_email, or outreach",
+      error: "mode must be verified_owner, known_email, outreach, or owner_to_buyer",
     });
   }
 
@@ -94,7 +94,7 @@ export async function POST(
   const { data: existingThreads } = await (svc.from("deal_threads") as any)
     .select("id, status")
     .eq("deal_id", dealId)
-    .in("status", ["pending_owner", "negotiating"]);
+    .in("status", ["pending_owner", "pending_buyer", "negotiating"]);
 
   if (existingThreads && existingThreads.length > 0) {
     return json(409, { error: "An active offer already exists for this deal" });
@@ -119,6 +119,21 @@ export async function POST(
   }
 
   let ownerUserId: string | null = null;
+  const isOwnerToBuyer = mode === "owner_to_buyer";
+
+  if (isOwnerToBuyer) {
+    // Caller must be the verified property owner
+    if (prop.status !== "verified") {
+      return json(422, {
+        error: "Property must be verified to send a deal as the owner.",
+      });
+    }
+    if (!prop.owner_user_id || prop.owner_user_id !== user.id) {
+      return json(403, {
+        error: "Only the verified property owner can submit in owner_to_buyer mode.",
+      });
+    }
+  }
 
   const rawTermsSnapshot = body?.terms_snapshot;
   if (!rawTermsSnapshot || typeof rawTermsSnapshot !== "object") {
@@ -170,14 +185,25 @@ export async function POST(
   const { data: thread, error: threadErr } = await (
     svc.from("deal_threads") as any
   )
-    .insert({
-      deal_id: dealId,
-      property_id: propertyId,
-      created_by_user_id: user.id,
-      buyer_user_id: user.id,
-      owner_user_id: ownerUserId ?? null,
-      status: "pending_owner",
-    })
+    .insert(
+      isOwnerToBuyer
+        ? {
+            deal_id: dealId,
+            property_id: propertyId,
+            created_by_user_id: user.id,
+            buyer_user_id: null,
+            owner_user_id: user.id,
+            status: "pending_buyer",
+          }
+        : {
+            deal_id: dealId,
+            property_id: propertyId,
+            created_by_user_id: user.id,
+            buyer_user_id: user.id,
+            owner_user_id: ownerUserId ?? null,
+            status: "pending_owner",
+          },
+    )
     .select()
     .single();
 
@@ -191,7 +217,7 @@ export async function POST(
   ).insert({
     thread_id: thread.id,
     user_id: user.id,
-    role: "buyer",
+    role: isOwnerToBuyer ? "owner" : "buyer",
     permission: "propose",
     status: "active",
   });
@@ -272,7 +298,9 @@ export async function POST(
     .eq("id", thread.id);
 
   const knownInviteeEmail =
-    mode === "known_email" ? normalizeEmail(body?.invitee_email) : null;
+    mode === "known_email" || mode === "owner_to_buyer"
+      ? normalizeEmail(body?.invitee_email)
+      : null;
 
   if (mode === "known_email" && knownInviteeEmail) {
     const crypto = await import("crypto");
@@ -334,14 +362,75 @@ export async function POST(
     }
   }
 
-  if (mode === "outreach") {
+  // owner_to_buyer with a known buyer email — create invite for the buyer
+  if (mode === "owner_to_buyer" && knownInviteeEmail) {
     const crypto = await import("crypto");
     const token = crypto.randomBytes(32).toString("hex");
     const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
 
     await (svc.from("thread_invites") as any).insert({
       thread_id: thread.id,
-      intended_role: "owner",
+      intended_role: "buyer",
+      invitee_email: knownInviteeEmail,
+      token_hash: tokenHash,
+      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      created_by_user_id: user.id,
+    });
+
+    try {
+      let inviteeUserId: string | null = null;
+      let page = 1;
+      const perPage = 100;
+
+      while (!inviteeUserId) {
+        const { data: listData } = await svc.auth.admin.listUsers({
+          page,
+          perPage,
+        });
+        const users = listData?.users ?? [];
+        const match = users.find(
+          (u: any) => u.email?.toLowerCase() === knownInviteeEmail,
+        );
+
+        if (match) {
+          inviteeUserId = match.id;
+          break;
+        }
+
+        if (users.length < perPage) break;
+        page++;
+      }
+
+      if (inviteeUserId && inviteeUserId !== user.id) {
+        await (svc.from("deal_access_grants") as any).upsert(
+          {
+            deal_id: dealId,
+            user_id: inviteeUserId,
+            role: "VIEWER",
+            created_by: user.id,
+            revoked_at: null,
+            expires_at: null,
+          },
+          { onConflict: "deal_id,user_id" },
+        );
+      }
+    } catch (grantErr: any) {
+      console.error("submit_offer_owner_to_buyer_grant_error", {
+        dealId,
+        email: knownInviteeEmail,
+        error: grantErr?.message,
+      });
+    }
+  }
+
+  if (mode === "outreach" || (mode === "owner_to_buyer" && !knownInviteeEmail)) {
+    const crypto = await import("crypto");
+    const token = crypto.randomBytes(32).toString("hex");
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+
+    await (svc.from("thread_invites") as any).insert({
+      thread_id: thread.id,
+      intended_role: mode === "owner_to_buyer" ? "buyer" : "owner",
       invitee_email: "outreach@fractpath.internal",
       token_hash: tokenHash,
       expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),

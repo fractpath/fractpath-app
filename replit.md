@@ -1,7 +1,7 @@
 # FractPath
 
 ## Overview
-FractPath is a Next.js application designed to engage homeowners by collecting exploratory scenario information and providing deterministic, non-binding summaries. These summaries integrate with HubSpot for sales follow-up, generating qualified sales opportunities. The platform features Supabase authentication with role-based onboarding (Homeowner, Buyer, Realtor), a user dashboard, and a deal resume flow that converts marketing DraftSnapshots into authenticated deals with immutable calculator snapshots. It also includes a share-link capability for read-only deal viewing. The project's vision is to streamline property transaction processes, enhance user engagement through clear, non-committal informational summaries, and efficiently generate qualified leads for sales teams, ultimately transforming how homeowners explore their property options.
+FractPath is a Next.js application designed to engage homeowners by collecting exploratory scenario information and providing deterministic, non-binding summaries. It integrates with HubSpot for sales follow-up, generating qualified sales opportunities. The platform features Supabase authentication with role-based onboarding (Homeowner, Buyer, Realtor), a user dashboard, a deal resume flow, and a share-link capability for read-only deal viewing. Its vision is to streamline property transaction processes, enhance user engagement, and efficiently generate qualified leads for sales teams, transforming how homeowners explore property options.
 
 ## User Preferences
 - Language must be neutral and exploratory (no deal/commitment language in user-facing copy)
@@ -13,54 +13,50 @@ FractPath is a Next.js application designed to engage homeowners by collecting e
 FractPath is built with Next.js, utilizing API routes for backend logic and Supabase for database and authentication.
 
 **UI/UX Decisions:**
-- **Role-based Onboarding:** User experience adapts based on selected role during signup.
-- **Deal Viewing:** Emphasizes immutable calculator snapshots and an audit trail, with share links providing read-only access.
-- **Unified Property Form:** A single modal handles property addition for both profile and deal contexts.
-- **Shared Modal Shell:** Consistent overlay/header/body/footer layout for modals.
-- **Enriched Property Preview:** A shared, audience-aware component for displaying property details, including images, stats, and address, with graceful fallback for missing enrichment data.
-- **Buyer-Facing Discovery Page:** Displays verified, public-visibility properties with enrichment thumbnails, key stats, and clear CTAs, without exposing private owner details or internal IDs.
+- Role-based onboarding and adaptive user experience.
+- Immutable calculator snapshots and an audit trail for deal viewing, with share links for read-only access.
+- Unified modal for property addition, ensuring consistent UI elements.
+- Enriched property preview component with graceful fallback for missing data.
+- Buyer-facing discovery page for public properties, omitting private owner details.
+- Unified property page layout across admin, owner, and public interfaces, including header, hero media, valuation/cash sections, and detailed property record sections.
 
 **Technical Implementations:**
-- **Authentication & Authorization:** Supabase manages user authentication, roles, and metadata, with Row Level Security (RLS) governing data access.
-- **Data Handling:** DraftSnapshots are captured, validated, and stored, converting to `Deal` objects and immutable `FullDealSnapshotV1` records upon authentication. Calculator snapshots are append-only and versioned.
-- **Properties Management:** Supports multiple properties per user, with structured address fields, status tracking, and a verification workflow using `normalized_address` for deduplication.
-- **Property Documents:** Stores verification uploads in Supabase Storage with signed URLs, server-side processing for file size, content-type sniffing, image transcoding, and fraud signal computation.
-- **Secured Debt Underwriting:** `properties` table carries private underwriting columns for secured property debt and fair market value (FMV). Owners declare secured debt, and `property_underwriting_snapshots` is an append-only table.
-- **Deal Triage:** `deals` table carries triage metadata columns (`triage_status`, `triage_reason_tags`, `fmv_plausibility_flag`), evaluated deterministically at offer-acceptance time.
-- **Canonical Lifecycle Engine:** A single source of truth for workflow status, returning detailed `CanonicalLifecycleResult` to drive user and admin displays.
-- **Milestone Tracking & Notifications:** Defines simplified stages for customer-facing progress and sends inline HTML emails via Resend for workflow milestones.
+- **Authentication & Authorization:** Supabase handles user authentication, roles, and Row Level Security (RLS).
+- **Data Handling:** DraftSnapshots are validated and stored, converting to `Deal` objects and immutable `FullDealSnapshotV1` records. Calculator snapshots are append-only and versioned.
+- **Properties Management:** Supports multiple properties per user, with structured address fields, status tracking, and verification using `normalized_address`.
+- **Property Documents:** Stores verification uploads in Supabase Storage with server-side processing for image transcoding and fraud signal computation.
+- **Secured Debt Underwriting:** `properties` table includes private underwriting columns for secured property debt and fair market value (FMV).
+- **Deal Triage:** `deals` table carries triage metadata columns evaluated at offer-acceptance.
+- **Canonical Lifecycle Engine:** Single source of truth for workflow status and `CanonicalLifecycleResult` generation.
+- **Milestone Tracking & Notifications:** Defines simplified stages for customer progress and sends inline HTML emails via Resend.
 - **Contract Versioning:** `CONTRACT_VERSION` and `SCHEMA_VERSION` are stamped at snapshot persistence boundaries.
-- **Property Enrichment:** Integrates with third-party providers (Mashvisor, RentCast) to enrich property data, storing raw and summarized payloads in `property_enrichments`.
-- **RentCast Facts Migration (Phase 2/3):** `PropertyFacts` type (`src/lib/property/propertyFacts.ts`) drives address/beds/baths/sqft/lot/year display across owner, public, admin pages from persisted `property_review_runs` rows. `PropertyAvm` and `PropertyReviewedBasis` types added; `EnrichedPropertyPreview` redesigned with hero → address → facts row → value section (AVM estimate + range + reviewed basis) → gallery → admin metadata. `valuationLabel` deprecated.
-- **Full RentCast Property Record (Phase 4):** `RentcastPropertyRecord` expanded with HOA, features, taxAssessments, propertyTaxes, history, assessorID, legalDescription, subdivision, zoning. `NormalizedPropertyProfile` and `normalizeRentcastPropertyProfile()` updated to persist all fields. `PropertyRecord` display type (`src/lib/property/propertyRecord.ts`) with `rentcastRecordToPropertyRecord()` and `normalizedProfileToRecord()` converters. `PropertyRecordSections` server component renders Property overview tiles (beds/baths/sqft/lot/year), Property Details, Home Features, Sale History, Tax & Assessment History sections. Wired into owner, public, and admin pages from `property_review_runs.normalized_payload` (sole canonical source). No new external API calls at render time.
-- **Property Status Lanes:** Provides pure derivation functions for three property status lanes: Participation, Valuation, and Closing Readiness, displayed consistently across admin, owner, and public interfaces.
-- **Phase 4 Full Redesign:** Unified property page layout across all three surfaces. `PropertyPageHeader` — H1 address + badge row (Status, Owner Verified, Appraisal) with tooltip states. `PropertyHeroMedia` — hero image carousel or map-fallback for owner, public, and admin audiences. `ValuationCashSection` — tabbed client component (RentCast / ATTOM review / Manual appraisal) with summary tiles (Estimated value, Range, Reviewed basis, Secured debt, Eligible cash); audience-aware (buyer hides debt/cash; admin shows secured debt). `PropertyDetailClient` gains `hideAddressCard`, `hideWorkflowWidget`, `hideValuationCards` suppression props. `PropertyRecordSections` `PropertyDetailsSection` filters assessor ID and legal description for buyer audience. All three property pages follow the canonical hierarchy: Header → Owner verification status (admin only) → Hero → Valuation summary → Secured debt section (owner/admin only) → PropertyRecordSections → operational panels. Admin page removes `AdminVendorReviewPanel`, `AdminMashvisorPanel`, and the Linked deal block. Owner verification controls moved to top of admin page (below badge row). Duplicate address/status card removed from admin page. Public page excludes assessor ID and legal description from PropertyDetailsSection.
-- **Owner Photo Management:** `property_photos` table (UUID PK, soft-delete via `removed_at`, sort_order, is_hero flag, public_url). Public Supabase storage bucket `property-photos`. API routes: GET/POST photos, DELETE (soft), PATCH hero, PATCH reorder. `PropertyHeroMedia` updated with `ownerPhotos` + `onManagePhotos` props; priority: owner hero → first owner photo → vendor images → map fallback. `PropertyMediaSection` client component wraps hero + `ManagePhotosModal` for owner/admin pages. Hero badge and star thumbnail indicators for hero photo.
-- **Owner Property Settings Modal:** `PropertySettingsModal` client component (visibility: private/public, proposal interest status: not_interested/interested/open). PATCH `/api/me/properties/[id]/settings`. `OwnerPropertyEditControls` bar below hero on owner page shows current settings + two action buttons (Settings, Suggest correction).
-- **Owner Fact Correction Suggestions:** `property_fact_corrections` table (field_key, canonical_value, owner_submitted_value, review_status: pending/approved/rejected). Unique index prevents duplicate active corrections per field. `SuggestPropertyDetailUpdateModal` lets owners suggest values for 6 correctable fields (beds, baths, sqft, lot, year_built, owner_occupied). Blocked fields shown as disabled in select.
-- **Admin Fact Correction Review:** `AdminFactCorrectionPanel` client component shows pending/resolved corrections grouped by status. Approve/reject with optional reviewer note via POST `/api/admin/properties/[id]/corrections/[corrId]/review`. Added to admin page after PropertyRecordSections.
-- **Immutable Audit Trail:** `property_edit_audit` table with UPDATE/DELETE triggers that raise exceptions (append-only). Covers: photo_uploaded, photo_removed, photo_hero_set, photo_reordered, settings_updated, correction_submitted, correction_approved, correction_rejected.
-- **Legal Document Publishing (Version 2):** Privacy Policy and Terms of Use (Version 2, effective April 12, 2026) stored verbatim as TypeScript constants in `src/lib/policies/content.ts`. `EULA_VERSION = "v2"` in `src/lib/eula.ts` gates re-acceptance. `policy_acceptances` table (user_id, policy_type, terms_of_use|privacy_policy, policy_version, accepted_at, ip_address, user_agent, device_metadata) stores per-policy acceptance with metadata. `/api/me/eula` POST atomically inserts both policy acceptance rows + updates `profiles.eula_version`. `OnboardingGate` shows a tabbed modal (Privacy Policy / Terms of Use) with full scrollable legal text and "Accept both" / "Decline and sign out" actions. Public `/privacy` and `/terms` routes serve the full policy text. `/eula-required` updated with links to both policy pages.
-- **Public Property Map (Phase 1):** `/map` page with MapLibre GL JS (v5) rendering Mapbox Streets raster tiles via `NEXT_PUBLIC_MAPBOX_TOKEN`. `GET /api/map/public-properties` returns enriched `DiscoveryProperty[]` (id, address, lat, lng, status, verified_at, hero_photo_url, **rentcast_avm**, beds, baths, sqft, year_built, property_type) for verified+public+non-private properties with lat/lng. No ATTOM FMV fields exposed. Hero photo: owner hero → first owner photo → Mashvisor cover fallback. Markers rendered as HTML elements; click opens popup with thumbnail, address, facts, FMV, and "View Property" link. Default center: Annapolis, MD (38.978, -76.492), zoom 8. No auth required.
-- **Verified Properties Discovery Surface:** `/verified-properties` refactored into a map+cards discovery page. Server component fetches enriched `DiscoveryProperty[]` (lat/lng/hero/facts/rentcast_avm). Passes to `VerifiedPropertiesClient` (client component) which renders: search input (city/ZIP/address), sort control (newest/value-desc/value-asc), `PropertyMapEmbed` (shared data — no separate API fetch), and property cards grid. Marker click → highlights card and scrolls to it; card click → highlights card and flies map to that marker. **Card est value source: `property_review_summary.fmv_amount` (RentCast AVM) — ATTOM controlling FMV (`properties.latest_verified_fmv`) is intentionally excluded from the public browse API.** If no RentCast AVM exists, est value is omitted. Properties without lat/lng appear in card grid but not on map. `PropertyMapEmbed`: scroll-wheel zoom disabled, NavigationControl (+/−) added, tile URL includes `/512/` size segment (fixes Mapbox 403s). Map never remounts on filter/sort changes; markers synced incrementally; bounds fit on first load only.
-- **Property Detail Page Location Map:** `/verified-properties/[propertyId]` now fetches `latitude, longitude` directly from the properties table row (added to `PUBLIC_SELECT`). A "Location" section below `PropertyRecordSections` renders a Mapbox Static Images API `<img>` (600×240 @2x, zoom 14, with pin marker) — no JS, no client component, fully server-rendered. Shown only when both lat/lng are present and `NEXT_PUBLIC_MAPBOX_TOKEN` is set.
+- **Property Enrichment:** Integrates with third-party providers (Mashvisor, RentCast) to enrich property data, storing raw and summarized payloads. `PropertyFacts`, `PropertyAvm`, and `PropertyReviewedBasis` types are used for consistent display.
+- **Owner Photo Management:** `property_photos` table supports soft-delete, sorting, and hero photo selection. API routes manage photos in Supabase Storage.
+- **Owner Property Settings:** `PropertySettingsModal` allows owners to manage property visibility and proposal interest status.
+- **Owner Fact Correction Suggestions:** `property_fact_corrections` table records owner-submitted corrections for specific fields with a review workflow.
+- **Owner-Initiated Deal Creation:** Owners can create deals from their property page, with a specific UI variant for sending to potential buyers.
+- **Immutable Audit Trail:** `property_edit_audit` table tracks property modifications via triggers.
+- **Legal Document Publishing:** Versioned Privacy Policy and Terms of Use are stored as TypeScript constants, with user acceptance tracked in `policy_acceptances`.
+- **Public Property Map:** `/map` page uses MapLibre GL JS to display public properties, including enriched data like AVM, beds, baths, sqft, and hero photos.
+- **Verified Properties Discovery Surface:** `/verified-properties` page combines map and cards for discovery, allowing search, sort, and interactive map/card highlighting.
+- **Property Detail Page Location Map:** Displays a server-rendered Mapbox Static Images API map with a pin for property location.
 
 **Feature Specifications:**
-- **Homeowner Intake:** Core data collection form.
-- **User Dashboard:** Role-specific content displaying deal cards and next steps.
-- **Deal Resume:** Converts marketing drafts into authenticated deals.
-- **Offer/Counter-Offer/Accept/Reject:** Functionality for managing deal negotiation states.
-- **Transactional Email:** Sends HTML emails via Resend API, logging attempts and outcomes.
-- **Compute Endpoint:** Handles computation of deal snapshots using the canonical engine.
-- **Share Link Flow:** Enables generation of shareable URLs for read-only deal viewing with token validation.
-- **Deal Terms Modal:** Custom 4-tab modal (Payments, Exit Terms, Assumptions, Fees) for configuring deal specifics.
-- **Owner Debt Challenge:** Allows owners to submit statements regarding debt discrepancies.
+- **Homeowner Intake:** Core data collection.
+- **User Dashboard:** Role-specific content and deal cards.
+- **Deal Resume:** Converts marketing drafts to authenticated deals.
+- **Offer/Counter-Offer/Accept/Reject:** Deal negotiation states.
+- **Transactional Email:** Sends HTML emails via Resend.
+- **Compute Endpoint:** Calculates deal snapshots using the canonical engine.
+- **Share Link Flow:** Generates shareable, read-only deal URLs.
+- **Deal Terms Modal:** Configures deal specifics across payments, exit terms, assumptions, and fees.
+- **Owner Debt Challenge:** Allows owners to submit debt discrepancy statements.
 
 ## External Dependencies
 - **Next.js:** Application framework.
 - **Supabase:** Database, authentication, and Row Level Security.
 - **HubSpot:** Sales follow-up integration.
-- **@fractpath/compute:** Canonical compute engine for deal calculations.
+- **@fractpath/compute:** Canonical compute engine.
 - **fractpath-calculator-widget:** React UI components and compute utilities.
 - **Resend:** Transactional email service.
 - **sharp:** Server-side image processing.

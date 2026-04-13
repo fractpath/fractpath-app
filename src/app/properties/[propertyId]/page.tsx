@@ -31,6 +31,7 @@ import {
   isAppraisalBadgeUnderReview,
 } from "@/lib/property/badges";
 import { deriveValuationLane } from "@/lib/property/statusLanes";
+import { propertyHasActiveDeal } from "@/lib/deal/activeDealCheck";
 
 export const runtime = "nodejs";
 
@@ -415,6 +416,22 @@ export default async function PropertyDetailPage({ params }: PageProps) {
   const heroLng = ownerPropertyRecord?.longitude ?? null;
   const heroAddress = ownerPropertyRecord?.formattedAddress ?? address_display ?? null;
 
+  // ── Owner deal CTA: active-deal check ────────────────────────────────────
+  // Show "Create deal" CTA only when the property is verified, the owner has
+  // not opted out of proposals, and no active deal already exists.
+  let ownerCanCreateDeal = false;
+  if (
+    row.status === "verified" &&
+    row.proposal_interest_status !== "not_interested"
+  ) {
+    try {
+      const hasActive = await propertyHasActiveDeal(svc, propertyId);
+      ownerCanCreateDeal = !hasActive;
+    } catch {
+      ownerCanCreateDeal = false; // fail-closed
+    }
+  }
+
   // ── Badge computation for PropertyPageHeader ─────────────────────────────
   const ownerValuationLaneForBadge = deriveValuationLane({
     manualAppraisalStatus: workflowState.manualAppraisalStatus,
@@ -468,6 +485,33 @@ export default async function PropertyDetailPage({ params }: PageProps) {
           expiresAt={row.property_review_expires_at ?? null}
           isParticipationApproved={row.status === "verified"}
         />
+
+        {/* ── A2. Owner deal CTA — only when property is verified and eligible ── */}
+        {ownerCanCreateDeal ? (
+          <div className="flex items-center justify-between rounded-lg border bg-card px-4 py-4">
+            <p className="text-sm text-muted-foreground">
+              Ready to explore a home equity agreement for this property?
+            </p>
+            <Link
+              href={`/deal/new?propertyId=${propertyId}`}
+              className="ml-4 shrink-0 rounded-md bg-foreground px-4 py-2 text-sm font-semibold text-background hover:opacity-90 transition-opacity"
+            >
+              Create deal
+            </Link>
+          </div>
+        ) : row.status === "verified" && linkedDeal?.deal_id ? (
+          <div className="flex items-center justify-between rounded-lg border bg-muted/40 px-4 py-3">
+            <p className="text-sm text-muted-foreground">
+              An active deal is in progress for this property.
+            </p>
+            <Link
+              href={`/deal/${linkedDeal.deal_id}`}
+              className="ml-4 shrink-0 rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted/40 transition-colors"
+            >
+              View deal
+            </Link>
+          </div>
+        ) : null}
 
         {/* ── B. Hero media — owner photos first, vendor fallback, then map ── */}
         <PropertyMediaSection
