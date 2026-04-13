@@ -1,386 +1,177 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { AppHeader } from "@/components/layout/AppHeader";
-import Image from "next/image";
-import Link from "next/link";
+import type { DiscoveryProperty } from "@/app/api/map/public-properties/route";
+import { VerifiedPropertiesClient } from "@/components/property/VerifiedPropertiesClient";
 
 export const runtime = "nodejs";
 
-type PropertyRow = {
-  id: string;
-  address_line1: string;
-  address_line2: string | null;
-  city: string | null;
-  state: string | null;
-  postal_code: string | null;
-  verified_at: string | null;
-  ownership_type: string | null;
-  occupancy_use: string | null;
-  // Hero image — owner photo takes priority over vendor enrichment
-  hero_image_url?: string | null;
-  property_type?: string | null;
-  beds?: number | null;
-  baths?: number | null;
-  sqft?: number | null;
-  lot_size?: number | null;
-  year_built?: number | null;
-  value_estimate?: number | null;
-};
-
-type EnrichmentRow = {
-  property_id: string;
-  images_payload: { cover_image_url: string | null; image_urls: string[] } | null;
-  summary_payload: {
-    property_type: string | null;
-    beds: number | null;
-    baths: number | null;
-    sqft: number | null;
-    value_estimate: number | null;
-  } | null;
-};
-
-function formatAddress(row: PropertyRow): string {
-  const parts: string[] = [];
-  if (row.address_line1) parts.push(row.address_line1);
-  if (row.address_line2) parts.push(row.address_line2);
-  const cityStateZip: string[] = [];
-  if (row.city) cityStateZip.push(row.city);
-  if (row.state) cityStateZip.push(row.state);
-  if (row.postal_code) cityStateZip.push(row.postal_code);
-  if (cityStateZip.length > 0) parts.push(cityStateZip.join(", "));
-  return parts.join("\n");
-}
-
-function fmtNum(val: number | null | undefined): string {
-  if (val == null) return "";
-  return new Intl.NumberFormat("en-US").format(val);
-}
-
-function fmtCurrency(val: number | null | undefined): string {
-  if (val == null) return "";
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(val);
-}
-
-function humanizeOccupancy(val: string | null | undefined): string | null {
-  if (!val) return null;
-  if (val === "primary_residence") return "Primary residence";
-  if (val === "secondary_residence") return "Secondary residence";
-  if (val === "rental_property") return "Rental property";
-  return val.replace(/_/g, " ");
-}
-
 export default async function VerifiedPropertiesPage() {
   const supabase = createServiceClient();
+  const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
 
   // Eligibility: canonical verified state + publicly enabled.
   // verified_at is used for display only — its absence does NOT disqualify a verified property.
-  // Nulls are sorted last so properties with a stamped date appear first.
+  // Nulls sorted last so properties with a stamped date appear first.
   const { data, error } = await (supabase.from("properties") as any)
     .select(
-      "id, address_line1, address_line2, city, state, postal_code, verified_at, ownership_type, occupancy_use",
+      "id, address_line1, city, state, postal_code, verified_at, latitude, longitude, latest_verified_fmv",
     )
     .eq("status", "verified")
     .eq("visibility_preference", "public")
     .order("verified_at", { ascending: false, nullsFirst: false });
 
-  let rows: PropertyRow[] = error ? [] : ((data ?? []) as PropertyRow[]);
+  const baseRows: any[] = error ? [] : (data ?? []);
 
-  // Batch-fetch enrichment, RentCast canonical facts, owner photos, and approved corrections
-  if (rows.length > 0) {
-    const ids = rows.map((r) => r.id);
+  let properties: DiscoveryProperty[] = [];
 
-    // 1. Mashvisor enrichment (vendor image + summary fallback)
-    const { data: enrichmentRows } = await (supabase
-      .from("property_enrichments") as any)
-      .select("property_id, images_payload, summary_payload")
-      .in("property_id", ids)
-      .eq("is_current", true)
-      .eq("provider", "mashvisor")
-      .not("summary_payload", "is", null);
+  if (baseRows.length > 0) {
+    const ids = baseRows.map((r: any) => r.id);
 
-    const enrichMap = new Map<string, EnrichmentRow>();
-    for (const e of (enrichmentRows ?? []) as EnrichmentRow[]) {
-      enrichMap.set(e.property_id, e);
+    // Parallel enrichment fetches
+    const [photoResult, enrichResult, rentcastResult, correctionResult] = await Promise.all([
+      // 1. Owner photos (hero priority)
+      (supabase.from("property_photos") as any)
+        .select("property_id, public_url, is_hero, sort_order, created_at")
+        .in("property_id", ids)
+        .is("removed_at", null)
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true }),
+
+      // 2. Mashvisor cover image (fallback only — not used for valuation)
+      (supabase.from("property_enrichments") as any)
+        .select("property_id, images_payload")
+        .in("property_id", ids)
+        .eq("is_current", true)
+        .eq("provider", "mashvisor"),
+
+      // 3. RentCast canonical property profile (beds/baths/sqft/year_built/type)
+      (supabase.from("property_review_runs") as any)
+        .select("property_id, normalized_payload")
+        .in("property_id", ids)
+        .eq("provider", "rentcast")
+        .eq("artifact_type", "property_profile")
+        .eq("is_current", true)
+        .eq("status", "completed"),
+
+      // 4. Approved owner corrections
+      (supabase.from("property_fact_corrections") as any)
+        .select("property_id, field_key, owner_submitted_value")
+        .in("property_id", ids)
+        .eq("review_status", "approved"),
+    ]);
+
+    // Hero photo maps
+    const heroMap = new Map<string, string>();
+    const firstMap = new Map<string, string>();
+    for (const photo of photoResult.data ?? []) {
+      if (!photo?.property_id) continue;
+      if (photo.is_hero && !heroMap.has(photo.property_id))
+        heroMap.set(photo.property_id, photo.public_url);
+      if (!firstMap.has(photo.property_id))
+        firstMap.set(photo.property_id, photo.public_url);
     }
 
-    // 2. RentCast canonical property profile (beds/baths/sqft/lot/year_built)
-    const { data: rentcastRows } = await (supabase
-      .from("property_review_runs") as any)
-      .select("property_id, normalized_payload")
-      .in("property_id", ids)
-      .eq("provider", "rentcast")
-      .eq("artifact_type", "property_profile")
-      .eq("is_current", true)
-      .eq("status", "completed");
+    // Vendor cover image fallback map
+    const vendorCoverMap = new Map<string, string>();
+    for (const e of enrichResult.data ?? []) {
+      const cover = e?.images_payload?.cover_image_url ?? null;
+      if (cover) vendorCoverMap.set(e.property_id, cover);
+    }
 
-    type RentcastFactsMap = {
+    // RentCast facts map
+    type RCFacts = {
       beds: number | null;
       baths: number | null;
       sqft: number | null;
-      lot_size: number | null;
       year_built: number | null;
       property_type: string | null;
     };
-    const rentcastMap = new Map<string, RentcastFactsMap>();
-    for (const run of rentcastRows ?? []) {
+    const rentcastMap = new Map<string, RCFacts>();
+    for (const run of rentcastResult.data ?? []) {
       if (!run?.property_id || !run?.normalized_payload) continue;
       const p = run.normalized_payload as any;
       rentcastMap.set(run.property_id, {
         beds: p.bedrooms ?? null,
         baths: p.bathrooms ?? null,
         sqft: p.squareFootage ?? null,
-        lot_size: p.lotSize ?? null,
         year_built: p.yearBuilt ?? null,
         property_type: p.propertyType ?? null,
       });
     }
 
-    // 3. Owner hero photos — hero priority rule
-    const { data: photoRows } = await (supabase
-      .from("property_photos") as any)
-      .select("property_id, public_url, is_hero, sort_order, created_at")
-      .in("property_id", ids)
-      .is("removed_at", null)
-      .order("sort_order", { ascending: true })
-      .order("created_at", { ascending: true });
-
-    const heroPhotoMap = new Map<string, string>();
-    const firstPhotoMap = new Map<string, string>();
-    for (const photo of photoRows ?? []) {
-      if (!photo?.property_id) continue;
-      if (photo.is_hero && !heroPhotoMap.has(photo.property_id)) {
-        heroPhotoMap.set(photo.property_id, photo.public_url);
-      }
-      if (!firstPhotoMap.has(photo.property_id)) {
-        firstPhotoMap.set(photo.property_id, photo.public_url);
-      }
-    }
-
-    // 4. Approved corrections — override canonical displayed values
-    const { data: correctionRows } = await (supabase
-      .from("property_fact_corrections") as any)
-      .select("property_id, field_key, owner_submitted_value, review_status")
-      .in("property_id", ids)
-      .eq("review_status", "approved");
-
-    type CorrectionsMap = Record<string, string>;
-    const correctionMap = new Map<string, CorrectionsMap>();
-    for (const c of correctionRows ?? []) {
+    // Approved corrections map
+    const correctionMap = new Map<string, Record<string, string>>();
+    for (const c of correctionResult.data ?? []) {
       if (!c?.property_id) continue;
       const existing = correctionMap.get(c.property_id) ?? {};
       existing[c.field_key] = c.owner_submitted_value;
       correctionMap.set(c.property_id, existing);
     }
 
-    rows = rows.map((row) => {
-      const e = enrichMap.get(row.id);
+    function applyNumericCorrection(
+      propertyId: string,
+      field: string,
+      value: number | null,
+    ): number | null {
+      const corrections = correctionMap.get(propertyId) ?? {};
+      const corrected = corrections[field];
+      if (corrected !== undefined) {
+        const n = Number(corrected);
+        return isNaN(n) ? value : n;
+      }
+      return value;
+    }
+
+    properties = baseRows.map((row: any) => {
       const rc = rentcastMap.get(row.id);
-      const corrections = correctionMap.get(row.id) ?? {};
+      const heroPhotoUrl =
+        heroMap.get(row.id) ?? firstMap.get(row.id) ?? vendorCoverMap.get(row.id) ?? null;
 
-      // Resolve hero image with priority: owner hero > first owner photo > vendor cover image
-      const ownerHero = heroPhotoMap.get(row.id) ?? firstPhotoMap.get(row.id) ?? null;
-      const vendorCover = e?.images_payload?.cover_image_url ?? null;
-      const hero_image_url = ownerHero ?? vendorCover;
+      // lat/lng: from properties table directly
+      const lat = typeof row.latitude === "number" ? row.latitude : null;
+      const lng = typeof row.longitude === "number" ? row.longitude : null;
 
-      // Resolve facts: RentCast canonical > Mashvisor summary fallback, then apply approved corrections
-      const applyCorrection = (field: string, value: number | null): number | null => {
-        const corrected = corrections[field];
-        if (corrected !== undefined) {
-          const n = Number(corrected);
-          return isNaN(n) ? value : n;
-        }
-        return value;
+      const entry: DiscoveryProperty & { latitude: number | null; longitude: number | null } = {
+        id: row.id,
+        address_line1: row.address_line1 ?? null,
+        city: row.city ?? null,
+        state: row.state ?? null,
+        postal_code: row.postal_code ?? null,
+        latitude: lat,
+        longitude: lng,
+        status: "verified",
+        verified_at: row.verified_at ?? null,
+        // Est value: properties.latest_verified_fmv — the canonical, review-stamped FMV.
+        // Mashvisor-derived value_estimate is NOT used here.
+        latest_verified_fmv: typeof row.latest_verified_fmv === "number" ? row.latest_verified_fmv : null,
+        hero_photo_url: heroPhotoUrl,
+        beds: applyNumericCorrection(row.id, "bedrooms", rc?.beds ?? null),
+        baths: applyNumericCorrection(row.id, "bathrooms", rc?.baths ?? null),
+        sqft: applyNumericCorrection(row.id, "sqft_living", rc?.sqft ?? null),
+        year_built: applyNumericCorrection(row.id, "year_built", rc?.year_built ?? null),
+        property_type: rc?.property_type ?? null,
       };
-
-      const beds = applyCorrection("bedrooms", rc?.beds ?? e?.summary_payload?.beds ?? null);
-      const baths = applyCorrection("bathrooms", rc?.baths ?? e?.summary_payload?.baths ?? null);
-      const sqft = applyCorrection("sqft_living", rc?.sqft ?? e?.summary_payload?.sqft ?? null);
-      const lot_size = applyCorrection("lot_sqft", rc?.lot_size ?? null);
-      const year_built = applyCorrection("year_built", rc?.year_built ?? null);
-      const property_type = rc?.property_type ?? e?.summary_payload?.property_type ?? null;
-      const value_estimate = e?.summary_payload?.value_estimate ?? null;
-
-      return {
-        ...row,
-        hero_image_url,
-        property_type,
-        beds,
-        baths,
-        sqft,
-        lot_size,
-        year_built,
-        value_estimate,
-      };
+      return entry;
     });
+
+    // Filter map-eligible entries (lat/lng required for markers)
+    // Cards show all; map only shows those with coordinates — handled client-side.
   }
 
   return (
     <div className="min-h-screen bg-background">
       <AppHeader />
 
-      <main className="mx-auto max-w-5xl px-4 py-10 space-y-8">
-        {/* Page header */}
+      <main className="mx-auto max-w-5xl px-4 py-10 space-y-6">
         <div className="space-y-1.5">
           <h1 className="text-2xl font-semibold">Verified Properties</h1>
           <p className="text-sm text-muted-foreground max-w-xl">
-            Verified properties open to home equity agreement proposals. Each
-            property shown here has completed the verification process.
+            Verified properties open to home equity agreement proposals. Each property shown here
+            has completed the verification process.
           </p>
         </div>
 
-        {/* Grid */}
-        {rows.length === 0 ? (
-          <div className="rounded-lg border p-8 text-center text-sm text-muted-foreground">
-            No verified properties are currently available. Check back later.
-          </div>
-        ) : (
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {rows.map((row) => {
-              const address = formatAddress(row);
-              const hasStats = row.beds || row.baths || row.sqft || row.lot_size || row.year_built || row.value_estimate;
-              const occupancyLabel = humanizeOccupancy(row.occupancy_use);
-              const typeLabel = row.property_type
-                ? row.property_type
-                : occupancyLabel;
-
-              return (
-                <div
-                  key={row.id}
-                  className="rounded-xl border bg-card overflow-hidden shadow-sm flex flex-col"
-                >
-                  {/* Thumbnail — owner hero priority */}
-                  <div className="relative h-44 bg-muted/40 flex-shrink-0">
-                    {row.hero_image_url ? (
-                      <Image
-                        src={row.hero_image_url}
-                        alt={`Property at ${row.address_line1 ?? "verified property"}`}
-                        fill
-                        className="object-cover"
-                        unoptimized
-                      />
-                    ) : (
-                      <div className="flex h-full items-center justify-center">
-                        <svg
-                          className="w-10 h-10 text-muted-foreground/30"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                          aria-hidden="true"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={1.5}
-                            d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"
-                          />
-                        </svg>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Card body */}
-                  <div className="p-4 flex flex-col gap-3 flex-1">
-                    {/* Verified badge */}
-                    <div>
-                      <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                        <svg
-                          className="w-3 h-3"
-                          fill="currentColor"
-                          viewBox="0 0 20 20"
-                          aria-hidden="true"
-                        >
-                          <path
-                            fillRule="evenodd"
-                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                        Verified
-                      </span>
-                    </div>
-
-                    {/* Address */}
-                    <div>
-                      <div className="text-sm font-semibold leading-snug whitespace-pre-line">
-                        {address}
-                      </div>
-                      {typeLabel && (
-                        <div className="text-xs text-muted-foreground mt-0.5 capitalize">
-                          {typeLabel}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Canonical stats strip — RentCast facts with approved-correction overlay */}
-                    {hasStats && (
-                      <div className="flex flex-wrap gap-3 text-sm">
-                        {row.beds != null && (
-                          <div className="text-center">
-                            <div className="font-semibold">{row.beds}</div>
-                            <div className="text-[11px] text-muted-foreground">Beds</div>
-                          </div>
-                        )}
-                        {row.baths != null && (
-                          <div className="text-center">
-                            <div className="font-semibold">{row.baths}</div>
-                            <div className="text-[11px] text-muted-foreground">Baths</div>
-                          </div>
-                        )}
-                        {row.sqft != null && (
-                          <div className="text-center">
-                            <div className="font-semibold">{fmtNum(row.sqft)}</div>
-                            <div className="text-[11px] text-muted-foreground">Sq ft</div>
-                          </div>
-                        )}
-                        {row.lot_size != null && (
-                          <div className="text-center">
-                            <div className="font-semibold">{fmtNum(row.lot_size)}</div>
-                            <div className="text-[11px] text-muted-foreground">Lot sq ft</div>
-                          </div>
-                        )}
-                        {row.year_built != null && (
-                          <div className="text-center">
-                            <div className="font-semibold">{row.year_built}</div>
-                            <div className="text-[11px] text-muted-foreground">Built</div>
-                          </div>
-                        )}
-                        {row.value_estimate != null && (
-                          <div className="text-center">
-                            <div className="font-semibold">
-                              {fmtCurrency(row.value_estimate)}
-                            </div>
-                            <div className="text-[11px] text-muted-foreground">
-                              Est. value
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* CTA */}
-                    <div className="mt-auto pt-2">
-                      <Link
-                        href={`/verified-properties/${row.id}`}
-                        className="block w-full rounded-md bg-foreground px-3 py-2 text-center text-sm font-medium text-background hover:opacity-90 transition-opacity"
-                      >
-                        View Property
-                      </Link>
-                    </div>
-                  </div>
-
-                  {/* Compliance footer */}
-                  <div className="px-4 py-2 border-t bg-muted/20 text-[10px] text-muted-foreground">
-                    Not a public listing or offer of sale. Subject to review.
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+        <VerifiedPropertiesClient properties={properties} token={token} />
       </main>
     </div>
   );

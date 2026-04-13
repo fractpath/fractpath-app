@@ -24,7 +24,7 @@ type PageProps = {
 // Valuation-derivation columns (last four) are used server-side ONLY to compute
 // the displayed label — they are never rendered as raw values in the HTML.
 const PUBLIC_SELECT =
-  "id, address_line1, address_line2, city, state, postal_code, status, visibility_preference, verified_at, ownership_type, occupancy_use, latest_verified_fmv, escalation_avm_status, manual_appraisal_status, fmv_verification_source";
+  "id, address_line1, address_line2, city, state, postal_code, status, visibility_preference, verified_at, ownership_type, occupancy_use, latest_verified_fmv, escalation_avm_status, manual_appraisal_status, fmv_verification_source, latitude, longitude";
 
 function formatFullAddress(row: {
   address_line1: string | null;
@@ -277,6 +277,37 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
         {publicPropertyRecord && (
           <PropertyRecordSections record={publicPropertyRecord} audience="buyer" />
         )}
+
+        {/* ── F. Location map — Mapbox Static Images (non-interactive, lightweight) ── */}
+        {(() => {
+          const propLat =
+            typeof (row as any).latitude === "number" ? (row as any).latitude : null;
+          const propLng =
+            typeof (row as any).longitude === "number" ? (row as any).longitude : null;
+          const mapToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+          if (propLat == null || propLng == null || !mapToken) return null;
+          const staticUrl =
+            `https://api.mapbox.com/styles/v1/mapbox/streets-v12/static/` +
+            `pin-s-l+000(${propLng},${propLat})/` +
+            `${propLng},${propLat},14/` +
+            `600x240@2x?access_token=${mapToken}`;
+          return (
+            <section className="rounded-xl border overflow-hidden">
+              <div className="px-4 py-3 border-b bg-muted/20">
+                <h2 className="text-sm font-semibold">Location</h2>
+              </div>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={staticUrl}
+                alt={`Map showing location of ${fullAddress}`}
+                className="w-full block"
+                loading="lazy"
+                width={600}
+                height={240}
+              />
+            </section>
+          );
+        })()}
 
         {/* Compliance note */}
         <p className="text-[11px] text-muted-foreground border-t pt-4">
