@@ -1,147 +1,11 @@
 "use client";
 
 import { useState, useMemo, useRef, useCallback } from "react";
-import Link from "next/link";
 import type { DiscoveryProperty } from "@/app/api/map/public-properties/route";
 import { PropertyMapEmbed } from "@/components/map/PropertyMapEmbed";
+import { PropertyDiscoveryCard } from "@/components/property/PropertyDiscoveryCard";
 
 type SortKey = "newest" | "value_desc" | "value_asc";
-
-function fmtNum(n: number): string {
-  return n.toLocaleString("en-US");
-}
-
-function fmtCurrency(n: number): string {
-  return n.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  });
-}
-
-function PropertyCard({
-  property,
-  isHighlighted,
-  onClick,
-  cardRef,
-}: {
-  property: DiscoveryProperty;
-  isHighlighted: boolean;
-  onClick: () => void;
-  cardRef: (el: HTMLDivElement | null) => void;
-}) {
-  const addr = property.address_line1 ?? "";
-  const csz = [property.city, property.state, property.postal_code]
-    .filter(Boolean)
-    .join(", ");
-  const typeLabel = property.property_type ?? null;
-
-  const facts = [
-    property.beds != null ? `${property.beds} bd` : null,
-    property.baths != null ? `${property.baths} ba` : null,
-    property.sqft != null ? `${fmtNum(property.sqft)} sqft` : null,
-    property.year_built != null ? `Built ${property.year_built}` : null,
-  ].filter(Boolean);
-
-  return (
-    <div
-      ref={cardRef}
-      onClick={onClick}
-      className={[
-        "rounded-xl border bg-card overflow-hidden shadow-sm flex flex-col cursor-pointer transition-all duration-150",
-        isHighlighted
-          ? "ring-2 ring-blue-500 shadow-md"
-          : "hover:shadow-md hover:border-border/80",
-      ].join(" ")}
-    >
-      {/* Thumbnail */}
-      <div className="relative h-44 bg-muted/40 flex-shrink-0">
-        {property.hero_photo_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={property.hero_photo_url}
-            alt={`Property at ${addr || "verified property"}`}
-            className="w-full h-full object-cover"
-            loading="lazy"
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center">
-            <svg
-              className="w-10 h-10 text-muted-foreground/30"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.5}
-                d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"
-              />
-            </svg>
-          </div>
-        )}
-      </div>
-
-      {/* Card body */}
-      <div className="p-4 flex flex-col gap-2.5 flex-1">
-        <div>
-          <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
-            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
-              <path
-                fillRule="evenodd"
-                d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
-                clipRule="evenodd"
-              />
-            </svg>
-            Verified
-          </span>
-        </div>
-
-        <div>
-          <div className="text-sm font-semibold leading-snug">{addr}</div>
-          <div className="text-xs text-muted-foreground mt-0.5">
-            {csz}
-            {typeLabel && csz ? ` · ${typeLabel}` : typeLabel ?? ""}
-          </div>
-        </div>
-
-        {facts.length > 0 && (
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-            {facts.map((f) => (
-              <span key={f}>{f}</span>
-            ))}
-          </div>
-        )}
-
-        {property.rentcast_avm != null && (
-          <div>
-            <span className="text-base font-bold tabular-nums text-foreground">
-              {fmtCurrency(property.rentcast_avm)}
-            </span>
-            <span className="ml-1.5 text-[11px] text-muted-foreground">Est. value</span>
-          </div>
-        )}
-
-        <div className="mt-auto pt-1">
-          <Link
-            href={`/verified-properties/${property.id}`}
-            onClick={(e) => e.stopPropagation()}
-            className="block w-full rounded-md bg-foreground px-3 py-2 text-center text-sm font-medium text-background hover:opacity-90 transition-opacity"
-          >
-            View Property
-          </Link>
-        </div>
-      </div>
-
-      <div className="px-4 py-2 border-t bg-muted/20 text-[10px] text-muted-foreground">
-        Not a public listing or offer of sale. Subject to review.
-      </div>
-    </div>
-  );
-}
 
 export function VerifiedPropertiesClient({
   properties,
@@ -152,9 +16,49 @@ export function VerifiedPropertiesClient({
 }) {
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("newest");
+  // highlightedId: which property has the blue ring on its page card + highlighted marker
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  // flyToId: triggers map.flyTo for a property (set by card click)
   const [flyToId, setFlyToId] = useState<string | null>(null);
+  // selectedId: which property's overlay card is open in the map (set by marker click)
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
+  // ── On-demand photo cache ──────────────────────────────────────────────────
+  // photoCacheRef: mutation guard (avoids stale closure in loadPhotos)
+  // photoCache: React state driving re-renders when new photos arrive
+  const photoCacheRef = useRef<Map<string, string[]>>(new Map());
+  const [photoCache, setPhotoCache] = useState<Map<string, string[]>>(new Map());
+
+  const loadingRef = useRef<Set<string>>(new Set());
+  const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set());
+
+  const loadPhotos = useCallback(async (propertyId: string) => {
+    if (photoCacheRef.current.has(propertyId) || loadingRef.current.has(propertyId)) return;
+
+    loadingRef.current.add(propertyId);
+    setLoadingIds((prev) => new Set([...prev, propertyId]));
+
+    try {
+      const res = await fetch(`/api/map/property-photos/${propertyId}`);
+      if (res.ok) {
+        const data = await res.json();
+        const urls: string[] = Array.isArray(data.photos) ? data.photos : [];
+        photoCacheRef.current.set(propertyId, urls);
+        setPhotoCache((prev) => new Map([...prev, [propertyId, urls]]));
+      }
+    } finally {
+      loadingRef.current.delete(propertyId);
+      setLoadingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(propertyId);
+        return next;
+      });
+    }
+  }, []);
+
+  // ── Filter / sort ──────────────────────────────────────────────────────────
 
   const filtered = useMemo(() => {
     let result = [...properties];
@@ -199,17 +103,35 @@ export function VerifiedPropertiesClient({
     [filtered],
   );
 
-  const handleMarkerClick = useCallback((id: string) => {
-    setHighlightedId(id);
-    const card = cardRefs.current.get(id);
-    if (card) {
-      card.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    }
-  }, []);
+  const selectedProperty = useMemo(
+    () => (selectedId ? (properties.find((p) => p.id === selectedId) ?? null) : null),
+    [selectedId, properties],
+  );
 
+  // ── Interaction handlers ───────────────────────────────────────────────────
+
+  // Marker click: open overlay, highlight marker, scroll page card into view
+  const handleMarkerClick = useCallback(
+    (id: string) => {
+      setSelectedId(id);
+      setHighlightedId(id);
+      const card = cardRefs.current.get(id);
+      if (card) {
+        card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    },
+    [],
+  );
+
+  // Card click: fly map to marker, highlight; close any open overlay
   const handleCardClick = useCallback((id: string) => {
+    setSelectedId(null);
     setHighlightedId(id);
     setFlyToId(id);
+  }, []);
+
+  const handleOverlayClose = useCallback(() => {
+    setSelectedId(null);
   }, []);
 
   const setCardRef = useCallback(
@@ -222,6 +144,8 @@ export function VerifiedPropertiesClient({
     },
     [],
   );
+
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-6">
@@ -268,19 +192,24 @@ export function VerifiedPropertiesClient({
         </span>
       </div>
 
-      {/* Map */}
+      {/* Map with React overlay card */}
       {token && mapProperties.length > 0 && (
         <PropertyMapEmbed
           properties={mapProperties}
           token={token}
-          height={380}
+          height={400}
           onMarkerClick={handleMarkerClick}
           highlightedId={highlightedId}
           flyToId={flyToId}
+          selectedProperty={selectedProperty}
+          overlayPhotos={selectedId ? (photoCache.get(selectedId) ?? null) : null}
+          overlayPhotosLoading={selectedId ? loadingIds.has(selectedId) : false}
+          onLoadOverlayPhotos={selectedId ? () => loadPhotos(selectedId) : undefined}
+          onOverlayClose={handleOverlayClose}
         />
       )}
 
-      {/* Cards */}
+      {/* Page card grid */}
       {filtered.length === 0 ? (
         <div className="rounded-lg border p-8 text-center text-sm text-muted-foreground">
           {search
@@ -290,9 +219,13 @@ export function VerifiedPropertiesClient({
       ) : (
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((p) => (
-            <PropertyCard
+            <PropertyDiscoveryCard
               key={p.id}
               property={p}
+              variant="page"
+              photos={photoCache.get(p.id) ?? null}
+              photosLoading={loadingIds.has(p.id)}
+              onLoadPhotos={() => loadPhotos(p.id)}
               isHighlighted={highlightedId === p.id}
               onClick={() => handleCardClick(p.id)}
               cardRef={setCardRef(p.id)}

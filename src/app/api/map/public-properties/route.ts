@@ -14,6 +14,8 @@ export type DiscoveryProperty = {
   status: string;
   verified_at: string | null;
   hero_photo_url: string | null;
+  /** Total non-removed owner photos. Used to show/hide carousel arrows before photos are loaded. */
+  photo_count: number | null;
   /** RentCast AVM estimate from property_review_summary.fmv_amount — null when unavailable. */
   rentcast_avm: number | null;
   beds: number | null;
@@ -53,7 +55,7 @@ export async function GET() {
 
   const [photoResult, enrichResult, rentcastResult, correctionResult, avmResult] =
     await Promise.all([
-      // 1. Owner hero photos
+      // 1. Owner photos (hero + count)
       (supabase.from("property_photos") as any)
         .select("property_id, public_url, is_hero, sort_order, created_at")
         .in("property_id", ids)
@@ -91,12 +93,14 @@ export async function GET() {
 
   const heroMap = new Map<string, string>();
   const firstMap = new Map<string, string>();
+  const photoCountMap = new Map<string, number>();
   for (const photo of photoResult.data ?? []) {
     if (!photo?.property_id) continue;
     if (photo.is_hero && !heroMap.has(photo.property_id))
       heroMap.set(photo.property_id, photo.public_url);
     if (!firstMap.has(photo.property_id))
       firstMap.set(photo.property_id, photo.public_url);
+    photoCountMap.set(photo.property_id, (photoCountMap.get(photo.property_id) ?? 0) + 1);
   }
 
   const vendorCoverMap = new Map<string, string>();
@@ -133,7 +137,6 @@ export async function GET() {
     correctionMap.set(c.property_id, existing);
   }
 
-  // RentCast AVM map — browse-card estimated value (not ATTOM controlling FMV)
   const avmMap = new Map<string, number>();
   for (const row of avmResult.data ?? []) {
     if (row?.property_id && typeof row.fmv_amount === "number") {
@@ -167,11 +170,10 @@ export async function GET() {
       longitude: p.longitude,
       status: p.status,
       verified_at: p.verified_at,
-      // RentCast AVM — public browse-card est value; null when RentCast hasn't run yet.
-      // ATTOM controlling FMV (properties.latest_verified_fmv) is intentionally excluded.
       rentcast_avm: avmMap.get(p.id) ?? null,
       hero_photo_url:
         heroMap.get(p.id) ?? firstMap.get(p.id) ?? vendorCoverMap.get(p.id) ?? null,
+      photo_count: photoCountMap.get(p.id) ?? null,
       beds: applyCorrection(p.id, "bedrooms", rc?.beds ?? null),
       baths: applyCorrection(p.id, "bathrooms", rc?.baths ?? null),
       sqft: applyCorrection(p.id, "sqft_living", rc?.sqft ?? null),

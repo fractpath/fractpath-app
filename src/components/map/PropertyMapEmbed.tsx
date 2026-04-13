@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { DiscoveryProperty } from "@/app/api/map/public-properties/route";
+import { PropertyDiscoveryCard } from "@/components/property/PropertyDiscoveryCard";
 
 const ANNAPOLIS: [number, number] = [-76.4922, 38.9784];
 const DEFAULT_ZOOM = 9;
@@ -11,61 +12,28 @@ const IS_DEV = process.env.NODE_ENV !== "production";
 // Persists across React re-renders; resets on HMR hot reload (intentional).
 let _mapInitCount = 0;
 
-function fmtCurrency(n: number): string {
-  return n.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  });
-}
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 function fmtNum(n: number): string {
   return n.toLocaleString("en-US");
 }
 
-function buildPopupHtml(p: DiscoveryProperty): string {
-  const imgHtml = p.hero_photo_url
-    ? `<img src="${p.hero_photo_url}" alt="Property" style="width:100%;height:130px;object-fit:cover;display:block;border-radius:6px 6px 0 0;" />`
-    : `<div style="width:100%;height:60px;background:#f4f4f5;border-radius:6px 6px 0 0;"></div>`;
-
-  const addr = p.address_line1 ?? "";
-  const csz = [p.city, p.state, p.postal_code].filter(Boolean).join(", ");
-
-  const facts = [
-    p.beds != null ? `${p.beds} bd` : null,
-    p.baths != null ? `${p.baths} ba` : null,
-    p.sqft != null ? `${fmtNum(p.sqft)} sqft` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-
-  const fmvHtml =
-    p.rentcast_avm != null
-      ? `<div style="font-size:13px;font-weight:700;color:#166534;margin-bottom:6px;">${fmtCurrency(p.rentcast_avm)}</div>`
-      : "";
-
-  return `
-    <div style="min-width:210px;max-width:250px;font-family:inherit;border-radius:8px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,0.12);">
-      ${imgHtml}
-      <div style="padding:10px 12px 12px;">
-        <div style="font-size:12px;font-weight:600;color:#18181b;margin-bottom:2px;line-height:1.3;">${addr}</div>
-        <div style="font-size:11px;color:#71717a;margin-bottom:4px;">${csz}</div>
-        ${facts ? `<div style="font-size:11px;color:#52525b;margin-bottom:4px;">${facts}</div>` : ""}
-        ${fmvHtml}
-        <a href="/verified-properties/${p.id}" style="display:block;text-align:center;background:#18181b;color:#fff;border-radius:6px;padding:5px 0;font-size:11px;font-weight:600;text-decoration:none;">View Property</a>
-      </div>
-    </div>
-  `;
+/**
+ * Abbreviated currency for marker labels.
+ *   $902,000 → $902K
+ *   $700,000 → $700K
+ *   $1,050,000 → $1.05M
+ */
+function fmtAbbrev(n: number): string {
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000;
+    const s = m % 1 === 0 ? `${m}` : m.toFixed(2).replace(/\.?0+$/, "");
+    return `$${s}M`;
+  }
+  return `$${Math.round(n / 1000)}K`;
 }
 
-type Props = {
-  properties: DiscoveryProperty[];
-  token: string;
-  height?: number;
-  onMarkerClick?: (id: string) => void;
-  highlightedId?: string | null;
-  flyToId?: string | null;
-};
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 type DebugStats = {
   initCount: number;
@@ -75,6 +43,23 @@ type DebugStats = {
   markerCount: number;
 };
 
+type Props = {
+  properties: DiscoveryProperty[];
+  token: string;
+  height?: number;
+  onMarkerClick?: (id: string) => void;
+  highlightedId?: string | null;
+  flyToId?: string | null;
+  /** Property shown in the React overlay card (replaces HTML popup). */
+  selectedProperty?: DiscoveryProperty | null;
+  overlayPhotos?: string[] | null;
+  overlayPhotosLoading?: boolean;
+  onLoadOverlayPhotos?: () => void;
+  onOverlayClose?: () => void;
+};
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export function PropertyMapEmbed({
   properties,
   token,
@@ -82,6 +67,11 @@ export function PropertyMapEmbed({
   onMarkerClick,
   highlightedId,
   flyToId,
+  selectedProperty,
+  overlayPhotos,
+  overlayPhotosLoading,
+  onLoadOverlayPhotos,
+  onOverlayClose,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -94,7 +84,7 @@ export function PropertyMapEmbed({
     onMarkerClickRef.current = onMarkerClick;
   }, [onMarkerClick]);
 
-  // Dev-only debug stats — allocated in all envs but only rendered + wired in dev.
+  // Dev-only debug stats
   const [debugStats, setDebugStats] = useState<DebugStats>({
     initCount: 0,
     zoom: DEFAULT_ZOOM,
@@ -102,6 +92,8 @@ export function PropertyMapEmbed({
     tileErrors: 0,
     markerCount: 0,
   });
+
+  // ── Map initialization ─────────────────────────────────────────────────────
 
   useEffect(() => {
     if (mapRef.current || !containerRef.current) return;
@@ -145,43 +137,26 @@ export function PropertyMapEmbed({
         },
         center: ANNAPOLIS,
         zoom: DEFAULT_ZOOM,
-        // Disable scroll-wheel zoom so the map doesn't hijack page scrolling.
-        // Users zoom via the NavigationControl buttons added below.
         scrollZoom: false,
       });
 
-      // Visible +/- zoom buttons — replaces scroll-wheel zoom as the primary zoom gesture.
       map.addControl(new ml.NavigationControl({ showCompass: false }), "top-right");
 
       mapRef.current = map;
 
       if (IS_DEV) {
-        // Track current zoom level in real time.
         map.on("zoom", () => {
           const z = parseFloat(map.getZoom().toFixed(1));
           setDebugStats((prev) => ({ ...prev, zoom: z }));
         });
-
-        // Count successful tile data events.
-        // MapLibre fires a "data" event with dataType="tile" each time a tile
-        // finishes loading. One tile load = one event in normal usage.
         map.on("data", (e: any) => {
           if (e.dataType === "tile") {
             setDebugStats((prev) => ({ ...prev, tilesOk: prev.tilesOk + 1 }));
           }
         });
-
-        // Count map-level errors — primarily tile fetch failures (403, 404, network).
-        // MapLibre routes all tile HTTP errors through this event.
         map.on("error", (e: any) => {
-          setDebugStats((prev) => ({
-            ...prev,
-            tileErrors: prev.tileErrors + 1,
-          }));
-          console.warn(
-            "[MapDebug] map error:",
-            e?.error?.message ?? e?.error ?? e
-          );
+          setDebugStats((prev) => ({ ...prev, tileErrors: prev.tileErrors + 1 }));
+          console.warn("[MapDebug] map error:", e?.error?.message ?? e?.error ?? e);
         });
       }
 
@@ -204,6 +179,8 @@ export function PropertyMapEmbed({
     };
   }, [token]);
 
+  // ── Marker sync ────────────────────────────────────────────────────────────
+
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
 
@@ -214,6 +191,7 @@ export function PropertyMapEmbed({
 
       const currentIds = new Set(properties.map((p) => p.id));
 
+      // Remove stale markers
       for (const [id, marker] of markersRef.current.entries()) {
         if (!currentIds.has(id)) {
           marker.remove();
@@ -221,51 +199,64 @@ export function PropertyMapEmbed({
         }
       }
 
+      // Add new markers
       for (const property of properties) {
         if (markersRef.current.has(property.id)) continue;
 
-        const el = document.createElement("div");
-        el.style.cssText =
-          "width:26px;height:26px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:#18181b;border:2.5px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.35);cursor:pointer;transition:transform 0.15s;";
+        // Wrapper — anchor: bottom-left aligns this element so the diamond tip
+        // points at the coordinate and the label sits above it.
+        const wrapper = document.createElement("div");
+        wrapper.style.cssText =
+          "cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;gap:3px;";
 
-        const popup = new ml.Popup({
-          offset: 20,
-          maxWidth: "260px",
-          closeButton: true,
-          closeOnClick: false,
-        }).setHTML(buildPopupHtml(property));
+        // Abbreviated est. value label pill (only if AVM is available)
+        if (property.rentcast_avm != null) {
+          const label = document.createElement("div");
+          label.className = "fp-marker-label";
+          label.textContent = fmtAbbrev(property.rentcast_avm);
+          label.style.cssText =
+            "background:rgba(0,0,0,0.82);color:#fff;font-size:10px;font-weight:700;" +
+            "font-family:ui-sans-serif,system-ui,sans-serif;padding:2px 6px;" +
+            "border-radius:4px;white-space:nowrap;line-height:1.5;pointer-events:none;";
+          wrapper.appendChild(label);
+        }
 
-        const marker = new ml.Marker({ element: el, anchor: "bottom-left" })
-          .setLngLat([property.longitude, property.latitude])
-          .setPopup(popup)
+        // Diamond pin
+        const diamond = document.createElement("div");
+        diamond.className = "fp-marker-diamond";
+        diamond.style.cssText =
+          "width:22px;height:22px;border-radius:50% 50% 50% 0;" +
+          "transform:rotate(-45deg);background:#18181b;" +
+          "border:2.5px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.35);" +
+          "transition:transform 0.15s,background 0.15s;";
+        wrapper.appendChild(diamond);
+
+        const marker = new ml.Marker({ element: wrapper, anchor: "bottom-left" })
+          .setLngLat([property.longitude!, property.latitude!])
           .addTo(map);
 
-        el.addEventListener("click", () => {
-          popup.addTo(map);
+        wrapper.addEventListener("click", () => {
           onMarkerClickRef.current?.(property.id);
         });
 
         markersRef.current.set(property.id, marker);
       }
 
-      // Update debug marker count after every sync.
       if (IS_DEV) {
-        setDebugStats((prev) => ({
-          ...prev,
-          markerCount: markersRef.current.size,
-        }));
+        setDebugStats((prev) => ({ ...prev, markerCount: markersRef.current.size }));
       }
 
+      // Fit bounds once on first render
       if (!hasFitRef.current && properties.length > 0) {
         hasFitRef.current = true;
         if (properties.length === 1) {
           map.flyTo({
-            center: [properties[0].longitude, properties[0].latitude],
+            center: [properties[0].longitude!, properties[0].latitude!],
             zoom: 13,
           });
         } else {
-          const lngs = properties.map((p) => p.longitude);
-          const lats = properties.map((p) => p.latitude);
+          const lngs = properties.map((p) => p.longitude!);
+          const lats = properties.map((p) => p.latitude!);
           map.fitBounds(
             [
               [Math.min(...lngs), Math.min(...lats)],
@@ -280,39 +271,43 @@ export function PropertyMapEmbed({
     sync();
   }, [properties, mapReady]);
 
+  // ── Marker highlight ───────────────────────────────────────────────────────
+
   useEffect(() => {
     if (!mapReady) return;
     for (const [id, marker] of markersRef.current.entries()) {
       const el = marker.getElement();
       if (!el) continue;
+      const diamond = el.querySelector(".fp-marker-diamond") as HTMLElement | null;
+      if (!diamond) continue;
       if (id === highlightedId) {
-        el.style.background = "#2563eb";
-        el.style.transform = "rotate(-45deg) scale(1.2)";
+        diamond.style.background = "#2563eb";
+        diamond.style.transform = "rotate(-45deg) scale(1.25)";
       } else {
-        el.style.background = "#18181b";
-        el.style.transform = "rotate(-45deg) scale(1)";
+        diamond.style.background = "#18181b";
+        diamond.style.transform = "rotate(-45deg) scale(1)";
       }
     }
   }, [highlightedId, mapReady]);
+
+  // ── Fly to ─────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     if (!mapReady || !flyToId || !mapRef.current) return;
     const property = properties.find((p) => p.id === flyToId);
     if (!property) return;
     mapRef.current.flyTo({
-      center: [property.longitude, property.latitude],
+      center: [property.longitude!, property.latitude!],
       zoom: Math.max(mapRef.current.getZoom(), 13),
       duration: 600,
     });
-    const marker = markersRef.current.get(flyToId);
-    if (marker) {
-      marker.getPopup()?.addTo(mapRef.current);
-    }
   }, [flyToId, mapReady, properties]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
   }, []);
+
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <div
@@ -321,9 +316,41 @@ export function PropertyMapEmbed({
       onMouseDown={handleMouseDown}
     >
       <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
+
       {!mapReady && (
         <div className="absolute inset-0 flex items-center justify-center bg-muted/70 pointer-events-none">
           <span className="text-sm text-muted-foreground">Loading map…</span>
+        </div>
+      )}
+
+      {/* React overlay card — replaces HTML popup.
+          Positioned top-left, max 272px wide, scrolls if content overflows. */}
+      {mapReady && selectedProperty && (
+        <div
+          style={{
+            position: "absolute",
+            top: 12,
+            left: 12,
+            width: 272,
+            maxHeight: "calc(100% - 24px)",
+            overflowY: "auto",
+            zIndex: 20,
+            borderRadius: 12,
+            // Prevent map drag/zoom from firing through the card
+            pointerEvents: "auto",
+          }}
+          // Stop map events leaking through the overlay
+          onMouseDown={(e) => e.stopPropagation()}
+          onWheel={(e) => e.stopPropagation()}
+        >
+          <PropertyDiscoveryCard
+            property={selectedProperty}
+            variant="overlay"
+            photos={overlayPhotos ?? null}
+            photosLoading={overlayPhotosLoading ?? false}
+            onLoadPhotos={onLoadOverlayPhotos ?? (() => {})}
+            onClose={onOverlayClose}
+          />
         </div>
       )}
 
@@ -346,14 +373,25 @@ export function PropertyMapEmbed({
             whiteSpace: "nowrap",
           }}
         >
-          <div style={{ color: "#facc15", fontWeight: 700, marginBottom: 2 }}>
-            ⚙ MapDebug
+          <div style={{ color: "#facc15", fontWeight: 700, marginBottom: 2 }}>⚙ MapDebug</div>
+          <div>
+            inits: <b style={{ color: "#fff" }}>{debugStats.initCount}</b>
           </div>
-          <div>inits: <b style={{ color: "#fff" }}>{debugStats.initCount}</b></div>
-          <div>zoom: <b style={{ color: "#fff" }}>{debugStats.zoom}</b></div>
-          <div>tiles OK: <b style={{ color: "#4ade80" }}>{debugStats.tilesOk}</b></div>
-          <div>tile errors: <b style={{ color: debugStats.tileErrors > 0 ? "#f87171" : "#fff" }}>{debugStats.tileErrors}</b></div>
-          <div>markers: <b style={{ color: "#fff" }}>{debugStats.markerCount}</b></div>
+          <div>
+            zoom: <b style={{ color: "#fff" }}>{debugStats.zoom}</b>
+          </div>
+          <div>
+            tiles OK: <b style={{ color: "#4ade80" }}>{debugStats.tilesOk}</b>
+          </div>
+          <div>
+            tile errors:{" "}
+            <b style={{ color: debugStats.tileErrors > 0 ? "#f87171" : "#fff" }}>
+              {debugStats.tileErrors}
+            </b>
+          </div>
+          <div>
+            markers: <b style={{ color: "#fff" }}>{debugStats.markerCount}</b>
+          </div>
         </div>
       )}
     </div>

@@ -9,9 +9,6 @@ export default async function VerifiedPropertiesPage() {
   const supabase = createServiceClient();
   const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
 
-  // Eligibility: canonical verified state + publicly enabled.
-  // verified_at is used for display only — its absence does NOT disqualify a verified property.
-  // Nulls sorted last so properties with a stamped date appear first.
   const { data, error } = await (supabase.from("properties") as any)
     .select(
       "id, address_line1, city, state, postal_code, verified_at, latitude, longitude",
@@ -27,10 +24,9 @@ export default async function VerifiedPropertiesPage() {
   if (baseRows.length > 0) {
     const ids = baseRows.map((r: any) => r.id);
 
-    // Parallel enrichment fetches
     const [photoResult, enrichResult, rentcastResult, correctionResult, avmResult] =
       await Promise.all([
-        // 1. Owner photos (hero priority)
+        // 1. Owner photos — hero priority + count only (no full array in initial payload)
         (supabase.from("property_photos") as any)
           .select("property_id, public_url, is_hero, sort_order, created_at")
           .in("property_id", ids)
@@ -68,25 +64,27 @@ export default async function VerifiedPropertiesPage() {
           .in("property_id", ids),
       ]);
 
-    // Hero photo maps
     const heroMap = new Map<string, string>();
     const firstMap = new Map<string, string>();
+    const photoCountMap = new Map<string, number>();
     for (const photo of photoResult.data ?? []) {
       if (!photo?.property_id) continue;
       if (photo.is_hero && !heroMap.has(photo.property_id))
         heroMap.set(photo.property_id, photo.public_url);
       if (!firstMap.has(photo.property_id))
         firstMap.set(photo.property_id, photo.public_url);
+      photoCountMap.set(
+        photo.property_id,
+        (photoCountMap.get(photo.property_id) ?? 0) + 1,
+      );
     }
 
-    // Vendor cover image fallback map
     const vendorCoverMap = new Map<string, string>();
     for (const e of enrichResult.data ?? []) {
       const cover = e?.images_payload?.cover_image_url ?? null;
       if (cover) vendorCoverMap.set(e.property_id, cover);
     }
 
-    // RentCast canonical facts map
     type RCFacts = {
       beds: number | null;
       baths: number | null;
@@ -107,7 +105,6 @@ export default async function VerifiedPropertiesPage() {
       });
     }
 
-    // Approved corrections map
     const correctionMap = new Map<string, Record<string, string>>();
     for (const c of correctionResult.data ?? []) {
       if (!c?.property_id) continue;
@@ -116,7 +113,6 @@ export default async function VerifiedPropertiesPage() {
       correctionMap.set(c.property_id, existing);
     }
 
-    // RentCast AVM map — browse-card est value
     const avmMap = new Map<string, number>();
     for (const row of avmResult.data ?? []) {
       if (row?.property_id && typeof row.fmv_amount === "number") {
@@ -153,10 +149,11 @@ export default async function VerifiedPropertiesPage() {
         longitude: typeof row.longitude === "number" ? row.longitude : null,
         status: "verified",
         verified_at: row.verified_at ?? null,
-        // RentCast AVM — public browse est value.
-        // Null when no RentCast review has run; est value is omitted from card in that case.
         rentcast_avm: avmMap.get(row.id) ?? null,
         hero_photo_url: heroPhotoUrl,
+        // photo_count: total non-removed owner photos — used client-side to show/hide
+        // carousel arrows before the full photo array is fetched on demand.
+        photo_count: photoCountMap.get(row.id) ?? null,
         beds: applyNumericCorrection(row.id, "bedrooms", rc?.beds ?? null),
         baths: applyNumericCorrection(row.id, "bathrooms", rc?.baths ?? null),
         sqft: applyNumericCorrection(row.id, "sqft_living", rc?.sqft ?? null),
