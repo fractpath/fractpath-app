@@ -19,6 +19,7 @@
     "@supabase/supabase-js": "^2.97.0",
     "fractpath-calculator-widget": "git+https://github.com/fractpath/fractpath-calculator-widget.git#390f7ed",
     "heic2any": "^0.0.4",
+    "maplibre-gl": "^5.22.0",
     "next": "16.1.6",
     "node-fetch": "^3.3.2",
     "react": "19.2.3",
