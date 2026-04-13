@@ -5,10 +5,10 @@ import { useRouter } from "next/navigation";
 
 type Props = {
   threadId: string;
-  isBuyer: boolean;
+  isSender: boolean;
 };
 
-export function WaitingBanner({ threadId, isBuyer }: Props) {
+export function WaitingBanner({ threadId, isSender }: Props) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,7 +54,7 @@ export function WaitingBanner({ threadId, isBuyer }: Props) {
             </div>
           </div>
         </div>
-        {isBuyer && (
+        {isSender && (
           <button
             type="button"
             disabled={busy}

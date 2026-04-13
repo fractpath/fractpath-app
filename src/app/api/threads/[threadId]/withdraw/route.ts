@@ -31,14 +31,24 @@ export async function POST(
 
   if (tErr || !thread) return json(404, { error: "Thread not found" });
 
-  if (thread.buyer_user_id !== user.id) {
-    return json(403, { error: "Only the buyer can withdraw" });
+  // Determine who is the sender for this thread direction:
+  // - buyer→owner (pending_owner): the buyer withdraws
+  // - owner→buyer (pending_buyer): the owner withdraws
+  const isPendingOwner = thread.status === "pending_owner";
+  const isPendingBuyer = thread.status === "pending_buyer";
+
+  if (!isPendingOwner && !isPendingBuyer) {
+    return json(400, {
+      error: "Can only withdraw threads in pending_owner or pending_buyer status",
+    });
   }
 
-  if (thread.status !== "pending_owner") {
-    return json(400, {
-      error: "Can only withdraw threads in pending_owner status",
-    });
+  if (isPendingOwner && thread.buyer_user_id !== user.id) {
+    return json(403, { error: "Only the buyer can withdraw a pending_owner thread" });
+  }
+
+  if (isPendingBuyer && thread.owner_user_id !== user.id) {
+    return json(403, { error: "Only the owner can withdraw a pending_buyer thread" });
   }
 
   // Best-effort cascade cleanup (ignore errors; final delete is the key)

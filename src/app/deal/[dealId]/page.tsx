@@ -144,7 +144,14 @@ async function loadNegotiationState(
         null)
       : null;
 
-  const isBuyer = effectiveThread.buyer_user_id === userId;
+  // For pending_buyer threads the buyer_user_id column is null until the
+  // buyer formally accepts — infer buyer side from owner_user_id instead.
+  const isBuyer =
+    effectiveThread.buyer_user_id !== null
+      ? effectiveThread.buyer_user_id === userId
+      : effectiveThread.status === "pending_buyer" &&
+        effectiveThread.owner_user_id !== userId;
+
   const isSender = currentProposal?.created_by_user_id === userId;
   const isResponder =
     !!currentProposal && !isSender && effectiveThread.status !== "accepted";
@@ -492,7 +499,7 @@ export default async function DealPage(ctx: PageProps) {
     const { data: candidateThreads } = await (svc.from("deal_threads") as any)
       .select("id, status, buyer_user_id, owner_user_id, created_at")
       .eq("deal_id", dealId)
-      .in("status", ["pending_owner", "negotiating", "accepted", "closed"])
+      .in("status", ["pending_owner", "pending_buyer", "negotiating", "accepted", "closed"])
       .order("created_at", { ascending: false })
       .limit(5);
 
@@ -500,7 +507,7 @@ export default async function DealPage(ctx: PageProps) {
 
     const effectiveThread =
       allCandidateThreads.find((t) =>
-        ["pending_owner", "negotiating", "accepted"].includes(t.status),
+        ["pending_owner", "pending_buyer", "negotiating", "accepted"].includes(t.status),
       ) ?? null;
 
     const threadStatusForMilestone: string | null =
@@ -510,13 +517,13 @@ export default async function DealPage(ctx: PageProps) {
 
     let editingLocked =
       !!effectiveThread &&
-      ["pending_owner", "negotiating", "accepted"].includes(
+      ["pending_owner", "pending_buyer", "negotiating", "accepted"].includes(
         effectiveThread.status,
       );
 
     const showNegotiationUi =
       !!effectiveThread &&
-      ["pending_owner", "negotiating"].includes(effectiveThread.status);
+      ["pending_owner", "pending_buyer", "negotiating"].includes(effectiveThread.status);
 
     const effectiveSnapshot = toEffectiveSnapshot(
       negState.currentProposal?.terms_snapshot ?? null,
@@ -807,7 +814,7 @@ export default async function DealPage(ctx: PageProps) {
           {showNegotiationUi && negState.isSender && effectiveThread && (
             <WaitingBanner
               threadId={effectiveThread.id}
-              isBuyer={negState.isBuyer}
+              isSender={negState.isSender}
             />
           )}
 
@@ -1306,7 +1313,7 @@ export default async function DealPage(ctx: PageProps) {
 
     const effectiveThread =
       thread &&
-      ["pending_owner", "negotiating", "accepted"].includes(thread.status)
+      ["pending_owner", "pending_buyer", "negotiating", "accepted"].includes(thread.status)
         ? thread
         : null;
 
@@ -1314,13 +1321,13 @@ export default async function DealPage(ctx: PageProps) {
 
     let editingLocked =
       !!effectiveThread &&
-      ["pending_owner", "negotiating", "accepted"].includes(
+      ["pending_owner", "pending_buyer", "negotiating", "accepted"].includes(
         effectiveThread.status,
       );
 
     const showNegotiationUi =
       !!effectiveThread &&
-      ["pending_owner", "negotiating"].includes(effectiveThread.status);
+      ["pending_owner", "pending_buyer", "negotiating"].includes(effectiveThread.status);
 
     const effectiveSnapshot = toEffectiveSnapshot(
       negState.currentProposal?.terms_snapshot ?? null,
@@ -1601,7 +1608,7 @@ export default async function DealPage(ctx: PageProps) {
           {showNegotiationUi && negState.isSender && effectiveThread && (
             <WaitingBanner
               threadId={effectiveThread.id}
-              isBuyer={negState.isBuyer}
+              isSender={negState.isSender}
             />
           )}
 

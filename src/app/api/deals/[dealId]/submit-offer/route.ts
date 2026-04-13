@@ -522,53 +522,107 @@ export async function POST(
     propertyAddress,
   });
 
-  if (buyerEmail) {
-    try {
-      await sendTemplateEmail({
-        to: buyerEmail,
-        from: fromEmail,
-        subject: "Your FractPath offer was submitted",
-        template: {
-          id:
-            process.env.RESEND_TEMPLATE_BUYER_OFFER_SUBMITTED_ID ??
-            "fractpath-buyer-offer-submitted-1",
-          variables: {
-            property_address: propertyAddress,
-            ACTION_URL: buyerActionUrl,
+  if (isOwnerToBuyer) {
+    // owner→buyer direction: the caller (owner) gets a "deal sent" confirmation;
+    // the invited buyer gets a buyer-oriented review email.
+    if (buyerEmail) {
+      try {
+        await sendTemplateEmail({
+          to: buyerEmail,
+          from: fromEmail,
+          subject: "Your FractPath deal was sent to a potential buyer",
+          template: {
+            id:
+              process.env.RESEND_TEMPLATE_OWNER_DEAL_SENT_ID ??
+              "fractpath-owner-deal-sent",
+            variables: {
+              property_address: propertyAddress,
+              ACTION_URL: buyerActionUrl,
+            },
           },
-        },
-      });
-    } catch (emailErr: any) {
-      console.error("submit_offer_buyer_email_failed", {
-        dealId,
-        buyerEmail,
-        error: emailErr?.message,
-      });
+        });
+      } catch (emailErr: any) {
+        console.error("submit_offer_owner_to_buyer_owner_email_failed", {
+          dealId,
+          buyerEmail,
+          error: emailErr?.message,
+        });
+      }
     }
-  }
 
-  if (homeownerEmail) {
-    try {
-      await sendTemplateEmail({
-        to: homeownerEmail,
-        from: fromEmail,
-        subject: "A new FractPath offer is ready for review",
-        template: {
-          id:
-            process.env.RESEND_TEMPLATE_HOMEOWNER_OFFER_SUBMITTED_ID ??
-            "fractpath-homeowner-offer-submitted",
-          variables: {
-            property_address: propertyAddress,
-            ACTION_URL: homeownerActionUrl,
+    if (homeownerEmail) {
+      try {
+        await sendTemplateEmail({
+          to: homeownerEmail,
+          from: fromEmail,
+          subject: "A homeowner has invited you to review a property deal",
+          template: {
+            id:
+              process.env.RESEND_TEMPLATE_BUYER_DEAL_RECEIVED_ID ??
+              "fractpath-buyer-deal-received",
+            variables: {
+              property_address: propertyAddress,
+              ACTION_URL: homeownerActionUrl,
+            },
           },
-        },
-      });
-    } catch (emailErr: any) {
-      console.error("submit_offer_homeowner_email_failed", {
-        dealId,
-        homeownerEmail,
-        error: emailErr?.message,
-      });
+        });
+      } catch (emailErr: any) {
+        console.error("submit_offer_owner_to_buyer_buyer_email_failed", {
+          dealId,
+          homeownerEmail,
+          error: emailErr?.message,
+        });
+      }
+    }
+  } else {
+    if (buyerEmail) {
+      try {
+        await sendTemplateEmail({
+          to: buyerEmail,
+          from: fromEmail,
+          subject: "Your FractPath offer was submitted",
+          template: {
+            id:
+              process.env.RESEND_TEMPLATE_BUYER_OFFER_SUBMITTED_ID ??
+              "fractpath-buyer-offer-submitted-1",
+            variables: {
+              property_address: propertyAddress,
+              ACTION_URL: buyerActionUrl,
+            },
+          },
+        });
+      } catch (emailErr: any) {
+        console.error("submit_offer_buyer_email_failed", {
+          dealId,
+          buyerEmail,
+          error: emailErr?.message,
+        });
+      }
+    }
+
+    if (homeownerEmail) {
+      try {
+        await sendTemplateEmail({
+          to: homeownerEmail,
+          from: fromEmail,
+          subject: "A new FractPath offer is ready for review",
+          template: {
+            id:
+              process.env.RESEND_TEMPLATE_HOMEOWNER_OFFER_SUBMITTED_ID ??
+              "fractpath-homeowner-offer-submitted",
+            variables: {
+              property_address: propertyAddress,
+              ACTION_URL: homeownerActionUrl,
+            },
+          },
+        });
+      } catch (emailErr: any) {
+        console.error("submit_offer_homeowner_email_failed", {
+          dealId,
+          homeownerEmail,
+          error: emailErr?.message,
+        });
+      }
     }
   }
 
