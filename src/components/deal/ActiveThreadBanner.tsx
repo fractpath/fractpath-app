@@ -35,7 +35,11 @@ export function ActiveThreadBanner({ threadId, threadStatus, isBuyer }: Props) {
     }
   }, [threadId, router]);
 
-  if (threadStatus !== "pending_owner" || !isBuyer) return null;
+  if (
+    !["pending_owner", "pending_buyer"].includes(threadStatus) ||
+    !isBuyer
+  )
+    return null;
 
   return (
     <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 p-4" data-testid="active-thread-banner">

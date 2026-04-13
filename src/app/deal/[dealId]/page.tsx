@@ -814,6 +814,7 @@ export default async function DealPage(ctx: PageProps) {
           {showNegotiationUi && negState.isSender && effectiveThread && (
             <WaitingBanner
               threadId={effectiveThread.id}
+              threadStatus={effectiveThread.status}
               isSender={negState.isSender}
             />
           )}
@@ -1608,6 +1609,7 @@ export default async function DealPage(ctx: PageProps) {
           {showNegotiationUi && negState.isSender && effectiveThread && (
             <WaitingBanner
               threadId={effectiveThread.id}
+              threadStatus={effectiveThread.status}
               isSender={negState.isSender}
             />
           )}

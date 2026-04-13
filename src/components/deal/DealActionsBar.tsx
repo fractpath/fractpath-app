@@ -62,11 +62,11 @@ export function DealActionsBar({
     !!ownerProposalId &&
     ownerProposalStatus === "submitted";
 
-  // Buyer can withdraw when their offer is pending
+  // Buyer can withdraw only while their offer is still pending (before any counter)
   const canBuyerWithdraw =
     isBuyer &&
     locked &&
-    activeThreadStatus === "pending_owner" &&
+    (activeThreadStatus === "pending_owner" || activeThreadStatus === "pending_buyer") &&
     !!activeThreadId;
 
   async function handleOwnerDecision(decision: "accept" | "reject") {

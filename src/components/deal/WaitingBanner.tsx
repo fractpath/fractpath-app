@@ -5,13 +5,18 @@ import { useRouter } from "next/navigation";
 
 type Props = {
   threadId: string;
+  threadStatus: string;
   isSender: boolean;
 };
 
-export function WaitingBanner({ threadId, isSender }: Props) {
+export function WaitingBanner({ threadId, threadStatus, isSender }: Props) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const isPending =
+    threadStatus === "pending_owner" || threadStatus === "pending_buyer";
+  const isNegotiating = threadStatus === "negotiating";
 
   const handleWithdraw = useCallback(async () => {
     setBusy(true);
@@ -34,43 +39,72 @@ export function WaitingBanner({ threadId, isSender }: Props) {
     }
   }, [threadId, router]);
 
-  return (
-    <div
-      className="rounded-md border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950"
-      data-testid="waiting-banner"
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <span className="relative flex h-2.5 w-2.5">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75" />
-            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-blue-500" />
+  // Negotiating state: show informational banner only — no Withdraw button
+  if (isNegotiating && isSender) {
+    return (
+      <div
+        className="rounded-md border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950"
+        data-testid="waiting-banner"
+      >
+        <div className="flex items-start gap-2">
+          <span className="relative flex h-2.5 w-2.5 mt-0.5 shrink-0">
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-blue-400" />
           </span>
           <div>
             <div className="text-sm font-medium text-blue-900 dark:text-blue-100">
-              Waiting for the other party to respond
+              Negotiation in progress
             </div>
             <div className="mt-0.5 text-xs text-blue-700 dark:text-blue-300">
-              Your proposal has been sent. You will be notified when they respond.
+              A counter has been sent. Withdraw is no longer available.
             </div>
           </div>
         </div>
-        {isSender && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={handleWithdraw}
-            className="shrink-0 rounded-md border border-blue-300 bg-white px-3 py-1.5 text-xs font-medium text-blue-800 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-600 dark:bg-blue-900 dark:text-blue-200"
-            data-testid="withdraw-offer-btn"
-          >
-            {busy ? "Withdrawing..." : "Withdraw"}
-          </button>
+      </div>
+    );
+  }
+
+  // Pending state: show waiting indicator with Withdraw for the sender
+  if (isPending) {
+    return (
+      <div
+        className="rounded-md border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950"
+        data-testid="waiting-banner"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-blue-500" />
+            </span>
+            <div>
+              <div className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                Waiting for the other party to respond
+              </div>
+              <div className="mt-0.5 text-xs text-blue-700 dark:text-blue-300">
+                Your proposal has been sent. You will be notified when they respond.
+              </div>
+            </div>
+          </div>
+          {isSender && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={handleWithdraw}
+              className="shrink-0 rounded-md border border-blue-300 bg-white px-3 py-1.5 text-xs font-medium text-blue-800 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-600 dark:bg-blue-900 dark:text-blue-200"
+              data-testid="withdraw-offer-btn"
+            >
+              {busy ? "Withdrawing..." : "Withdraw"}
+            </button>
+          )}
+        </div>
+        {error && (
+          <div className="mt-2 text-xs text-red-600" data-testid="withdraw-error">
+            {error}
+          </div>
         )}
       </div>
-      {error && (
-        <div className="mt-2 text-xs text-red-600" data-testid="withdraw-error">
-          {error}
-        </div>
-      )}
-    </div>
-  );
+    );
+  }
+
+  return null;
 }
