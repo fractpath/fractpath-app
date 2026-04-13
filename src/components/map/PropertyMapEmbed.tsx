@@ -5,6 +5,11 @@ import type { DiscoveryProperty } from "@/app/api/map/public-properties/route";
 
 const ANNAPOLIS: [number, number] = [-76.4922, 38.9784];
 const DEFAULT_ZOOM = 9;
+const IS_DEV = process.env.NODE_ENV !== "production";
+
+// Module-level counter: increments every time the map instance is constructed.
+// Persists across React re-renders; resets on HMR hot reload (intentional).
+let _mapInitCount = 0;
 
 function fmtCurrency(n: number): string {
   return n.toLocaleString("en-US", {
@@ -62,6 +67,14 @@ type Props = {
   flyToId?: string | null;
 };
 
+type DebugStats = {
+  initCount: number;
+  zoom: number;
+  tilesOk: number;
+  tileErrors: number;
+  markerCount: number;
+};
+
 export function PropertyMapEmbed({
   properties,
   token,
@@ -81,6 +94,15 @@ export function PropertyMapEmbed({
     onMarkerClickRef.current = onMarkerClick;
   }, [onMarkerClick]);
 
+  // Dev-only debug stats — allocated in all envs but only rendered + wired in dev.
+  const [debugStats, setDebugStats] = useState<DebugStats>({
+    initCount: 0,
+    zoom: DEFAULT_ZOOM,
+    tilesOk: 0,
+    tileErrors: 0,
+    markerCount: 0,
+  });
+
   useEffect(() => {
     if (mapRef.current || !containerRef.current) return;
     let cancelled = false;
@@ -88,6 +110,13 @@ export function PropertyMapEmbed({
     async function init() {
       const ml = (await import("maplibre-gl")).default;
       if (cancelled || !containerRef.current) return;
+
+      if (IS_DEV) {
+        _mapInitCount++;
+        const captured = _mapInitCount;
+        setDebugStats((prev) => ({ ...prev, initCount: captured }));
+        console.log(`[MapDebug] Map init #${captured}`);
+      }
 
       const map = new ml.Map({
         container: containerRef.current,
@@ -125,6 +154,37 @@ export function PropertyMapEmbed({
       map.addControl(new ml.NavigationControl({ showCompass: false }), "top-right");
 
       mapRef.current = map;
+
+      if (IS_DEV) {
+        // Track current zoom level in real time.
+        map.on("zoom", () => {
+          const z = parseFloat(map.getZoom().toFixed(1));
+          setDebugStats((prev) => ({ ...prev, zoom: z }));
+        });
+
+        // Count successful tile data events.
+        // MapLibre fires a "data" event with dataType="tile" each time a tile
+        // finishes loading. One tile load = one event in normal usage.
+        map.on("data", (e: any) => {
+          if (e.dataType === "tile") {
+            setDebugStats((prev) => ({ ...prev, tilesOk: prev.tilesOk + 1 }));
+          }
+        });
+
+        // Count map-level errors — primarily tile fetch failures (403, 404, network).
+        // MapLibre routes all tile HTTP errors through this event.
+        map.on("error", (e: any) => {
+          setDebugStats((prev) => ({
+            ...prev,
+            tileErrors: prev.tileErrors + 1,
+          }));
+          console.warn(
+            "[MapDebug] map error:",
+            e?.error?.message ?? e?.error ?? e
+          );
+        });
+      }
+
       map.on("load", () => {
         if (!cancelled) setMapReady(true);
       });
@@ -186,6 +246,14 @@ export function PropertyMapEmbed({
         });
 
         markersRef.current.set(property.id, marker);
+      }
+
+      // Update debug marker count after every sync.
+      if (IS_DEV) {
+        setDebugStats((prev) => ({
+          ...prev,
+          markerCount: markersRef.current.size,
+        }));
       }
 
       if (!hasFitRef.current && properties.length > 0) {
@@ -256,6 +324,36 @@ export function PropertyMapEmbed({
       {!mapReady && (
         <div className="absolute inset-0 flex items-center justify-center bg-muted/70 pointer-events-none">
           <span className="text-sm text-muted-foreground">Loading map…</span>
+        </div>
+      )}
+
+      {/* Dev-only debug overlay — tree-shaken in production builds */}
+      {IS_DEV && mapReady && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 8,
+            left: 8,
+            background: "rgba(0,0,0,0.72)",
+            color: "#d4d4d8",
+            fontFamily: "ui-monospace, monospace",
+            fontSize: 11,
+            lineHeight: 1.6,
+            padding: "6px 10px",
+            borderRadius: 6,
+            pointerEvents: "none",
+            zIndex: 10,
+            whiteSpace: "nowrap",
+          }}
+        >
+          <div style={{ color: "#facc15", fontWeight: 700, marginBottom: 2 }}>
+            ⚙ MapDebug
+          </div>
+          <div>inits: <b style={{ color: "#fff" }}>{debugStats.initCount}</b></div>
+          <div>zoom: <b style={{ color: "#fff" }}>{debugStats.zoom}</b></div>
+          <div>tiles OK: <b style={{ color: "#4ade80" }}>{debugStats.tilesOk}</b></div>
+          <div>tile errors: <b style={{ color: debugStats.tileErrors > 0 ? "#f87171" : "#fff" }}>{debugStats.tileErrors}</b></div>
+          <div>markers: <b style={{ color: "#fff" }}>{debugStats.markerCount}</b></div>
         </div>
       )}
     </div>
