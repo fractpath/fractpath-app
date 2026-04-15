@@ -274,22 +274,45 @@ export default async function AdminPropertyAuditPage({
   }
 
   // Fetch all review requests for this deal+property (including resolved), newest first.
-  // currentReviewRequest = latest open/submitted (for the editable panel).
-  // allReviewRequests   = complete history (for the read-only history section).
+  // currentReviewRequest   = latest open/submitted deal-linked request (editable panel, deal mode).
+  // propertyNativeRequest  = latest open/submitted property-only request (editable panel, property mode).
+  // allReviewRequests      = complete history across both deal-linked and property-native.
   let currentReviewRequest: AdminReviewRequest | null = null;
+  let propertyNativeRequest: AdminReviewRequest | null = null;
   let allReviewRequests: AdminReviewRequest[] = [];
+
+  const REQ_SELECT =
+    "id, deal_id, property_id, status, requested_items, admin_note, homeowner_note, resolved_note, submitted_at, resolved_at, created_at";
+
   if (linkedDeal?.id) {
     const { data: reqRows } = await (supabase.from("deal_review_requests") as any)
-      .select(
-        "id, deal_id, property_id, status, requested_items, admin_note, homeowner_note, resolved_note, submitted_at, resolved_at, created_at",
-      )
+      .select(REQ_SELECT)
       .eq("deal_id", linkedDeal.id)
       .eq("property_id", propertyId)
       .order("created_at", { ascending: false })
       .limit(20);
-    allReviewRequests = (reqRows ?? []) as AdminReviewRequest[];
+    const dealRows = (reqRows ?? []) as AdminReviewRequest[];
+    allReviewRequests = dealRows;
     currentReviewRequest =
-      allReviewRequests.find((r) => r.status === "open" || r.status === "submitted") ?? null;
+      dealRows.find((r) => r.status === "open" || r.status === "submitted") ?? null;
+  }
+
+  // Always load property-native (deal_id IS NULL) requests so the panel is
+  // accessible for verification/review regardless of deal state.
+  {
+    const { data: nativeRows } = await (supabase.from("deal_review_requests") as any)
+      .select(REQ_SELECT)
+      .eq("property_id", propertyId)
+      .is("deal_id", null)
+      .order("created_at", { ascending: false })
+      .limit(20);
+    const nativeRequests = (nativeRows ?? []) as AdminReviewRequest[];
+    propertyNativeRequest =
+      nativeRequests.find((r) => r.status === "open" || r.status === "submitted") ?? null;
+    // Merge into full history, sorted newest first
+    allReviewRequests = [...allReviewRequests, ...nativeRequests].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    );
   }
 
   const auditRows = (auditRes.data ?? []) as any[];
@@ -961,11 +984,13 @@ export default async function AdminPropertyAuditPage({
       <PropertyDocumentsPreview propertyId={propertyId} docs={docs} />
 
       {/* ── Additional information request ── */}
-      {linkedDeal && (
+      {/* Mount when a linked deal exists (deal mode) OR when the property review
+          status is information_requested without a deal (property mode). */}
+      {(linkedDeal || reviewStatus === "information_requested") && (
         <AdminReviewRequestPanel
-          dealId={linkedDeal.id}
+          dealId={linkedDeal?.id ?? null}
           propertyId={propertyId}
-          initialRequest={currentReviewRequest}
+          initialRequest={linkedDeal ? currentReviewRequest : propertyNativeRequest}
         />
       )}
 
@@ -1096,15 +1121,9 @@ export default async function AdminPropertyAuditPage({
               <p className="text-xs text-yellow-800">
                 This property is in <strong>information requested</strong> status. The homeowner has been asked to supply additional documentation.
               </p>
-              {linkedDeal ? (
-                <p className="text-xs text-yellow-800">
-                  Use the <strong>Additional information request</strong> panel on this page to view or update the checklist and requested items.
-                </p>
-              ) : (
-                <p className="text-xs text-yellow-800 italic">
-                  No deal is currently linked to this property. The information request checklist requires an active linked deal — it will appear automatically once a deal is associated.
-                </p>
-              )}
+              <p className="text-xs text-yellow-800">
+                Use the <strong>Additional information request</strong> panel on this page to view, create, or update the checklist and requested items.
+              </p>
             </div>
           )}
 

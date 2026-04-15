@@ -253,7 +253,8 @@ export default async function PropertyDetailPage({ params }: PageProps) {
     debtDiscrepancyDelta,
   };
 
-  // Fetch open/submitted review request for the linked deal + this property
+  // Fetch open/submitted review request.
+  // Priority: deal-linked request (if a deal exists) → property-native (deal_id IS NULL).
   let reviewRequest: HomeownerReviewRequest | null = null;
   if (linkedDeal?.deal_id) {
     try {
@@ -272,6 +273,30 @@ export default async function PropertyDetailPage({ params }: PageProps) {
           requested_items: reqRow.requested_items ?? [],
           admin_note: reqRow.admin_note ?? null,
           submitted_at: reqRow.submitted_at ?? null,
+        };
+      }
+    } catch {
+      // non-fatal
+    }
+  }
+  // Fallback: property-native review request (no deal required)
+  if (!reviewRequest) {
+    try {
+      const { data: nativeRow } = await (svc.from("deal_review_requests") as any)
+        .select("id, status, requested_items, admin_note, submitted_at")
+        .eq("property_id", propertyId)
+        .is("deal_id", null)
+        .in("status", ["open", "submitted"])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (nativeRow) {
+        reviewRequest = {
+          id: nativeRow.id,
+          status: nativeRow.status,
+          requested_items: nativeRow.requested_items ?? [],
+          admin_note: nativeRow.admin_note ?? null,
+          submitted_at: nativeRow.submitted_at ?? null,
         };
       }
     } catch {

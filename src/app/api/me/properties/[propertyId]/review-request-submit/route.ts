@@ -76,20 +76,23 @@ export async function POST(
     return NextResponse.json({ ok: false, error: upErr.message }, { status: 500 });
   }
 
-  // Best-effort event log
-  try {
-    await (svc.from("deal_events") as any).insert({
-      deal_id: request.deal_id,
-      event_type: "DEAL_REVIEW_REQUEST_SUBMITTED",
-      payload: {
-        request_id: request.id,
-        property_id: propertyId,
-        has_homeowner_note: !!(body.homeowner_note?.trim()),
-      },
-      created_by: user.id,
-    });
-  } catch {
-    // best-effort
+  // Best-effort event log — only when a deal is linked (property-native requests
+  // have deal_id = null and deal_events requires a deal_id FK).
+  if (request.deal_id) {
+    try {
+      await (svc.from("deal_events") as any).insert({
+        deal_id: request.deal_id,
+        event_type: "DEAL_REVIEW_REQUEST_SUBMITTED",
+        payload: {
+          request_id: request.id,
+          property_id: propertyId,
+          has_homeowner_note: !!(body.homeowner_note?.trim()),
+        },
+        created_by: user.id,
+      });
+    } catch {
+      // best-effort
+    }
   }
 
   // Notify ops/admin — best-effort, non-blocking
@@ -128,26 +131,26 @@ export async function POST(
               </a>
             </p>
             <p style="font-size:12px;color:#888;margin-top:16px;">
-              Deal ID: ${request.deal_id} · Property ID: ${propertyId}
+              ${request.deal_id ? `Deal ID: ${request.deal_id} · ` : ""}Property ID: ${propertyId}
             </p>
           </div>
         `,
       });
 
       console.log("review_request_ops_notified", {
-        dealId: request.deal_id,
+        dealId: request.deal_id ?? null,
         propertyId,
       });
     } else {
       console.log("review_request_ops_notify_skipped_no_recipient", {
-        dealId: request.deal_id,
+        dealId: request.deal_id ?? null,
         propertyId,
         hint: "Set RESEND_OPS_EMAIL env var to enable ops notifications",
       });
     }
   } catch (emailErr: any) {
     console.error("review_request_ops_notify_failed", {
-      dealId: request.deal_id,
+      dealId: request.deal_id ?? null,
       propertyId,
       error: emailErr?.message,
     });
