@@ -179,6 +179,29 @@ export async function POST(
     const message =
       error instanceof Error ? error.message : "ATTOM screening failed";
 
+    // ATTOM returns a SuccessWithoutResult / total:0 body (often HTTP 400) when
+    // the address has no record in their database. This is a vendor no-data
+    // condition, not an application error — return a controlled no-result response
+    // instead of propagating a 500.
+    const isNoResult =
+      message.includes("SuccessWithoutResult") ||
+      message.includes("total\":0") ||
+      message.includes('"total":0') ||
+      message.toLowerCase().includes("no result") ||
+      (message.includes("(400)") && message.toLowerCase().includes("no data"));
+
+    if (isNoResult) {
+      console.log("ATTOM_SCREENING_NO_RESULT", { propertyId, message });
+      return NextResponse.json(
+        {
+          ok: true,
+          noResult: true,
+          message: "ATTOM returned no result for this address.",
+        },
+        { status: 200 },
+      );
+    }
+
     console.error("ATTOM_SCREENING_FAILED", { propertyId, error: message });
 
     return jsonError(message, 500);

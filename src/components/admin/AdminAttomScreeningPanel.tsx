@@ -1013,6 +1013,7 @@ export function AdminAttomScreeningPanel({
   const router = useRouter();
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [noResult, setNoResult] = useState(false);
   const [lastResult, setLastResult] = useState<{
     outcome: string;
     nextVerificationState: string;
@@ -1023,6 +1024,7 @@ export function AdminAttomScreeningPanel({
   async function handleRunAttom() {
     setIsBusy(true);
     setError(null);
+    setNoResult(false);
     setLastResult(null);
     try {
       const res = await fetch(
@@ -1032,6 +1034,9 @@ export function AdminAttomScreeningPanel({
       const body = await res.json();
       if (!body.ok) {
         setError(body.error ?? `ATTOM screening failed (${res.status})`);
+      } else if (body.noResult) {
+        // Vendor returned no data for this address — not an app error.
+        setNoResult(true);
       } else {
         setLastResult({
           outcome: body.outcome,
@@ -1251,6 +1256,12 @@ export function AdminAttomScreeningPanel({
         {error && (
           <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">
             {error}
+          </div>
+        )}
+
+        {noResult && !error && (
+          <div className="rounded-md bg-yellow-50 border border-yellow-200 px-3 py-2 text-xs text-yellow-800">
+            ATTOM returned no data for this address. The property may not be in their database.
           </div>
         )}
 

@@ -1,3 +1,4 @@
+import { AdminVendorReviewPanel } from "@/components/admin/AdminVendorReviewPanel";
 import crypto from "crypto";
 import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
@@ -1063,15 +1064,29 @@ export default async function AdminPropertyAuditPage({
         </div>
 
         <div className="p-4 space-y-5 text-sm">
-          {/* Status controls */}
-          <div>
-            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
-              Status controls
+          {/* Status controls + vendor review */}
+          <div className="space-y-4">
+            <div>
+              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+                Status controls
+              </div>
+              <AdminPropertyReviewControls
+                propertyId={propertyId}
+                currentReviewStatus={reviewStatus}
+              />
             </div>
-            <AdminPropertyReviewControls
-              propertyId={propertyId}
-              currentReviewStatus={reviewStatus}
-            />
+
+            {p.status === "verified" && (
+              <div>
+                <AdminVendorReviewPanel
+                  propertyId={propertyId}
+                  initialSummary={vendorSummary}
+                  lastProfileError={lastProfileError}
+                  lastAvmError={lastAvmError}
+                  initialProfileDetails={persistedProfileDetails}
+                />
+              </div>
+            )}
           </div>
 
           {/* Information requested — contextual callout */}
