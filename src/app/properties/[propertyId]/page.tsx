@@ -570,8 +570,8 @@ export default async function PropertyDetailPage({ params }: PageProps) {
           propertyStatus={row.status ?? ""}
         />
 
-        {/* ── B3. Release claim (only when property is not archived) ── */}
-        {row.status !== "archived" && (
+        {/* ── B3. Release claim — only when user IS the current owner_user_id and property is not archived ── */}
+        {row.status !== "archived" && row.owner_user_id === user.id && (
           <OwnerReleaseClaimSection propertyId={propertyId} />
         )}
 

@@ -14,16 +14,6 @@ type ModalState =
   | { type: "blocked"; reasons: string[] }
   | { type: "success" };
 
-function blockedReasonLabel(reason: string): string {
-  const labels: Record<string, string> = {
-    admin_hold: "an administrative hold",
-    binding_accepted_deal_exists: "a binding accepted agreement",
-    active_signature_packet_exists: "an active signature workflow",
-    closing_workflow_active: "an active closing or settlement workflow",
-  };
-  return labels[reason] ?? reason;
-}
-
 export function OwnerReleaseClaimSection({ propertyId }: Props) {
   const [modal, setModal] = useState<ModalState>({ type: "closed" });
 
@@ -35,10 +25,18 @@ export function OwnerReleaseClaimSection({ propertyId }: Props) {
         { method: "GET" },
       );
       const json = await res.json();
+
+      // 403 means the user is no longer the owner_user_id (already released)
+      if (res.status === 403) {
+        setModal({ type: "blocked", reasons: ["not_owner"] });
+        return;
+      }
+
       if (!json.ok) {
         setModal({ type: "blocked", reasons: ["unknown"] });
         return;
       }
+
       if (json.allowed) {
         setModal({
           type: "allowed",
@@ -47,7 +45,7 @@ export function OwnerReleaseClaimSection({ propertyId }: Props) {
       } else {
         setModal({
           type: "blocked",
-          reasons: json.blocked_reasons ?? [],
+          reasons: json.blocked_reasons ?? ["unknown"],
         });
       }
     } catch {
@@ -91,7 +89,7 @@ export function OwnerReleaseClaimSection({ propertyId }: Props) {
       )}
 
       {modal.type === "blocked" && (
-        <ReleaseClaimBlockedModal onClose={handleClose} />
+        <ReleaseClaimBlockedModal reasons={modal.reasons} onClose={handleClose} />
       )}
 
       {modal.type === "success" && (

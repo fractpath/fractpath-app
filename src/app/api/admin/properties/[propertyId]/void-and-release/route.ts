@@ -63,7 +63,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   }
 
   if (!threadId) {
-    return jsonError("thread_id is required", 422);
+    return jsonError("thread_id is required for audit attribution", 422);
   }
 
   const svc = createServiceClient();
@@ -94,9 +94,15 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       adminId: admin.user.id,
       error: result.error,
     });
-    return jsonError(result.error, result.error === "thread_not_found" ? 404 : 409, {
-      detail: result.error,
-    });
+    const errorStatus =
+      result.error === "no_accepted_threads_found" ? 404
+      : result.error === "primary_thread_not_in_accepted_status" ? 422
+      : result.error.startsWith("load_accepted_threads_failed") ||
+        result.error.startsWith("void_threads_failed") ||
+        result.error.startsWith("properties_update_failed")
+      ? 500
+      : 409;
+    return jsonError(result.error, errorStatus, { detail: result.error });
   }
 
   console.log("admin_void_and_release_success", {

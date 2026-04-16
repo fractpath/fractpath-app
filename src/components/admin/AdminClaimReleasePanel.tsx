@@ -236,9 +236,13 @@ function ResetOperationalStateForm({
         Reset property operational state
       </p>
       <p className="text-xs text-gray-600">
-        This will recompute and reset verification/readiness/claim-derived
-        workflow flags. It does NOT release the property claim and does NOT
-        erase audit history.
+        This resets verification and review workflow flags (verification state,
+        review status, escalation flags) so the property re-enters the intake
+        flow. It does <strong>not</strong> release the owner claim,{" "}
+        <strong>not</strong> void or close any deal threads, and does{" "}
+        <strong>not</strong> remove photos or owner-linked data. To release the
+        claim, use &ldquo;Release property claim&rdquo; or &ldquo;Void accepted
+        agreement + release property&rdquo; instead.
       </p>
       <ReasonCodeSelect value={reasonCode} onChange={setReasonCode} />
       <NotesField value={notes} onChange={setNotes} required={false} />

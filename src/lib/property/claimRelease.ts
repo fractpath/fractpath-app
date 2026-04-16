@@ -45,6 +45,14 @@ export const BLOCKING_SIGNATURE_STATUSES = new Set([
   "completed",
 ]);
 
+/** signature packet statuses that should be voided when their deal is voided */
+export const VOIDABLE_SIGNATURE_STATUSES = new Set([
+  "prepared",
+  "sent",
+  "delivered",
+  "partially_signed",
+]);
+
 /** closing_review_status values that block release */
 export const BLOCKING_CLOSING_STATUSES = new Set(["pending", "issue_found"]);
 
@@ -164,10 +172,17 @@ export async function loadOwnerReleaseEligibilityData(
     .eq("property_id", propertyId)
     .not("status", "in", '("closed","closed_due_to_claim_release","voided_by_admin")');
 
-  const { data: signaturePackets } = await svc
-    .from("deal_signature_packets")
-    .select("id, status")
-    .eq("property_id", propertyId);
+  const threadIds: string[] = (threads ?? []).map((t: any) => t.id);
+
+  // Query signature packets by thread_id — deal_signature_packets has no property_id column
+  let signaturePackets: SignaturePacketSummary[] = [];
+  if (threadIds.length > 0) {
+    const { data: packets } = await svc
+      .from("deal_signature_packets")
+      .select("id, status")
+      .in("thread_id", threadIds);
+    signaturePackets = packets ?? [];
+  }
 
   return {
     property: {
@@ -177,8 +192,29 @@ export async function loadOwnerReleaseEligibilityData(
       closing_review_status: property.closing_review_status ?? null,
     },
     threads: threads ?? [],
-    signaturePackets: signaturePackets ?? [],
+    signaturePackets,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Internal helper: soft-delete property_photos for a property
+// ---------------------------------------------------------------------------
+
+async function softDeletePropertyPhotos(
+  propertyId: string,
+  actorId: string,
+  svc: any,
+): Promise<void> {
+  const now = new Date().toISOString();
+  const { error } = await svc
+    .from("property_photos")
+    .update({ removed_at: now, removed_by: actorId })
+    .eq("property_id", propertyId)
+    .is("removed_at", null);
+
+  if (error) {
+    console.error("claim_release_photo_soft_delete_failed", { propertyId, error });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -235,7 +271,7 @@ export async function performOwnerRelease(
     }
   }
 
-  // 3. Detach owner documents (hard delete — purge from active use; audit event below covers chain of custody)
+  // 3. Detach owner documents (hard delete)
   const { error: docErr } = await svc
     .from("property_documents")
     .delete()
@@ -245,7 +281,10 @@ export async function performOwnerRelease(
     console.error("claim_release_doc_purge_failed", { propertyId, docErr });
   }
 
-  // 4. Write audit events
+  // 4. Soft-delete owner-contributed photos
+  await softDeletePropertyPhotos(propertyId, actorId, svc);
+
+  // 5. Write audit events
   const now = new Date().toISOString();
   const events: any[] = [
     {
@@ -261,7 +300,7 @@ export async function performOwnerRelease(
       event_type: "property_owner_private_data_purged",
       actor_id: actorId,
       actor_role: "owner",
-      metadata: { purged_columns: Object.keys(purgePayload), documents_purged: true },
+      metadata: { purged_columns: Object.keys(purgePayload), documents_purged: true, photos_soft_deleted: true },
       created_at: now,
     },
     {
@@ -360,6 +399,9 @@ export async function performAdminRelease(
     console.error("admin_claim_release_doc_purge_failed", { propertyId, docErr });
   }
 
+  // Soft-delete owner-contributed photos
+  await softDeletePropertyPhotos(propertyId, actorId, svc);
+
   const now = new Date().toISOString();
   const events: any[] = [
     {
@@ -380,7 +422,7 @@ export async function performAdminRelease(
       actor_role: "admin",
       reason_code: reasonCode,
       notes,
-      metadata: { purged_columns: Object.keys(purgePayload), documents_purged: true },
+      metadata: { purged_columns: Object.keys(purgePayload), documents_purged: true, photos_soft_deleted: true },
       created_at: now,
     },
     {
@@ -429,7 +471,7 @@ export async function performAdminResetOperationalState(
   notes: string | null,
   svc: any,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  // Reset computed workflow flags — does NOT release owner claim
+  // Reset computed workflow flags — does NOT release owner claim, does NOT touch deal threads or photos
   const resetPayload: Record<string, unknown> = {
     verification_state: "intake_pending",
     property_review_status: null,
@@ -468,43 +510,66 @@ export async function performAdminResetOperationalState(
 
 // ---------------------------------------------------------------------------
 // Service: admin void accepted agreement + release property
+//
+// Voids ALL accepted threads for the property (not just the one passed in),
+// terminates any in-flight signature packets, purges owner-linked data.
 // ---------------------------------------------------------------------------
 
 export async function performAdminVoidAndRelease(
   propertyId: string,
-  threadId: string,
+  /** The accepted threadId selected in the UI — used for primary audit attribution */
+  primaryThreadId: string,
   actorId: string,
   reasonCode: ReleaseReasonCode,
   notes: string,
   svc: any,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  // 1. Verify the thread is accepted (double-check server-side)
-  const { data: thread, error: threadLoadErr } = await svc
+  // 1. Load ALL accepted threads for this property (not just the one passed in)
+  const { data: acceptedThreads, error: loadErr } = await svc
     .from("deal_threads")
     .select("id, status, property_id")
-    .eq("id", threadId)
     .eq("property_id", propertyId)
-    .single();
+    .eq("status", "accepted");
 
-  if (threadLoadErr || !thread) {
-    return { ok: false, error: "thread_not_found" };
+  if (loadErr) {
+    return { ok: false, error: `load_accepted_threads_failed: ${loadErr.message}` };
   }
 
-  if (thread.status !== "accepted") {
-    return { ok: false, error: "thread_not_in_accepted_status" };
+  if (!acceptedThreads || acceptedThreads.length === 0) {
+    return { ok: false, error: "no_accepted_threads_found" };
   }
 
-  // 2. Void the accepted thread
+  // Verify the primary thread is among the accepted threads
+  const primaryThread = acceptedThreads.find((t: any) => t.id === primaryThreadId);
+  if (!primaryThread) {
+    return { ok: false, error: "primary_thread_not_in_accepted_status" };
+  }
+
+  const acceptedThreadIds: string[] = acceptedThreads.map((t: any) => t.id);
+
+  // 2. Void ALL accepted threads
   const { error: voidErr } = await svc
     .from("deal_threads")
     .update({ status: "voided_by_admin" })
-    .eq("id", threadId);
+    .in("id", acceptedThreadIds);
 
   if (voidErr) {
-    return { ok: false, error: `void_thread_failed: ${voidErr.message}` };
+    return { ok: false, error: `void_threads_failed: ${voidErr.message}` };
   }
 
-  // 3. Close any other open (non-binding) threads for the property
+  // 3. Terminate in-flight signature packets for all voided threads
+  const now = new Date().toISOString();
+  const { error: packetErr } = await svc
+    .from("deal_signature_packets")
+    .update({ status: "voided", voided_at: now })
+    .in("thread_id", acceptedThreadIds)
+    .in("status", Array.from(VOIDABLE_SIGNATURE_STATUSES));
+
+  if (packetErr) {
+    console.error("admin_void_signature_packet_failed", { propertyId, packetErr });
+  }
+
+  // 4. Close any other open (non-binding) threads for the property
   const { data: siblingThreads } = await svc
     .from("deal_threads")
     .select("id")
@@ -524,7 +589,7 @@ export async function performAdminVoidAndRelease(
     }
   }
 
-  // 4. Purge owner-linked data
+  // 5. Purge owner-linked data
   const purgePayload: Record<string, unknown> = {
     owner_user_id: null,
     has_secured_property_debt: null,
@@ -543,7 +608,7 @@ export async function performAdminVoidAndRelease(
     owner_stated_fmv_confidence: null,
     owner_stated_fmv_source: null,
     willing_to_proceed_formal_review: null,
-    claim_released_at: new Date().toISOString(),
+    claim_released_at: now,
     verification_state: "intake_pending",
   };
 
@@ -565,9 +630,11 @@ export async function performAdminVoidAndRelease(
     console.error("admin_void_doc_purge_failed", { propertyId, docErr });
   }
 
-  // 5. Write audit events
-  const now = new Date().toISOString();
-  const allClosedIds = [threadId, ...siblingIds];
+  // 6. Soft-delete owner-contributed photos
+  await softDeletePropertyPhotos(propertyId, actorId, svc);
+
+  // 7. Write audit events
+  const allClosedIds = [...acceptedThreadIds, ...siblingIds];
   const events: any[] = [
     {
       property_id: propertyId,
@@ -576,8 +643,11 @@ export async function performAdminVoidAndRelease(
       actor_role: "admin",
       reason_code: reasonCode,
       notes,
-      deal_ids: [threadId],
-      metadata: { voided_thread_id: threadId },
+      deal_ids: acceptedThreadIds,
+      metadata: {
+        voided_thread_count: acceptedThreadIds.length,
+        primary_thread_id: primaryThreadId,
+      },
       created_at: now,
     },
     {
@@ -598,7 +668,7 @@ export async function performAdminVoidAndRelease(
       actor_role: "admin",
       reason_code: reasonCode,
       notes,
-      metadata: { purged_columns: Object.keys(purgePayload), documents_purged: true },
+      metadata: { purged_columns: Object.keys(purgePayload), documents_purged: true, photos_soft_deleted: true },
       created_at: now,
     },
     {

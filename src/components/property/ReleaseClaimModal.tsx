@@ -85,25 +85,56 @@ export function ReleaseClaimModal({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Blocked reason labels
+// ---------------------------------------------------------------------------
+
+const BLOCKED_REASON_MESSAGES: Record<string, string> = {
+  admin_hold:
+    "An administrative hold is active on this property. Contact your administrator to have it removed before releasing.",
+  binding_accepted_deal_exists:
+    "An accepted agreement is attached to this property. An administrator must void that agreement before this property can be released.",
+  active_signature_packet_exists:
+    "There is an active signature workflow in progress. It must be completed or voided before the claim can be released.",
+  closing_workflow_active:
+    "A closing or settlement workflow is currently active. It must be resolved before the claim can be released.",
+  not_owner:
+    "This property claim has already been released or is no longer associated with your account.",
+  network_error:
+    "A network error occurred. Please check your connection and try again.",
+  unknown:
+    "The release was blocked for an unspecified reason. Please contact support.",
+};
+
+function blockedReasonMessage(reason: string): string {
+  return BLOCKED_REASON_MESSAGES[reason] ?? `Release blocked: ${reason}`;
+}
+
 interface BlockedProps {
+  reasons: string[];
   onClose: () => void;
 }
 
-export function ReleaseClaimBlockedModal({ onClose }: BlockedProps) {
+export function ReleaseClaimBlockedModal({ reasons, onClose }: BlockedProps) {
+  const effectiveReasons = reasons.length > 0 ? reasons : ["unknown"];
+
   return (
     <Modal
       open
       onClose={onClose}
-      title="Release property claim?"
+      title="Unable to release property claim"
       onSecondary={onClose}
       secondaryLabel="Close"
     >
       <div className="space-y-3 text-sm text-gray-700">
-        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-800 text-sm">
-          This property cannot be released because it is tied to an active
-          binding deal. Contact support or an administrator to resolve the deal
-          first.
-        </div>
+        {effectiveReasons.map((reason) => (
+          <div
+            key={reason}
+            className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-800 text-sm"
+          >
+            {blockedReasonMessage(reason)}
+          </div>
+        ))}
       </div>
     </Modal>
   );
