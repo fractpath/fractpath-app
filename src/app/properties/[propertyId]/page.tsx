@@ -254,16 +254,19 @@ export default async function PropertyDetailPage({ params }: PageProps) {
     debtDiscrepancyDelta,
   };
 
-  // Fetch open/submitted review request.
+  // Fetch open/submitted/resolved review request.
   // Priority: deal-linked request (if a deal exists) → property-native (deal_id IS NULL).
+  // Includes resolved so owner can see the complete lifecycle.
+  const OWNER_REQ_SELECT =
+    "id, status, requested_items, admin_note, homeowner_note, submitted_at, resolved_note, resolved_at";
   let reviewRequest: HomeownerReviewRequest | null = null;
   if (linkedDeal?.deal_id) {
     try {
       const { data: reqRow } = await (svc.from("deal_review_requests") as any)
-        .select("id, status, requested_items, admin_note, submitted_at")
+        .select(OWNER_REQ_SELECT)
         .eq("deal_id", linkedDeal.deal_id)
         .eq("property_id", propertyId)
-        .in("status", ["open", "submitted"])
+        .in("status", ["open", "submitted", "resolved"])
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -273,7 +276,10 @@ export default async function PropertyDetailPage({ params }: PageProps) {
           status: reqRow.status,
           requested_items: reqRow.requested_items ?? [],
           admin_note: reqRow.admin_note ?? null,
+          homeowner_note: reqRow.homeowner_note ?? null,
           submitted_at: reqRow.submitted_at ?? null,
+          resolved_note: reqRow.resolved_note ?? null,
+          resolved_at: reqRow.resolved_at ?? null,
         };
       }
     } catch {
@@ -284,10 +290,10 @@ export default async function PropertyDetailPage({ params }: PageProps) {
   if (!reviewRequest) {
     try {
       const { data: nativeRow } = await (svc.from("deal_review_requests") as any)
-        .select("id, status, requested_items, admin_note, submitted_at")
+        .select(OWNER_REQ_SELECT)
         .eq("property_id", propertyId)
         .is("deal_id", null)
-        .in("status", ["open", "submitted"])
+        .in("status", ["open", "submitted", "resolved"])
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -297,7 +303,10 @@ export default async function PropertyDetailPage({ params }: PageProps) {
           status: nativeRow.status,
           requested_items: nativeRow.requested_items ?? [],
           admin_note: nativeRow.admin_note ?? null,
+          homeowner_note: nativeRow.homeowner_note ?? null,
           submitted_at: nativeRow.submitted_at ?? null,
+          resolved_note: nativeRow.resolved_note ?? null,
+          resolved_at: nativeRow.resolved_at ?? null,
         };
       }
     } catch {

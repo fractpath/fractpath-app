@@ -112,6 +112,22 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     itemCount: body.requested_items.length,
   });
 
+  // ── Property audit entry ───────────────────────────────────────────────────
+  try {
+    await (svc.from("property_status_audit") as any).insert({
+      property_id: propertyId,
+      from_status: wasNew ? "none" : "information_requested",
+      to_status: "information_requested",
+      changed_by: admin.user.id,
+      actor_type: "admin",
+      notes: wasNew
+        ? `Admin created property information request (${body.requested_items.length} item${body.requested_items.length === 1 ? "" : "s"})`
+        : `Admin updated property information request (${body.requested_items.length} item${body.requested_items.length === 1 ? "" : "s"})`,
+    });
+  } catch {
+    // best-effort — do not fail if audit write fails
+  }
+
   // ── Notify property owner / fallback to ops inbox ─────────────────────────
   void notifyOwner({
     svc,
@@ -170,6 +186,22 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     requestId: body.request_id,
     adminId: admin.user.id,
   });
+
+  // ── Property audit entry for resolve ──────────────────────────────────────
+  try {
+    await (svc.from("property_status_audit") as any).insert({
+      property_id: propertyId,
+      from_status: "information_requested",
+      to_status: "resolved",
+      changed_by: admin.user.id,
+      actor_type: "admin",
+      notes: body.resolved_note?.trim()
+        ? `Admin resolved information request: ${body.resolved_note.trim()}`
+        : "Admin resolved property information request",
+    });
+  } catch {
+    // best-effort — do not fail if audit write fails
+  }
 
   return NextResponse.json({ ok: true, request: updated }, { status: 200 });
 }

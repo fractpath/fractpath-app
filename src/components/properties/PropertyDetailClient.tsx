@@ -716,8 +716,8 @@ export function PropertyDetailClient({
         )}
       </div>
 
-      {/* Review request panel */}
-      {reviewRequest && (reviewRequest.status === "open" || reviewRequest.status === "submitted") && (
+      {/* Review request panel — shown for open, submitted, and recently resolved */}
+      {reviewRequest && (
         <ReviewRequestPanel
           request={reviewRequest}
           propertyId={property.id}

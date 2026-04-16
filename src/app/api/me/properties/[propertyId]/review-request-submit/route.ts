@@ -76,8 +76,7 @@ export async function POST(
     return NextResponse.json({ ok: false, error: upErr.message }, { status: 500 });
   }
 
-  // Best-effort event log — only when a deal is linked (property-native requests
-  // have deal_id = null and deal_events requires a deal_id FK).
+  // Best-effort event log — deal_events for deal-linked requests, property audit for all.
   if (request.deal_id) {
     try {
       await (svc.from("deal_events") as any).insert({
@@ -93,6 +92,21 @@ export async function POST(
     } catch {
       // best-effort
     }
+  }
+
+  // Property audit entry — written for both deal-linked and property-native requests
+  // so the admin property activity table always reflects homeowner submissions.
+  try {
+    await (svc.from("property_status_audit") as any).insert({
+      property_id: propertyId,
+      from_status: "information_requested",
+      to_status: "information_submitted",
+      changed_by: user.id,
+      actor_type: "homeowner",
+      notes: `Homeowner submitted updates for review request ${request.id}${body.homeowner_note?.trim() ? " (with note)" : ""}`,
+    });
+  } catch {
+    // best-effort — do not fail submission if audit write fails
   }
 
   // Notify ops/admin — best-effort, non-blocking

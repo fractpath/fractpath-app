@@ -9,7 +9,7 @@ export type ReviewRequestItem = {
 
 export type AdminReviewRequest = {
   id: string;
-  deal_id: string;
+  deal_id: string | null;
   property_id: string;
   status: "open" | "submitted" | "resolved";
   requested_items: ReviewRequestItem[];
