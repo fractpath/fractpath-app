@@ -23,6 +23,7 @@ import { PropertyMediaSection } from "@/components/property/PropertyMediaSection
 import { PropertyPageHeader } from "@/components/property/PropertyPageHeader";
 import { ValuationCashSection } from "@/components/property/ValuationCashSection";
 import { OwnerPropertyEditControls } from "@/components/property/OwnerPropertyEditControls";
+import { OwnerReleaseClaimSection } from "@/components/property/OwnerReleaseClaimSection";
 import type { OwnerPhoto, PropertyFactCorrection } from "@/lib/property/photos";
 import {
   shouldShowOwnerVerifiedBadge,
@@ -559,6 +560,11 @@ export default async function PropertyDetailPage({ params }: PageProps) {
           canonicalValues={canonicalValues}
           propertyStatus={row.status ?? ""}
         />
+
+        {/* ── B3. Release claim (only when property is not archived) ── */}
+        {row.status !== "archived" && (
+          <OwnerReleaseClaimSection propertyId={propertyId} />
+        )}
 
         {/* ── C. Valuation & cash position — consolidated section with tabs ── */}
         {(workflowState.rentcastFmv != null ||

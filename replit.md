@@ -40,6 +40,7 @@ FractPath is built with Next.js, utilizing API routes for backend logic and Supa
 - **Public Property Map:** `/map` page uses MapLibre GL JS to display public properties, including enriched data like AVM, beds, baths, sqft, and hero photos.
 - **Verified Properties Discovery Surface:** `/verified-properties` page combines map and cards for discovery, allowing search, sort, and interactive map/card highlighting.
 - **Property Detail Page Location Map:** Displays a server-rendered Mapbox Static Images API map with a pin for property location.
+- **Property Claim Release System:** Auditable release flow for owners and admins. Owners can release a property claim when no binding/active deals exist. Admins have three distinct actions: (1) Release property claim, (2) Reset operational state, (3) Void accepted agreement + release property (requires typed confirmation, reason code, and notes). All destructive events are recorded in the append-only `property_claim_events` table. Owner-linked private data is purged on release while audit history is preserved. `deal_threads` with `closed_due_to_claim_release` and `voided_by_admin` terminal statuses are used for non-binding and accepted deals respectively.
 
 **Feature Specifications:**
 - **Homeowner Intake:** Core data collection.

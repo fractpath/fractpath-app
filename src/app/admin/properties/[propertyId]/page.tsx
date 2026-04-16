@@ -1,4 +1,5 @@
 import { AdminVendorReviewPanel } from "@/components/admin/AdminVendorReviewPanel";
+import { AdminClaimReleasePanel } from "@/components/admin/AdminClaimReleasePanel";
 import crypto from "crypto";
 import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
@@ -317,6 +318,9 @@ export default async function AdminPropertyAuditPage({
 
   const auditRows = (auditRes.data ?? []) as any[];
   const underwritingRows = (underwritingRes.data ?? []) as any[];
+
+  // Top-level accepted thread ID — used by AdminClaimReleasePanel
+  const acceptedThreadId: string | null = linkedThreadRes.data?.id ?? null;
 
   const vendorSummary = summaryRes.data ?? null;
 
@@ -1639,6 +1643,13 @@ export default async function AdminPropertyAuditPage({
           </table>
         </div>
       )}
+
+      {/* ── Destructive admin actions ── */}
+      <AdminClaimReleasePanel
+        propertyId={propertyId}
+        acceptedThreadId={acceptedThreadId}
+        hasOwner={!!p.owner_user_id}
+      />
 
       {/* ── Property activity ── */}
       <div className="rounded-lg border overflow-x-auto">
