@@ -227,9 +227,11 @@ export async function performOwnerRelease(
   closableThreadIds: string[],
   svc: any,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  // 1. Null out owner-private columns on properties
+  // 1. Null out owner-private columns on properties and reset claim state
   const purgePayload: Record<string, unknown> = {
     owner_user_id: null,
+    ownership_status: "unclaimed",
+    claimed_by_user_id: null,
     has_secured_property_debt: null,
     secured_property_debt_amount: null,
     total_known_debt_amount: null,
@@ -350,6 +352,8 @@ export async function performAdminRelease(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const purgePayload: Record<string, unknown> = {
     owner_user_id: null,
+    ownership_status: "unclaimed",
+    claimed_by_user_id: null,
     has_secured_property_debt: null,
     secured_property_debt_amount: null,
     total_known_debt_amount: null,
@@ -589,9 +593,11 @@ export async function performAdminVoidAndRelease(
     }
   }
 
-  // 5. Purge owner-linked data
+  // 5. Purge owner-linked data and reset claim state
   const purgePayload: Record<string, unknown> = {
     owner_user_id: null,
+    ownership_status: "unclaimed",
+    claimed_by_user_id: null,
     has_secured_property_debt: null,
     secured_property_debt_amount: null,
     total_known_debt_amount: null,

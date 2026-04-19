@@ -350,6 +350,35 @@ describe("performOwnerRelease", () => {
     }
   });
 
+  it("sets ownership_status to 'unclaimed' and nulls claimed_by_user_id", async () => {
+    const propertyUpdates: any[] = [];
+
+    const svc = {
+      from: vi.fn((table: string) => {
+        if (table === "properties") {
+          return {
+            update: vi.fn().mockImplementation((payload: any) => {
+              propertyUpdates.push(payload);
+              return { eq: vi.fn().mockResolvedValue({ error: null }) };
+            }),
+          };
+        }
+        return new Proxy({}, {
+          get(_t, p) {
+            if (p === "then") return (r: any) => r({ data: null, error: null });
+            return vi.fn().mockReturnThis();
+          },
+        });
+      }),
+    };
+
+    await performOwnerRelease("prop-1", "user-1", [], svc);
+    expect(propertyUpdates.length).toBeGreaterThan(0);
+    expect(propertyUpdates[0]).toHaveProperty("ownership_status", "unclaimed");
+    expect(propertyUpdates[0]).toHaveProperty("claimed_by_user_id", null);
+    expect(propertyUpdates[0]).toHaveProperty("owner_user_id", null);
+  });
+
   it("soft-deletes property_photos (sets removed_at) rather than hard-deleting", async () => {
     const photoUpdates: any[] = [];
 
@@ -425,6 +454,36 @@ describe("performAdminRelease", () => {
     expect(result.ok).toBe(true);
     expect(photoUpdates.length).toBeGreaterThan(0);
     expect(photoUpdates[0]).toHaveProperty("removed_at");
+  });
+
+  it("sets ownership_status to 'unclaimed' and nulls claimed_by_user_id", async () => {
+    const propertyUpdates: any[] = [];
+
+    const svc = {
+      from: vi.fn((table: string) => {
+        if (table === "properties") {
+          return {
+            update: vi.fn().mockImplementation((payload: any) => {
+              propertyUpdates.push(payload);
+              return { eq: vi.fn().mockResolvedValue({ error: null }) };
+            }),
+          };
+        }
+        return new Proxy({}, {
+          get(_t, p) {
+            if (p === "then") return (r: any) => r({ data: null, error: null });
+            return vi.fn().mockReturnThis();
+          },
+        });
+      }),
+    };
+
+    const result = await performAdminRelease("prop-1", "admin-1", "stale_test_data", null, [], svc);
+    expect(result.ok).toBe(true);
+    expect(propertyUpdates.length).toBeGreaterThan(0);
+    expect(propertyUpdates[0]).toHaveProperty("ownership_status", "unclaimed");
+    expect(propertyUpdates[0]).toHaveProperty("claimed_by_user_id", null);
+    expect(propertyUpdates[0]).toHaveProperty("owner_user_id", null);
   });
 });
 
@@ -890,6 +949,8 @@ describe("performAdminVoidAndRelease", () => {
 
     expect(propertyUpdates.length).toBeGreaterThan(0);
     expect(propertyUpdates[0]).toHaveProperty("owner_user_id", null);
+    expect(propertyUpdates[0]).toHaveProperty("ownership_status", "unclaimed");
+    expect(propertyUpdates[0]).toHaveProperty("claimed_by_user_id", null);
     expect(propertyUpdates[0]).toHaveProperty("claim_released_at");
     expect(propertyUpdates[0]).toHaveProperty("verification_state", "intake_pending");
   });
