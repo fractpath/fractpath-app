@@ -70,9 +70,6 @@ export function Modal({
     <div
       ref={overlayRef}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={(e) => {
-        if (e.target === overlayRef.current) onClose();
-      }}
     >
       <div
         role="dialog"
@@ -80,11 +77,23 @@ export function Modal({
         aria-label={title}
         className={`w-full ${SIZE_CLASSES[size]} rounded-xl border bg-background shadow-xl flex flex-col max-h-[90vh]`}
       >
-        <div className="border-b px-6 py-4 flex-shrink-0">
-          <h2 className="text-lg font-semibold">{title}</h2>
-          {description ? (
-            <p className="mt-1 text-sm text-muted-foreground">{description}</p>
-          ) : null}
+        <div className="border-b px-6 py-4 flex-shrink-0 flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold">{title}</h2>
+            {description ? (
+              <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="flex-shrink-0 rounded p-1 hover:bg-muted/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5 text-muted-foreground">
+              <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22z" />
+            </svg>
+          </button>
         </div>
 
         {children ? <div className="px-6 py-4 overflow-y-auto flex-1">{children}</div> : null}

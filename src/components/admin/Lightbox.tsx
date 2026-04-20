@@ -62,13 +62,11 @@ export function Lightbox(props: LightboxProps) {
   return (
     <div
       className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
-      onClick={onClose}
       role="dialog"
       aria-modal="true"
     >
       <div
         className="max-w-5xl w-full max-h-[90vh] bg-background rounded-lg overflow-hidden shadow-lg"
-        onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-2 border-b">
