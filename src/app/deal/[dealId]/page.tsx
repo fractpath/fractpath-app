@@ -373,11 +373,12 @@ export default async function DealPage(ctx: PageProps) {
     let liveLatestVerifiedFmv: number | null = null;
     let liveFmvVerificationSource: string | null = null;
     let liveSecuredDebt: number | null = null;
+    let liveVisibilityPreference: string | null = null;
 
     if (resolvedPropertyId) {
       const { data: liveProp } = await (svc.from("properties") as any)
         .select(
-          "status, ownership_status, closing_review_status, escalation_deposit_status, escalation_avm_status, property_review_status, manual_appraisal_status, manual_appraisal_fmv, latest_verified_fmv, fmv_verification_source, secured_property_debt_amount",
+          "status, ownership_status, closing_review_status, escalation_deposit_status, escalation_avm_status, property_review_status, manual_appraisal_status, manual_appraisal_fmv, latest_verified_fmv, fmv_verification_source, secured_property_debt_amount, visibility_preference",
         )
         .eq("id", resolvedPropertyId)
         .maybeSingle();
@@ -395,6 +396,7 @@ export default async function DealPage(ctx: PageProps) {
         liveLatestVerifiedFmv = liveProp.latest_verified_fmv ?? null;
         liveFmvVerificationSource = liveProp.fmv_verification_source ?? null;
         liveSecuredDebt = liveProp.secured_property_debt_amount ?? null;
+        liveVisibilityPreference = liveProp.visibility_preference ?? null;
       }
     }
 
@@ -819,6 +821,47 @@ export default async function DealPage(ctx: PageProps) {
             />
           )}
 
+          {isOwner &&
+            !effectiveThread &&
+            liveVisibilityPreference === "public" &&
+            resolvedPropertyId && (
+              <div className="rounded-md border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-950">
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 text-green-600 dark:text-green-400 flex-shrink-0">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      className="w-4 h-4"
+                    >
+                      <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
+                      <path
+                        fillRule="evenodd"
+                        d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  </span>
+                  <div className="space-y-1 flex-1">
+                    <p className="text-sm font-semibold text-green-900 dark:text-green-100">
+                      Property is visible
+                    </p>
+                    <p className="text-xs text-green-700 dark:text-green-300">
+                      This property is visible on FractPath for interested parties to discover. Your deal remains a draft until you share it with a specific buyer or receive interest.
+                    </p>
+                    <div className="pt-1">
+                      <a
+                        href={`/verified-properties/${resolvedPropertyId}`}
+                        className="inline-flex items-center rounded border border-green-300 bg-white px-2.5 py-1 text-xs font-medium text-green-800 hover:bg-green-50 dark:border-green-700 dark:bg-green-900 dark:text-green-200 dark:hover:bg-green-800"
+                      >
+                        View property listing
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
           {showNegotiationUi &&
             negState.isResponder &&
             negState.currentProposal &&
@@ -1193,7 +1236,7 @@ export default async function DealPage(ctx: PageProps) {
     if (resolvedPropertyId) {
       const { data: liveProp } = await (svc.from("properties") as any)
         .select(
-          "status, ownership_status, closing_review_status, escalation_deposit_status, escalation_avm_status, property_review_status, manual_appraisal_status, manual_appraisal_fmv, latest_verified_fmv, fmv_verification_source, secured_property_debt_amount",
+          "status, ownership_status, closing_review_status, escalation_deposit_status, escalation_avm_status, property_review_status, manual_appraisal_status, manual_appraisal_fmv, latest_verified_fmv, fmv_verification_source, secured_property_debt_amount, visibility_preference",
         )
         .eq("id", resolvedPropertyId)
         .maybeSingle();

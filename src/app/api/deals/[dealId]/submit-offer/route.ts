@@ -135,6 +135,34 @@ export async function POST(
     }
   }
 
+  // Resolve buyer email early so the public-visibility branch can early-return
+  // before the terms-snapshot validation and thread creation below.
+  const knownInviteeEmail =
+    mode === "known_email" || mode === "owner_to_buyer"
+      ? normalizeEmail(body?.invitee_email)
+      : null;
+
+  // ── Public visibility path ────────────────────────────────────────────────
+  // Owner chose "Make property visible" (no specific buyer email).
+  // Update the property's public-facing visibility and proposal-interest fields only.
+  // No thread, no proposal, no snapshot required — the deal remains a draft.
+  if (isOwnerToBuyer && !knownInviteeEmail) {
+    const { error: visErr } = await (svc.from("properties") as any)
+      .update({
+        visibility_preference: "public",
+        proposal_interest_status: "interested_after_verification",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", propertyId)
+      .eq("owner_user_id", user.id);
+
+    if (visErr) {
+      return json(500, { error: visErr.message });
+    }
+
+    return json(200, { ok: true, visibility_updated: true, mode });
+  }
+
   const rawTermsSnapshot = body?.terms_snapshot;
   if (!rawTermsSnapshot || typeof rawTermsSnapshot !== "object") {
     return json(422, { error: "terms_snapshot is required" });
@@ -297,11 +325,6 @@ export async function POST(
     .update({ current_proposal_id: proposal.id })
     .eq("id", thread.id);
 
-  const knownInviteeEmail =
-    mode === "known_email" || mode === "owner_to_buyer"
-      ? normalizeEmail(body?.invitee_email)
-      : null;
-
   if (mode === "known_email" && knownInviteeEmail) {
     const crypto = await import("crypto");
     const token = crypto.randomBytes(32).toString("hex");
@@ -427,7 +450,7 @@ export async function POST(
     }
   }
 
-  if (mode === "outreach" || (mode === "owner_to_buyer" && !knownInviteeEmail)) {
+  if (mode === "outreach") {
     const crypto = await import("crypto");
     const token = crypto.randomBytes(32).toString("hex");
     const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
