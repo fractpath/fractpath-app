@@ -26,7 +26,7 @@ export function AppHeader() {
             href="/verified-properties"
             className="text-sm text-muted-foreground hover:text-foreground"
           >
-            Opportunities
+            Properties
           </Link>
           <Link
             href="/me"

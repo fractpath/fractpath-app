@@ -359,7 +359,6 @@ export function PropertyDiscoveryCard({
   // ── Shared: Card body ──────────────────────────────────────────────────────
 
   const isVerified = property.status === "verified";
-  const isOpenToProposals = property.open_to_proposals === true;
 
   const verifiedBadge = isVerified ? (
     <span
@@ -390,28 +389,6 @@ export function PropertyDiscoveryCard({
     </span>
   ) : null;
 
-  const openToProposalsBadge = isOpenToProposals ? (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 4,
-        borderRadius: 9999,
-        paddingLeft: 10,
-        paddingRight: 10,
-        paddingTop: 2,
-        paddingBottom: 2,
-        fontSize: 11,
-        fontWeight: 600,
-        background: "#eff6ff",
-        color: "#1d4ed8",
-        border: "1px solid #bfdbfe",
-      }}
-    >
-      Open to proposals
-    </span>
-  ) : null;
-
   const bodyPad = variant === "overlay" ? "10px 12px 12px" : undefined;
 
   const CardBody = (
@@ -423,10 +400,9 @@ export function PropertyDiscoveryCard({
       }
       className={variant === "page" ? "p-4 flex flex-col gap-2.5 flex-1" : undefined}
     >
-      {(verifiedBadge || openToProposalsBadge) && (
+      {verifiedBadge && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
           {verifiedBadge}
-          {openToProposalsBadge}
         </div>
       )}
 

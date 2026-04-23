@@ -168,7 +168,20 @@ export default async function VerifiedPropertiesPage() {
       <AppHeader />
 
       <main className="mx-auto max-w-5xl px-4 py-10 space-y-6">
-        <h1 className="text-2xl font-semibold">Opportunities</h1>
+        <div className="flex items-center justify-between gap-4">
+          <h1 className="text-2xl font-semibold">Properties Open to Proposals</h1>
+          <div className="flex-shrink-0 flex items-center gap-2.5">
+            <span className="text-sm text-muted-foreground hidden sm:block">
+              Have a property in mind?
+            </span>
+            <a
+              href="/deal/new"
+              className="inline-flex items-center rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background hover:opacity-90 transition-opacity whitespace-nowrap"
+            >
+              Create Deal
+            </a>
+          </div>
+        </div>
 
         <VerifiedPropertiesClient properties={properties} token={token} />
       </main>
