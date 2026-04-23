@@ -332,6 +332,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             .select("thread_id, intended_role, invitee_email")
             .eq("invitee_email", userEmail)
             .is("used_at", null)
+            .is("declined_at", null)
             .eq("intended_role", "owner")
         : { data: [] },
     ]);

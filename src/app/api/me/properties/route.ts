@@ -84,7 +84,8 @@ export async function GET() {
       )
         .select("thread_id, invitee_email, intended_role, expires_at")
         .eq("invitee_email", email)
-        .eq("intended_role", "owner");
+        .eq("intended_role", "owner")
+        .is("declined_at", null);
 
       if (invitesErr) return jsonError(invitesErr.message, 500);
 

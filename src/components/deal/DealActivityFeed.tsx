@@ -23,6 +23,7 @@ const LABELS: Record<string, string> = {
   ACCESS_REVOKED: "Access revoked",
   SHARE_TOKEN_MINTED: "Share link created",
   SHARE_TOKEN_REDEEMED: "Share link redeemed",
+  OWNER_NOT_CONFIRMED: "Owner not confirmed",
   // Signature lifecycle events
   signature_agreement_prepared: "Agreement prepared",
   signature_request_sent: "Signature request sent",
@@ -39,6 +40,7 @@ const TONES: Record<string, string> = {
   offer_withdrawn: "bg-amber-100 text-amber-800",
   offer_accepted: "bg-green-100 text-green-800",
   offer_declined: "bg-red-100 text-red-800",
+  OWNER_NOT_CONFIRMED: "bg-amber-100 text-amber-800",
   // Signature lifecycle tones
   signature_agreement_prepared: "bg-amber-100 text-amber-800",
   signature_request_sent: "bg-blue-100 text-blue-800",
