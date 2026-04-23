@@ -35,22 +35,28 @@ const PERSONA_WELCOME: Record<
   },
 };
 
-const NEXT_STEPS: Record<Persona, string[]> = {
-  homeowner: [
-    "Schedule an intro call with our team",
-    "Complete property appraisal coordination",
-    "Connect with our title partner",
-  ],
-  buyer: [
-    "Refine your terms and preferences",
-    "Get matched with homeowner opportunities",
-    "Review and finalize your pathway",
-  ],
-  realtor: [
-    "Complete beta partner onboarding",
-    "Set up your referral profile",
-    "Access co-pilot resources",
-  ],
+const PERSONA_FALLBACK_STEP: Record<Persona, NextStepVm> = {
+  homeowner: {
+    key: "homeowner-start",
+    title: "Create your first deal",
+    description: "Build a scenario and share it with potential buyers.",
+    href: "/deal/new",
+    cta: "Create deal",
+  },
+  buyer: {
+    key: "buyer-browse",
+    title: "Browse available properties",
+    description: "Find verified properties open to equity partnership.",
+    href: "/verified-properties",
+    cta: "Browse properties",
+  },
+  realtor: {
+    key: "realtor-account",
+    title: "Set up your account",
+    description: "Complete your profile to start referring clients.",
+    href: "/me",
+    cta: "Go to my account",
+  },
 };
 
 const IN_PROGRESS_STATUSES = new Set([
@@ -274,7 +280,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     tagline: nickname ? `Welcome, ${nickname}` : baseWelcome.tagline,
   };
 
-  let steps: any[] = NEXT_STEPS[persona] as any[];
+  let steps: NextStepVm[] = [];
 
   const grantsRes = await supabase
     .from("deal_access_grants")
@@ -507,7 +513,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   // deals I own (for "ready to submit" check)
   const myDealsRes = await supabase
     .from("deals")
-    .select("id,created_at,created_by_user_id,user_id")
+    .select("id,status,created_at,created_by_user_id,user_id")
     .or(`created_by_user_id.eq.${user.id},user_id.eq.${user.id}`)
     .order("created_at", { ascending: false })
     .limit(50);
@@ -569,9 +575,19 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   const buyerWaitingThread = pickFirst(buyerWaitingThreads);
 
-  const dynamicSteps: any[] = [];
+  const dynamicSteps: NextStepVm[] = [];
 
-  if (openReviewDealId && openReviewPropertyId) {
+  if (props.length === 0) {
+    // Priority 0: cold-start — user has no properties at all
+    dynamicSteps.push({
+      key: "add-property",
+      title: "Add your first property",
+      description:
+        "Connect a property to unlock deal workflows, offers, and equity scenarios.",
+      href: "/me",
+      cta: "Get started",
+    });
+  } else if (openReviewDealId && openReviewPropertyId) {
     // Priority 1: open review request -- homeowner action required
     dynamicSteps.push({
       key: "review-request-open",
@@ -637,11 +653,41 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       href: `/deal/${buyerWaitingThread.deal_id}#offer`,
       cta: "View offer",
     });
+  } else {
+    // Priority 8: deal in admin-limbo review state (no stronger user action available)
+    const REVIEW_LIMBO_STATUSES = new Set([
+      "NEEDS_REVIEW",
+      "UNDER_REVIEW",
+      "REVIEW_OPEN",
+      "REVIEW_SUBMITTED",
+    ]);
+    const limboOwnedDeal = pickFirst(
+      myDeals.filter((d: any) => {
+        const ownedByMe =
+          d.created_by_user_id === user.id || d.user_id === user.id;
+        const inLimbo =
+          typeof d.status === "string" &&
+          REVIEW_LIMBO_STATUSES.has(d.status.toUpperCase());
+        const notAlreadyAccepted = !acceptedOwnerDealIds.has(d.id);
+        return ownedByMe && inLimbo && notAlreadyAccepted;
+      }),
+    );
+    if (limboOwnedDeal?.id) {
+      dynamicSteps.push({
+        key: "deal-under-review",
+        title: "Deal is under review",
+        description: "Our team is reviewing your deal. We'll be in touch with any next steps.",
+        href: `/deal/${limboOwnedDeal.id}`,
+        cta: "View deal",
+      });
+    }
   }
 
-  if (dynamicSteps.length) {
-    steps = dynamicSteps;
-  }
+  // Always use the structured waterfall. If nothing matched, fall back to one
+  // per-persona structured action rather than static placeholder strings.
+  steps = dynamicSteps.length
+    ? dynamicSteps
+    : [PERSONA_FALLBACK_STEP[persona]];
 
   // (rest of your DashboardPage continues unchanged…)
 
