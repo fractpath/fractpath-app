@@ -98,6 +98,8 @@ export default async function AdminDealsTriagePage({ searchParams }: PageProps) 
     query = query.eq("triage_status", "ready_for_deposit");
   } else if (filterRaw === "more_info") {
     query = query.eq("triage_status", "more_info_needed");
+  } else if (filterRaw === "draft") {
+    query = query.eq("status", "DRAFT").is("archived_at", null);
   }
 
   const { data: deals, error } = await query;
@@ -109,6 +111,7 @@ export default async function AdminDealsTriagePage({ searchParams }: PageProps) 
     { key: "more_info", label: "More info needed" },
     { key: "ineligible", label: "Ineligible" },
     { key: "no_triage", label: "Pending triage" },
+    { key: "draft", label: "Draft deals" },
   ];
 
   return (

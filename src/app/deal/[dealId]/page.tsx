@@ -499,7 +499,7 @@ export default async function DealPage(ctx: PageProps) {
     }
 
     const { data: candidateThreads } = await (svc.from("deal_threads") as any)
-      .select("id, status, buyer_user_id, owner_user_id, created_at")
+      .select("id, status, buyer_user_id, owner_user_id, created_by_user_id, created_at")
       .eq("deal_id", dealId)
       .in("status", ["pending_owner", "pending_buyer", "negotiating", "accepted", "closed"])
       .order("created_at", { ascending: false })
@@ -507,9 +507,21 @@ export default async function DealPage(ctx: PageProps) {
 
     const allCandidateThreads: any[] = candidateThreads ?? [];
 
+    // A "stale owner-created visibility thread" has pending_buyer status, no real buyer
+    // (buyer_user_id IS NULL), and was created by the same user who owns the property.
+    // These were produced by the legacy "make property visible" flow and must not lock
+    // the deal page — they carry no real buyer negotiation.
+    const isStaleVisibilityThread = (t: any) =>
+      t.status === "pending_buyer" &&
+      t.buyer_user_id === null &&
+      t.created_by_user_id !== null &&
+      t.created_by_user_id === t.owner_user_id;
+
     const effectiveThread =
-      allCandidateThreads.find((t) =>
-        ["pending_owner", "pending_buyer", "negotiating", "accepted"].includes(t.status),
+      allCandidateThreads.find(
+        (t) =>
+          ["pending_owner", "pending_buyer", "negotiating", "accepted"].includes(t.status) &&
+          !isStaleVisibilityThread(t),
       ) ?? null;
 
     const threadStatusForMilestone: string | null =
@@ -1060,7 +1072,7 @@ export default async function DealPage(ctx: PageProps) {
 
     if (payloadThreadId) {
       const { data: eventThread } = await (svc.from("deal_threads") as any)
-        .select("id,status,property_id,buyer_user_id,owner_user_id,deal_id")
+        .select("id,status,property_id,buyer_user_id,owner_user_id,created_by_user_id,deal_id")
         .eq("id", payloadThreadId)
         .maybeSingle();
 
@@ -1355,9 +1367,18 @@ export default async function DealPage(ctx: PageProps) {
       }
     }
 
+    // Same stale-thread guard as the primary path: exclude owner-created pending_buyer
+    // threads with no real buyer (legacy "make property visible" artifacts).
+    const isStaleVisibilityThreadFallback = (t: any) =>
+      t?.status === "pending_buyer" &&
+      t?.buyer_user_id === null &&
+      t?.created_by_user_id !== null &&
+      t?.created_by_user_id === t?.owner_user_id;
+
     const effectiveThread =
       thread &&
-      ["pending_owner", "pending_buyer", "negotiating", "accepted"].includes(thread.status)
+      ["pending_owner", "pending_buyer", "negotiating", "accepted"].includes(thread.status) &&
+      !isStaleVisibilityThreadFallback(thread)
         ? thread
         : null;
 

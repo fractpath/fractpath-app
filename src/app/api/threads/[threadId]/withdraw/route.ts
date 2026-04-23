@@ -25,7 +25,7 @@ export async function POST(
   const svc = createServiceClient();
 
   const { data: thread, error: tErr } = await (svc.from("deal_threads") as any)
-    .select("id, buyer_user_id, status, deal_id")
+    .select("id, buyer_user_id, owner_user_id, status, deal_id")
     .eq("id", threadId)
     .maybeSingle();
 

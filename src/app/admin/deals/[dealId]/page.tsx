@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/auth/requireAdmin";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getDealEvents } from "@/lib/dealTimeline";
 import { AdminDealActions } from "@/components/admin/AdminDealActions";
+import { AdminDealDeleteButton } from "@/components/admin/AdminDealDeleteButton";
 import { AdminDealServicingPanel } from "@/components/admin/AdminDealServicingPanel";
 import { AdminReopenNegotiationButton } from "@/components/admin/AdminReopenNegotiationButton";
 import { SignatureCard } from "@/components/deal/SignatureCard";
@@ -1402,6 +1403,25 @@ export default async function AdminDealReviewPage({
           />
         </div>
       </div>
+
+      {/* ── Danger zone (draft-only admin delete) ── */}
+      {deal.status === "DRAFT" && !latestProposal && !sigData.packet && (
+        <div className="rounded-lg border border-red-200 overflow-hidden">
+          <div className="bg-red-50 px-4 py-2 text-sm font-medium border-b border-red-200 text-red-800">
+            Danger zone
+          </div>
+          <div className="p-4 flex items-start gap-4">
+            <div className="flex-1 space-y-1">
+              <p className="text-sm font-medium text-red-900">Delete this draft deal</p>
+              <p className="text-xs text-muted-foreground">
+                Permanently removes this orphan draft and all attached data (snapshots, events, access grants, stale threads).
+                Only available for DRAFT deals with no submitted proposals and no signature packets.
+              </p>
+            </div>
+            <AdminDealDeleteButton dealId={dealId} />
+          </div>
+        </div>
+      )}
 
       {/* ── Deal activity ── */}
       <div className="rounded-lg border overflow-hidden">
