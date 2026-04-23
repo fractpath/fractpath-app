@@ -187,7 +187,11 @@ export async function GET() {
         const threadByPropertyId = new Map<string, any>();
         for (const thread of threads ?? []) {
           if (!thread?.property_id) continue;
-          if (!threadByPropertyId.has(thread.property_id)) {
+          const existing = threadByPropertyId.get(thread.property_id);
+          // Prefer invite-backed threads so claim_thread_id and has_owner_invite stay
+          // aligned. Without this, a non-invite thread encountered first would win the
+          // slot, making has_owner_invite false even when a valid invite exists.
+          if (!existing || (!inviteBackedThreadIds.has(existing.id) && inviteBackedThreadIds.has(thread.id))) {
             threadByPropertyId.set(thread.property_id, thread);
           }
         }
