@@ -222,7 +222,7 @@ export function VerifiedPropertiesClient({
               <path fillRule="evenodd" d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z" clipRule="evenodd" />
             </svg>
           )}
-          Approved for participation
+          Open to proposals
         </button>
 
         <select
@@ -270,39 +270,51 @@ export function VerifiedPropertiesClient({
 
       {/* Card grid — CTA tile always first, then filtered property cards */}
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        {/* BYO-property CTA tile */}
-        <div className="rounded-xl border bg-card overflow-hidden shadow-sm flex flex-col">
+        {/* BYO-property CTA tile — black/premium marketing card */}
+        <div className="rounded-xl overflow-hidden shadow-sm flex flex-col" style={{ background: "#0a0a0a", border: "1px solid #27272a" }}>
           {/* Hero area */}
           <div
-            className="flex items-center justify-center bg-muted/60 flex-shrink-0"
-            style={{ height: 176 }}
+            className="flex-shrink-0 relative flex items-center justify-center"
+            style={{ height: 176, background: "#0a0a0a", overflow: "hidden" }}
             aria-hidden="true"
           >
+            {/* Subtle geometric rings */}
+            <svg
+              viewBox="0 0 200 200"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0.08 }}
+            >
+              <circle cx="100" cy="100" r="70" stroke="white" strokeWidth="1" />
+              <circle cx="100" cy="100" r="90" stroke="white" strokeWidth="0.75" />
+              <circle cx="100" cy="100" r="50" stroke="white" strokeWidth="0.5" />
+            </svg>
+            {/* House icon */}
             <svg
               xmlns="http://www.w3.org/2000/svg"
               viewBox="0 0 24 24"
               fill="none"
-              stroke="currentColor"
-              strokeWidth={1.25}
+              stroke="white"
+              strokeWidth={1.1}
               strokeLinecap="round"
               strokeLinejoin="round"
-              className="w-12 h-12 text-muted-foreground/40"
-              aria-hidden="true"
+              style={{ width: 52, height: 52, opacity: 0.9, position: "relative", zIndex: 1 }}
             >
               <path d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
             </svg>
           </div>
           {/* Body */}
-          <div className="p-4 flex flex-col gap-2.5 flex-1">
-            <p className="text-sm font-semibold leading-snug">Have a property in mind?</p>
-            <p className="text-xs text-muted-foreground leading-relaxed">
+          <div className="p-4 flex flex-col gap-2.5 flex-1" style={{ background: "#0a0a0a" }}>
+            <p className="text-sm font-semibold leading-snug" style={{ color: "#ffffff" }}>Have a property in mind?</p>
+            <p className="text-xs leading-relaxed" style={{ color: "#a1a1aa" }}>
               Start a deal by adding the property address. FractPath can help identify and
               reach out to the homeowner.
             </p>
             <div className="mt-auto pt-1">
               <Link
                 href="/deal/new"
-                className="block w-full rounded-md bg-foreground px-3 py-2 text-center text-sm font-medium text-background hover:opacity-90 transition-opacity"
+                className="block w-full rounded-md px-3 py-2 text-center text-sm font-medium transition-opacity hover:opacity-90"
+                style={{ background: "#ffffff", color: "#0a0a0a" }}
               >
                 Start a deal
               </Link>

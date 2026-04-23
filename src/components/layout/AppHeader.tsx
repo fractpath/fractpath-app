@@ -34,7 +34,7 @@ export function AppHeader() {
           >
             Profile
           </Link>
-          <form method="post" action="/auth/logout" className="m-0">
+          <form method="post" action="/auth/logout" className="m-0 flex items-center">
             <button
               type="submit"
               className="text-sm text-muted-foreground hover:text-foreground"
