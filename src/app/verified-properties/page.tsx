@@ -168,13 +168,7 @@ export default async function VerifiedPropertiesPage() {
       <AppHeader />
 
       <main className="mx-auto max-w-5xl px-4 py-10 space-y-6">
-        <div className="space-y-1.5">
-          <h1 className="text-2xl font-semibold">Opportunities</h1>
-          <p className="text-sm text-muted-foreground max-w-xl">
-            Browse properties available for home equity agreement exploration. Filter by verified
-            status or owner participation to narrow your search.
-          </p>
-        </div>
+        <h1 className="text-2xl font-semibold">Opportunities</h1>
 
         <VerifiedPropertiesClient properties={properties} token={token} />
       </main>

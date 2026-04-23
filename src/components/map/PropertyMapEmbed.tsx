@@ -246,11 +246,11 @@ export function PropertyMapEmbed({
         setDebugStats((prev) => ({ ...prev, markerCount: markersRef.current.size }));
       }
 
-      // Fit bounds once on first render
+      // Fit bounds once on first render — no animation to avoid unnecessary tile loads on mount
       if (!hasFitRef.current && properties.length > 0) {
         hasFitRef.current = true;
         if (properties.length === 1) {
-          map.flyTo({
+          map.jumpTo({
             center: [properties[0].longitude!, properties[0].latitude!],
             zoom: 13,
           });
@@ -262,7 +262,7 @@ export function PropertyMapEmbed({
               [Math.min(...lngs), Math.min(...lats)],
               [Math.max(...lngs), Math.max(...lats)],
             ],
-            { padding: 80, maxZoom: 14 },
+            { padding: 80, maxZoom: 14, animate: false },
           );
         }
       }

@@ -268,49 +268,70 @@ export function VerifiedPropertiesClient({
         />
       )}
 
-      {/* Page card grid */}
-      {filtered.length === 0 ? (
-        <div className="rounded-lg border p-8 text-center text-sm text-muted-foreground">
-          {search || activeFilterCount > 0
-            ? `No properties match your current filters.`
-            : "No properties are currently available. Check back later."}
+      {/* Card grid — CTA tile always first, then filtered property cards */}
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        {/* BYO-property CTA tile */}
+        <div className="rounded-xl border bg-card overflow-hidden shadow-sm flex flex-col">
+          {/* Hero area */}
+          <div
+            className="flex items-center justify-center bg-muted/60 flex-shrink-0"
+            style={{ height: 176 }}
+            aria-hidden="true"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.25}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="w-12 h-12 text-muted-foreground/40"
+              aria-hidden="true"
+            >
+              <path d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
+            </svg>
+          </div>
+          {/* Body */}
+          <div className="p-4 flex flex-col gap-2.5 flex-1">
+            <p className="text-sm font-semibold leading-snug">Have a property in mind?</p>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Start a deal by adding the property address. FractPath can help identify and
+              reach out to the homeowner.
+            </p>
+            <div className="mt-auto pt-1">
+              <Link
+                href="/deal/new"
+                className="block w-full rounded-md bg-foreground px-3 py-2 text-center text-sm font-medium text-background hover:opacity-90 transition-opacity"
+              >
+                Start a deal
+              </Link>
+            </div>
+          </div>
         </div>
-      ) : (
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((p) => (
-            <PropertyDiscoveryCard
-              key={p.id}
-              property={p}
-              variant="page"
-              photos={photoCache.get(p.id) ?? null}
-              photosLoading={loadingIds.has(p.id)}
-              onLoadPhotos={() => loadPhotos(p.id)}
-              isHighlighted={highlightedId === p.id}
-              onClick={() => handleCardClick(p.id)}
-              cardRef={setCardRef(p.id)}
-            />
-          ))}
-        </div>
-      )}
 
-      {/* BYO-property banner */}
-      <div className="rounded-lg border bg-muted/30 px-6 py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="space-y-1">
-          <p className="text-sm font-semibold text-foreground">
-            Didn&apos;t find the property you&apos;re looking for?
-          </p>
-          <p className="text-sm text-muted-foreground max-w-md">
-            Start a deal with a property you already have in mind. Add the address and FractPath
-            can help identify the owner and begin the process.
-          </p>
-        </div>
-        <Link
-          href="/deal/new"
-          className="flex-shrink-0 inline-flex items-center rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted/50 transition-colors"
-        >
-          Start a deal with a property
-        </Link>
+        {/* Property cards */}
+        {filtered.map((p) => (
+          <PropertyDiscoveryCard
+            key={p.id}
+            property={p}
+            variant="page"
+            photos={photoCache.get(p.id) ?? null}
+            photosLoading={loadingIds.has(p.id)}
+            onLoadPhotos={() => loadPhotos(p.id)}
+            isHighlighted={highlightedId === p.id}
+            onClick={() => handleCardClick(p.id)}
+            cardRef={setCardRef(p.id)}
+          />
+        ))}
       </div>
+
+      {/* No-results message when filters/search produce zero properties */}
+      {filtered.length === 0 && (search || activeFilterCount > 0) && (
+        <p className="text-sm text-muted-foreground text-center">
+          No properties match your current filters.
+        </p>
+      )}
     </div>
   );
 }
