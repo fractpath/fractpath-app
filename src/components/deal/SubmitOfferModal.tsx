@@ -168,7 +168,7 @@ export function SubmitOfferModal({ open, onClose, dealId, propertyId, effectiveS
             <div className="rounded-md bg-blue-50 border border-blue-200 p-3">
               <div className="text-sm font-medium text-blue-800">You are the property owner</div>
               <div className="mt-1 text-xs text-blue-700">
-                Send this deal to a potential buyer for their review. You can specify a buyer's email or let FractPath find one.
+                Send this deal to a specific buyer for review, or make the property visible on FractPath for interested parties to discover.
               </div>
             </div>
 
@@ -195,7 +195,7 @@ export function SubmitOfferModal({ open, onClose, dealId, propertyId, effectiveS
                 }`}
                 data-testid="segment-owner-outreach"
               >
-                FractPath find a buyer
+                Make property visible
               </button>
             </div>
 
@@ -218,9 +218,9 @@ export function SubmitOfferModal({ open, onClose, dealId, propertyId, effectiveS
               </div>
             ) : (
               <div className="rounded-md bg-blue-50 border border-blue-200 p-3">
-                <div className="text-sm font-medium text-blue-800">FractPath buyer outreach</div>
+                <div className="text-sm font-medium text-blue-800">Public visibility</div>
                 <div className="mt-1 text-xs text-blue-700">
-                  Our team will identify and connect a qualified buyer with this deal on your behalf.
+                  Make this property visible on FractPath so interested parties can view it and start a deal.
                 </div>
               </div>
             )}
@@ -232,7 +232,7 @@ export function SubmitOfferModal({ open, onClose, dealId, propertyId, effectiveS
               className="w-full rounded-lg bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90 disabled:opacity-50"
               data-testid="submit-offer-owner-btn"
             >
-              {busy ? "Submitting..." : "Send to buyer"}
+              {busy ? "Submitting..." : ownerBuyerSegment === "known_buyer_email" ? "Share with buyer" : "Make visible"}
             </button>
           </div>
         ) : isVerifiedOwner ? (
