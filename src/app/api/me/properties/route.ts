@@ -179,11 +179,20 @@ export async function GET() {
     const threadIds = Array.from(threadIdSet);
 
     if (threadIds.length > 0) {
+      // Exclude terminal threads — they cannot back a valid claimable card.
+      // A closed/voided thread remaining in threadIdSet (e.g., from a stale
+      // invite after claim-release) would otherwise surface a card that errors
+      // on claim because the thread is no longer actionable.
       const { data: threads, error: threadsErr } = await (
         svc.from("deal_threads") as any
       )
         .select("id, property_id, status, deal_id, owner_user_id")
-        .in("id", threadIds);
+        .in("id", threadIds)
+        .not(
+          "status",
+          "in",
+          '("closed","closed_due_to_claim_release","voided_by_admin")',
+        );
 
       if (threadsErr) return jsonError(threadsErr.message, 500);
 
