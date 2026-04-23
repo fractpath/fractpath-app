@@ -329,26 +329,26 @@ export function PropertyList() {
 
                   <div className="flex shrink-0 flex-wrap gap-2">
                     {isClaimable ? (
-                      <>
-                        {p.has_owner_invite && (
-                          <button
-                            className="text-sm text-muted-foreground underline"
-                            disabled={!!decliningId}
-                            onClick={() => {
-                              setNotMyPropertyId(p.claim_thread_id ?? null);
-                              setNotMyPropertyConfirmOpen(true);
-                            }}
-                          >
-                            Not my property
-                          </button>
-                        )}
+                      <div className="flex flex-col items-end gap-1">
                         <LoadingButton
                           loading={claimingId === p.id}
                           onClick={() => claimNow(p)}
                         >
                           Claim & verify
                         </LoadingButton>
-                      </>
+                        {p.has_owner_invite && (
+                          <button
+                            className="text-xs text-muted-foreground underline"
+                            disabled={!!decliningId}
+                            onClick={() => {
+                              setNotMyPropertyId(p.claim_thread_id ?? null);
+                              setNotMyPropertyConfirmOpen(true);
+                            }}
+                          >
+                            Not your property?
+                          </button>
+                        )}
+                      </div>
                     ) : (
                       <>
                         <Link
