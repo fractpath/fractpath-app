@@ -55,12 +55,16 @@ export async function GET() {
   const svc = createServiceClient();
   const email = user.email?.toLowerCase() ?? null;
 
+  // created_by_user_id is excluded when claim_released_at IS NOT NULL to prevent
+  // a released property from reappearing via the creator bridge after an owner
+  // releases their claim (owner_user_id and claimed_by_user_id are already null
+  // post-release, so only the creator bridge survives without this guard).
   const { data: ownedData, error: ownedErr } = await (
     svc.from("properties") as any
   )
     .select(OWNED_SELECT)
     .or(
-      `owner_user_id.eq.${user.id},created_by_user_id.eq.${user.id},claimed_by_user_id.eq.${user.id}`,
+      `owner_user_id.eq.${user.id},claimed_by_user_id.eq.${user.id},and(created_by_user_id.eq.${user.id},claim_released_at.is.null)`,
     )
     .order("updated_at", { ascending: false });
 
