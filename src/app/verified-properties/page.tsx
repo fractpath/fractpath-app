@@ -14,6 +14,7 @@ export default async function VerifiedPropertiesPage() {
       "id, address_line1, city, state, postal_code, status, verified_at, latitude, longitude, proposal_interest_status",
     )
     .eq("visibility_preference", "public")
+    .eq("status", "verified")
     .order("verified_at", { ascending: false, nullsFirst: false });
 
   const baseRows: any[] = error ? [] : (data ?? []);
