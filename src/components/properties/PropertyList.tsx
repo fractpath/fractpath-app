@@ -329,7 +329,7 @@ export function PropertyList() {
 
                   <div className="flex shrink-0 flex-wrap gap-2">
                     {isClaimable ? (
-                      <div className="flex flex-col items-end gap-1">
+                      <div className="flex flex-col items-center gap-1">
                         <LoadingButton
                           loading={claimingId === p.id}
                           onClick={() => claimNow(p)}
