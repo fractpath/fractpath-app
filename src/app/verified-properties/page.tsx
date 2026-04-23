@@ -11,9 +11,8 @@ export default async function VerifiedPropertiesPage() {
 
   const { data, error } = await (supabase.from("properties") as any)
     .select(
-      "id, address_line1, city, state, postal_code, verified_at, latitude, longitude",
+      "id, address_line1, city, state, postal_code, status, verified_at, latitude, longitude, proposal_interest_status",
     )
-    .eq("status", "verified")
     .eq("visibility_preference", "public")
     .order("verified_at", { ascending: false, nullsFirst: false });
 
@@ -147,7 +146,7 @@ export default async function VerifiedPropertiesPage() {
         postal_code: row.postal_code ?? null,
         latitude: typeof row.latitude === "number" ? row.latitude : null,
         longitude: typeof row.longitude === "number" ? row.longitude : null,
-        status: "verified",
+        status: row.status ?? "unknown",
         verified_at: row.verified_at ?? null,
         rentcast_avm: avmMap.get(row.id) ?? null,
         hero_photo_url: heroPhotoUrl,
@@ -159,6 +158,7 @@ export default async function VerifiedPropertiesPage() {
         sqft: applyNumericCorrection(row.id, "sqft_living", rc?.sqft ?? null),
         year_built: applyNumericCorrection(row.id, "year_built", rc?.year_built ?? null),
         property_type: rc?.property_type ?? null,
+        open_to_proposals: row.proposal_interest_status !== "not_interested",
       } satisfies DiscoveryProperty;
     });
   }
@@ -169,10 +169,10 @@ export default async function VerifiedPropertiesPage() {
 
       <main className="mx-auto max-w-5xl px-4 py-10 space-y-6">
         <div className="space-y-1.5">
-          <h1 className="text-2xl font-semibold">Verified Properties</h1>
+          <h1 className="text-2xl font-semibold">Opportunities</h1>
           <p className="text-sm text-muted-foreground max-w-xl">
-            Verified properties open to home equity agreement proposals. Each property shown here
-            has completed the verification process.
+            Browse properties available for home equity agreement exploration. Filter by verified
+            status or owner participation to narrow your search.
           </p>
         </div>
 

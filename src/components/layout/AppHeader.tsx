@@ -23,10 +23,10 @@ export function AppHeader() {
             Dashboard
           </Link>
           <Link
-            href="/deal/new"
-            className="inline-flex items-center rounded-md bg-foreground px-3 py-1.5 text-sm font-medium text-background"
+            href="/verified-properties"
+            className="text-sm text-muted-foreground hover:text-foreground"
           >
-            Create Deal
+            Opportunities
           </Link>
           <Link
             href="/me"

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useRef, useCallback } from "react";
+import Link from "next/link";
 import type { DiscoveryProperty } from "@/app/api/map/public-properties/route";
 import { PropertyMapEmbed } from "@/components/map/PropertyMapEmbed";
 import { PropertyDiscoveryCard } from "@/components/property/PropertyDiscoveryCard";
@@ -16,6 +17,8 @@ export function VerifiedPropertiesClient({
 }) {
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("newest");
+  const [filterVerified, setFilterVerified] = useState(false);
+  const [filterApproved, setFilterApproved] = useState(false);
   // highlightedId: which property has the blue ring on its page card + highlighted marker
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   // flyToId: triggers map.flyTo for a property (set by card click)
@@ -63,6 +66,14 @@ export function VerifiedPropertiesClient({
   const filtered = useMemo(() => {
     let result = [...properties];
 
+    if (filterVerified) {
+      result = result.filter((p) => p.status === "verified");
+    }
+
+    if (filterApproved) {
+      result = result.filter((p) => p.open_to_proposals === true);
+    }
+
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       result = result.filter(
@@ -96,7 +107,7 @@ export function VerifiedPropertiesClient({
     }
 
     return result;
-  }, [properties, search, sort]);
+  }, [properties, search, sort, filterVerified, filterApproved]);
 
   const mapProperties = useMemo(
     () => filtered.filter((p) => p.latitude != null && p.longitude != null),
@@ -145,6 +156,8 @@ export function VerifiedPropertiesClient({
     [],
   );
 
+  const activeFilterCount = (filterVerified ? 1 : 0) + (filterApproved ? 1 : 0);
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
@@ -175,6 +188,43 @@ export function VerifiedPropertiesClient({
           />
         </div>
 
+        {/* Filter toggles */}
+        <button
+          type="button"
+          onClick={() => setFilterVerified((v) => !v)}
+          className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+            filterVerified
+              ? "bg-foreground text-background border-foreground"
+              : "bg-background text-foreground hover:bg-muted/50"
+          }`}
+          aria-pressed={filterVerified}
+        >
+          {filterVerified && (
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5" aria-hidden="true">
+              <path fillRule="evenodd" d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z" clipRule="evenodd" />
+            </svg>
+          )}
+          Verified
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setFilterApproved((v) => !v)}
+          className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+            filterApproved
+              ? "bg-foreground text-background border-foreground"
+              : "bg-background text-foreground hover:bg-muted/50"
+          }`}
+          aria-pressed={filterApproved}
+        >
+          {filterApproved && (
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5" aria-hidden="true">
+              <path fillRule="evenodd" d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z" clipRule="evenodd" />
+            </svg>
+          )}
+          Approved for participation
+        </button>
+
         <select
           value={sort}
           onChange={(e) => setSort(e.target.value as SortKey)}
@@ -189,6 +239,15 @@ export function VerifiedPropertiesClient({
           {filtered.length === properties.length
             ? `${properties.length} propert${properties.length === 1 ? "y" : "ies"}`
             : `${filtered.length} of ${properties.length}`}
+          {activeFilterCount > 0 && (
+            <button
+              type="button"
+              onClick={() => { setFilterVerified(false); setFilterApproved(false); }}
+              className="ml-2 text-xs underline underline-offset-2 hover:text-foreground"
+            >
+              Clear filters
+            </button>
+          )}
         </span>
       </div>
 
@@ -212,9 +271,9 @@ export function VerifiedPropertiesClient({
       {/* Page card grid */}
       {filtered.length === 0 ? (
         <div className="rounded-lg border p-8 text-center text-sm text-muted-foreground">
-          {search
-            ? `No verified properties match "${search}". Try a different city or ZIP.`
-            : "No verified properties are currently available. Check back later."}
+          {search || activeFilterCount > 0
+            ? `No properties match your current filters.`
+            : "No properties are currently available. Check back later."}
         </div>
       ) : (
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
@@ -233,6 +292,25 @@ export function VerifiedPropertiesClient({
           ))}
         </div>
       )}
+
+      {/* BYO-property banner */}
+      <div className="rounded-lg border bg-muted/30 px-6 py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="space-y-1">
+          <p className="text-sm font-semibold text-foreground">
+            Didn&apos;t find the property you&apos;re looking for?
+          </p>
+          <p className="text-sm text-muted-foreground max-w-md">
+            Start a deal with a property you already have in mind. Add the address and FractPath
+            can help identify the owner and begin the process.
+          </p>
+        </div>
+        <Link
+          href="/deal/new"
+          className="flex-shrink-0 inline-flex items-center rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted/50 transition-colors"
+        >
+          Start a deal with a property
+        </Link>
+      </div>
     </div>
   );
 }

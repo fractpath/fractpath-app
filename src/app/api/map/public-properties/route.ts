@@ -23,6 +23,8 @@ export type DiscoveryProperty = {
   sqft: number | null;
   year_built: number | null;
   property_type: string | null;
+  /** True when the owner has indicated interest or openness to proposals. */
+  open_to_proposals?: boolean;
 };
 
 /** @deprecated Use DiscoveryProperty */
