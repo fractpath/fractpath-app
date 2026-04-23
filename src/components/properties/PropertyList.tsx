@@ -25,6 +25,7 @@ type Property = {
   claim_thread_id?: string | null;
   claim_deal_id?: string | null;
   claim_thread_status?: string | null;
+  has_owner_invite?: boolean;
   // Enrichment thumbnail — merged in by API from property_enrichments
   cover_image_url?: string | null;
   // Owner hero photo — priority over vendor enrichment thumbnail
@@ -329,22 +330,24 @@ export function PropertyList() {
                   <div className="flex shrink-0 flex-wrap gap-2">
                     {isClaimable ? (
                       <>
+                        {p.has_owner_invite && (
+                          <button
+                            className="text-sm text-muted-foreground underline"
+                            disabled={!!decliningId}
+                            onClick={() => {
+                              setNotMyPropertyId(p.claim_thread_id ?? null);
+                              setNotMyPropertyConfirmOpen(true);
+                            }}
+                          >
+                            Not my property
+                          </button>
+                        )}
                         <LoadingButton
                           loading={claimingId === p.id}
                           onClick={() => claimNow(p)}
                         >
                           Claim & verify
                         </LoadingButton>
-                        <button
-                          className="text-sm text-muted-foreground underline"
-                          disabled={!!decliningId}
-                          onClick={() => {
-                            setNotMyPropertyId(p.claim_thread_id ?? null);
-                            setNotMyPropertyConfirmOpen(true);
-                          }}
-                        >
-                          Not my property
-                        </button>
                       </>
                     ) : (
                       <>

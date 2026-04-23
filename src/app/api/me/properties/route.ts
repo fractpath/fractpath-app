@@ -77,6 +77,9 @@ export async function GET() {
   {
     const threadIdSet = new Set<string>();
     const grantedDealIdSet = new Set<string>();
+    // Tracks which thread IDs are backed by a direct email invite.
+    // Only invite-backed claimable cards support "Not My Property".
+    const inviteBackedThreadIds = new Set<string>();
 
     if (email) {
       const { data: invites, error: invitesErr } = await (
@@ -94,6 +97,7 @@ export async function GET() {
           !inv?.expires_at || new Date(inv.expires_at) > new Date();
         if (notExpired && inv?.thread_id) {
           threadIdSet.add(inv.thread_id);
+          inviteBackedThreadIds.add(inv.thread_id);
         }
       }
     }
@@ -192,6 +196,9 @@ export async function GET() {
               claim_thread_id: thread?.id ?? null,
               claim_deal_id: thread?.deal_id ?? null,
               claim_thread_status: thread?.status ?? null,
+              has_owner_invite: thread?.id
+                ? inviteBackedThreadIds.has(thread.id)
+                : false,
             };
           })
           .filter((p: any) => {
@@ -262,6 +269,7 @@ export async function GET() {
           claim_thread_id: r.claim_thread_id ?? null,
           claim_deal_id: r.claim_deal_id ?? null,
           claim_thread_status: r.claim_thread_status ?? null,
+          has_owner_invite: r.has_owner_invite ?? false,
         }),
       );
     }

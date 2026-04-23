@@ -188,6 +188,12 @@ export type ClaimablePropertyShape = {
   claim_thread_id: string | null;
   claim_deal_id: string | null;
   claim_thread_status: string | null;
+  /**
+   * True when the card is visible because of a direct email invite
+   * (thread_invites row). Only invite-backed cards support "Not My Property".
+   * False for cards visible via participant row, owner_user_id, or grant bridge.
+   */
+  has_owner_invite: boolean;
 };
 
 export function toClaimableProperty(
@@ -197,6 +203,7 @@ export function toClaimableProperty(
     claim_thread_id: string | null;
     claim_deal_id: string | null;
     claim_thread_status: string | null;
+    has_owner_invite: boolean;
   },
 ): ClaimablePropertyShape {
   return {
@@ -219,6 +226,7 @@ export function toClaimableProperty(
     claim_thread_id: extras.claim_thread_id,
     claim_deal_id: extras.claim_deal_id,
     claim_thread_status: extras.claim_thread_status,
+    has_owner_invite: extras.has_owner_invite,
   };
 }
 
