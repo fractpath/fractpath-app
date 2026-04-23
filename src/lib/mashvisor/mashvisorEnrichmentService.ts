@@ -56,14 +56,32 @@ async function importSingleImage(
   providerUrl: string,
   storagePath: string,
 ): Promise<{ hostedUrl: string | null; failureReason: string | null }> {
+  let host = "(unknown)";
+  try { host = new URL(providerUrl).hostname; } catch { /* noop */ }
+
   let res: Response;
   try {
     res = await fetch(providerUrl, {
+      redirect: "follow",
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       headers: { "User-Agent": "FractPath-Enrichment/1.0" },
     });
   } catch (err) {
-    const reason = err instanceof Error ? err.message : "fetch error";
+    const e = err as Error & { cause?: { code?: string; message?: string } };
+    const name    = e?.name    ?? "UnknownError";
+    const message = e?.message ?? "fetch error";
+    const cause   = e?.cause;
+    const causeCode    = cause?.code    ?? "(none)";
+    const causeMessage = cause?.message ?? "(none)";
+    const reason = `${name}: ${message}`;
+    console.warn(
+      `[Mashvisor] importSingleImage FETCH THREW` +
+      ` — host: ${host}` +
+      ` — name: ${name}` +
+      ` — message: ${message}` +
+      ` — cause.code: ${causeCode}` +
+      ` — cause.message: ${causeMessage}`,
+    );
     return { hostedUrl: null, failureReason: reason };
   }
 

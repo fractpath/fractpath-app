@@ -113,11 +113,14 @@ export function AdminVendorReviewPanel({
   const [candidates, setCandidates] = useState<ProfileCandidate[] | null>(null);
   const [confirmingIdx, setConfirmingIdx] = useState<number | null>(null);
   const [confirmErr, setConfirmErr] = useState<string | null>(null);
+  // noResult: true when the vendor returned no data for this address (not an app error).
+  const [profileNoResult, setProfileNoResult] = useState(false);
 
   async function handleFetchProfile() {
     setProfileErr(null);
     setCandidates(null);
     setConfirmErr(null);
+    setProfileNoResult(false);
     setProfilePending(true);
     try {
       const res = await fetch(
@@ -128,8 +131,11 @@ export function AdminVendorReviewPanel({
       if (!body.ok) {
         setProfileErr(body.error ?? "Failed to fetch property data");
       } else if (body.matched === false) {
-        // No exact canonical match — surface candidates for admin selection.
-        setCandidates(body.candidates ?? []);
+        const candidates: ProfileCandidate[] = body.candidates ?? [];
+        setCandidates(candidates);
+        if (body.noResult === true || candidates.length === 0) {
+          setProfileNoResult(true);
+        }
       } else {
         window.location.reload();
       }

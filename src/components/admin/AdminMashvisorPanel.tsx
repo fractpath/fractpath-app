@@ -4,6 +4,11 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { MashvisorNormalizedSummary, MashvisorImagesPayload } from "@/lib/mashvisor/types";
 import { EnrichedPropertyPreview } from "@/components/property/EnrichedPropertyPreview";
+import type {
+  PropertyFacts,
+  PropertyAvm,
+  PropertyReviewedBasis,
+} from "@/lib/property/propertyFacts";
 
 type Enrichment = {
   id: string;
@@ -19,10 +24,19 @@ type Props = {
   propertyId: string;
   hasAddress: boolean;
   enrichment: Enrichment | null;
+  /** Provider-agnostic facts from RentCast property_review_runs. */
+  rentcastFacts?: PropertyFacts | null;
+  /** Timestamp of the current RentCast property_profile run (requested_at). */
+  rentcastFetchedAt?: string | null;
+  /** RentCast provider property ID (raw_payload.id). */
+  rentcastRecordId?: string | null;
+  /** RentCast AVM estimate + range + confidence. */
+  avm?: PropertyAvm | null;
+  /** Reviewed/controlling FMV basis (ATTOM, manual appraisal, etc.). */
+  reviewedBasis?: PropertyReviewedBasis | null;
   /**
-   * Label shown for the numeric value estimate in the property preview stats row.
-   * Should match the active valuation lane on this property (e.g. "Reviewed value",
-   * "Appraised value"). Defaults to "Source value".
+   * @deprecated Kept for backward compat — no longer rendered in the preview.
+   * Pass `avm` and `reviewedBasis` instead.
    */
   valuationLabel?: string;
 };
@@ -41,7 +55,16 @@ function Spinner() {
   );
 }
 
-export function AdminMashvisorPanel({ propertyId, hasAddress, enrichment, valuationLabel = "Source value" }: Props) {
+export function AdminMashvisorPanel({
+  propertyId,
+  hasAddress,
+  enrichment,
+  rentcastFacts,
+  rentcastFetchedAt,
+  rentcastRecordId,
+  avm,
+  reviewedBasis,
+}: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -88,6 +111,12 @@ export function AdminMashvisorPanel({ propertyId, hasAddress, enrichment, valuat
     }
   }
 
+  // Metadata priority: RentCast is the facts source; Mashvisor is image-only fallback.
+  // fetchedAt and providerRecordId reflect the current RentCast profile run when available.
+  const effectiveFetchedAt = rentcastFetchedAt ?? rentcastFacts?.fetchedAt ?? current?.fetched_at ?? null;
+  const effectiveRecordId = rentcastRecordId ?? current?.provider_record_id ?? null;
+  const factsSourceLabel = rentcastFacts ? "RentCast" : completed ? "Mashvisor" : null;
+
   return (
     <div className="rounded-lg border overflow-hidden">
 
@@ -95,9 +124,12 @@ export function AdminMashvisorPanel({ propertyId, hasAddress, enrichment, valuat
       <div className="bg-muted/40 px-4 py-2 border-b flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">Property Preview</span>
-          <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-            Mashvisor
-          </span>
+          {factsSourceLabel && (
+            <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+              {factsSourceLabel}
+              {rentcastFacts && completed && " · Mashvisor images"}
+            </span>
+          )}
         </div>
 
         {hasAddress && (
@@ -139,17 +171,22 @@ export function AdminMashvisorPanel({ propertyId, hasAddress, enrichment, valuat
         )}
 
         {/* Shared enriched property preview */}
-        {summary && images ? (
+        {(rentcastFacts || avm || (summary && images)) ? (
           <EnrichedPropertyPreview
             audience="admin"
             enrichment={{
-              summary,
-              images,
-              fetchedAt: current?.fetched_at ?? null,
-              providerRecordId: current?.provider_record_id ?? null,
-              imageCount: images.image_urls?.length ?? 0,
+              summary: summary ?? null,
+              images: images ?? null,
+              // fetchedAt: RentCast profile run timestamp takes priority over
+              // Mashvisor enrichment row timestamp.
+              fetchedAt: effectiveFetchedAt,
+              // providerRecordId: RentCast record ID takes priority over Mashvisor property ID.
+              providerRecordId: effectiveRecordId,
+              imageCount: images?.image_urls?.length ?? 0,
+              facts: rentcastFacts ?? undefined,
+              avm: avm ?? null,
+              reviewedBasis: reviewedBasis ?? null,
             }}
-            valuationLabel={valuationLabel}
           />
         ) : !loading && current?.status !== "failed" ? (
           <div className="space-y-2">

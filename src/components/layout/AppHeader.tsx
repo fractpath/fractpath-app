@@ -23,10 +23,10 @@ export function AppHeader() {
             Dashboard
           </Link>
           <Link
-            href="/deal/new"
-            className="inline-flex items-center rounded-md bg-foreground px-3 py-1.5 text-sm font-medium text-background"
+            href="/verified-properties"
+            className="text-sm text-muted-foreground hover:text-foreground"
           >
-            Create Deal
+            Properties
           </Link>
           <Link
             href="/me"
@@ -34,7 +34,7 @@ export function AppHeader() {
           >
             Profile
           </Link>
-          <form method="post" action="/auth/logout" className="m-0">
+          <form method="post" action="/auth/logout" className="m-0 flex items-center">
             <button
               type="submit"
               className="text-sm text-muted-foreground hover:text-foreground"

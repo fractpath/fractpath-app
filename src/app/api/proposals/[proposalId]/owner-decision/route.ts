@@ -87,7 +87,7 @@ export async function POST(
     return json(404, { ok: false, error: "Thread not found" });
   }
 
-  if (!["pending_owner", "negotiating"].includes(thread.status)) {
+  if (!["pending_owner", "pending_buyer", "negotiating"].includes(thread.status)) {
     return json(409, {
       ok: false,
       error: `Invalid thread status: ${thread.status}`,
@@ -129,7 +129,26 @@ export async function POST(
   }
 
   const isOwnerSide = isPropertyOwner || isThreadOwner || isInvitedOwner;
-  const hasAccess = isBuyer || isOwnerSide;
+
+  // owner_to_buyer flow: buyer arrives via invite with intended_role="buyer"
+  let isInvitedBuyer = false;
+  if (!isBuyer && !isOwnerSide && user.email) {
+    const { data: buyerInvite } = await (svc.from("thread_invites") as any)
+      .select("id, intended_role, expires_at")
+      .eq("thread_id", thread.id)
+      .eq("invitee_email", user.email.toLowerCase())
+      .eq("intended_role", "buyer")
+      .limit(1)
+      .maybeSingle();
+
+    if (buyerInvite) {
+      const notExpired =
+        !buyerInvite.expires_at || new Date(buyerInvite.expires_at) > new Date();
+      isInvitedBuyer = notExpired;
+    }
+  }
+
+  const hasAccess = isBuyer || isOwnerSide || isInvitedBuyer;
 
   if (!hasAccess) {
     return json(403, { ok: false, error: "Access denied" });
@@ -283,11 +302,15 @@ export async function POST(
     if (isOwnerSide && !thread.owner_user_id) {
       threadPatch.owner_user_id = user.id;
     }
+    // Link buyer_user_id when invited buyer formally accepts (pending_buyer path)
+    if ((isBuyer || isInvitedBuyer) && !thread.buyer_user_id) {
+      threadPatch.buyer_user_id = user.id;
+    }
 
     const { error: tUpdErr } = await (svc.from("deal_threads") as any)
       .update(threadPatch)
       .eq("id", thread.id)
-      .in("status", ["pending_owner", "negotiating"]);
+      .in("status", ["pending_owner", "pending_buyer", "negotiating"]);
 
     if (tUpdErr) {
       return json(500, { ok: false, error: tUpdErr.message });
@@ -309,6 +332,11 @@ export async function POST(
     const finalOwnerUserId =
       (threadPatch.owner_user_id as string | undefined) ??
       (thread.owner_user_id as string | null);
+    // For pending_buyer threads the buyer_user_id is written in threadPatch;
+    // use it as the final buyer so the confirmation email is sent correctly.
+    const finalBuyerUserId =
+      (threadPatch.buyer_user_id as string | undefined) ??
+      (thread.buyer_user_id as string | null);
 
     // --- Sprint 16 triage (best-effort, non-blocking) ---
     try {
@@ -400,7 +428,7 @@ export async function POST(
 
     await Promise.all([
       sendEmailToUserId({
-        userId: thread.buyer_user_id,
+        userId: finalBuyerUserId,
         templateId: process.env.RESEND_TEMPLATE_BUYER_OFFER_ACCEPTED_ID,
         fallbackTemplate: "fractpath-buyer-offer-accepted",
         subject: "Your FractPath offer was accepted",
@@ -457,11 +485,15 @@ export async function POST(
   if (isOwnerSide && !thread.owner_user_id) {
     threadPatch.owner_user_id = user.id;
   }
+  // Link buyer_user_id when invited buyer rejects (pending_buyer path)
+  if ((isBuyer || isInvitedBuyer) && !thread.buyer_user_id) {
+    threadPatch.buyer_user_id = user.id;
+  }
 
   const { error: tUpdErr } = await (svc.from("deal_threads") as any)
     .update(threadPatch)
     .eq("id", thread.id)
-    .in("status", ["pending_owner", "negotiating"]);
+    .in("status", ["pending_owner", "pending_buyer", "negotiating"]);
 
   if (tUpdErr) {
     return json(500, { ok: false, error: tUpdErr.message });
@@ -470,10 +502,13 @@ export async function POST(
   const finalOwnerUserId =
     (threadPatch.owner_user_id as string | undefined) ??
     (thread.owner_user_id as string | null);
+  const finalBuyerUserId =
+    (threadPatch.buyer_user_id as string | undefined) ??
+    (thread.buyer_user_id as string | null);
 
   console.log("OWNER_DECISION_REJECT_EMAIL_ROUTING", {
     dealId: resolvedDealId,
-    buyerUserId: thread.buyer_user_id,
+    buyerUserId: finalBuyerUserId,
     ownerUserId: finalOwnerUserId,
     buyerTemplate: process.env.RESEND_TEMPLATE_BUYER_OFFER_REJECTED_ID,
     homeownerTemplate: process.env.RESEND_TEMPLATE_HOMEOWNER_OFFER_REJECTED_ID,
@@ -482,7 +517,7 @@ export async function POST(
 
   await Promise.all([
     sendEmailToUserId({
-      userId: thread.buyer_user_id,
+      userId: finalBuyerUserId,
       templateId: process.env.RESEND_TEMPLATE_BUYER_OFFER_REJECTED_ID,
       fallbackTemplate: "fractpath-buyer-offer-rejected",
       subject: "Your FractPath offer was declined",

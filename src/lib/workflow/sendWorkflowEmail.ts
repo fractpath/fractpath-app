@@ -48,7 +48,8 @@ export type BuyerWorkflowEmailEvent =
   | "DEAL_UNDER_VERIFICATION_REVIEW"
   | "DEAL_VERIFICATION_REVIEW_COMPLETED"
   | "DEAL_TERMS_NO_LONGER_ELIGIBLE_BUYER"
-  | "NEGOTIATION_REENGAGEMENT_REQUIRED_BUYER";
+  | "NEGOTIATION_REENGAGEMENT_REQUIRED_BUYER"
+  | "OWNER_NOT_CONFIRMED";
 
 export type WorkflowEmailEvent = OwnerWorkflowEmailEvent | BuyerWorkflowEmailEvent;
 
@@ -122,6 +123,11 @@ const BUYER_COPY: Record<BuyerWorkflowEmailEvent, EventCopy> = {
     subject: "Revised terms are available for this deal",
     headline: "Revised terms available",
     body: "The owner of this deal has requested a revision to the terms. Updated terms may be available shortly.",
+  },
+  OWNER_NOT_CONFIRMED: {
+    subject: "Owner not confirmed for your deal",
+    headline: "Owner not confirmed",
+    body: "The contacted recipient indicated they are not the owner of the property tied to your deal. Review the property details and update the owner if needed.",
   },
 };
 

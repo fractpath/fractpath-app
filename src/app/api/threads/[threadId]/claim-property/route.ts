@@ -70,6 +70,7 @@ export async function POST(
       .eq("thread_id", threadId)
       .eq("invitee_email", email)
       .eq("intended_role", "owner")
+      .is("declined_at", null)
       .limit(1)
       .maybeSingle();
 
@@ -132,7 +133,11 @@ export async function POST(
 
   if ("ownership_status" in prop) patch.ownership_status = "claimed";
 
-  if (Object.keys(patch).length === 0) {
+  // Reset claim_released_at so a previously released property doesn't carry a
+  // stale release timestamp after being re-claimed by a new owner.
+  if ("claim_released_at" in prop) patch.claim_released_at = null;
+
+  if (!("claimed_by_user_id" in patch) && !("owner_user_id" in patch) && !("user_id" in patch)) {
     return json(500, {
       ok: false,
       error:
@@ -140,17 +145,22 @@ export async function POST(
     });
   }
 
-  let updateQuery = (svc.from("properties") as any)
-    .update(patch)
-    .eq("id", propertyId);
-
-  if ("ownership_status" in prop) {
-    updateQuery = updateQuery.or(
-      "ownership_status.is.null,ownership_status.eq.unclaimed",
-    );
+  // Use a plain eq("id") update — we confirmed the property is unclaimed in the
+  // pre-check above (explicitlyUnclaimed). Chaining .or() on an update query
+  // can produce an unhandled JS exception in some Supabase client versions,
+  // which Next.js converts to a 502. The re-read below handles any race.
+  let claimedRows: any[] | null = null;
+  let pUpdErr: any = null;
+  try {
+    const result = await (svc.from("properties") as any)
+      .update(patch)
+      .eq("id", propertyId)
+      .select("*");
+    claimedRows = result.data;
+    pUpdErr = result.error;
+  } catch (e: any) {
+    return json(500, { ok: false, error: String(e?.message ?? e) });
   }
-
-  const { data: claimedRows, error: pUpdErr } = await updateQuery.select("*");
 
   if (pUpdErr) return json(500, { ok: false, error: pUpdErr.message });
 

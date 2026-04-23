@@ -9,7 +9,7 @@ export type ReviewRequestItem = {
 
 export type AdminReviewRequest = {
   id: string;
-  deal_id: string;
+  deal_id: string | null;
   property_id: string;
   status: "open" | "submitted" | "resolved";
   requested_items: ReviewRequestItem[];
@@ -67,7 +67,8 @@ const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
 };
 
 type Props = {
-  dealId: string;
+  /** null when operating in property-review mode (no linked deal). */
+  dealId: string | null;
   propertyId: string;
   initialRequest: AdminReviewRequest | null;
 };
@@ -101,6 +102,9 @@ export function AdminReviewRequestPanel({ dealId, propertyId, initialRequest }: 
     });
   }
 
+  // true = property-review mode (no linked deal); false = deal-review mode
+  const isPropertyMode = dealId === null;
+
   async function handleSave() {
     setErr(null);
     setSuccess(null);
@@ -111,15 +115,17 @@ export function AdminReviewRequestPanel({ dealId, propertyId, initialRequest }: 
     setSaving(true);
     try {
       const items = ALL_ITEM_TYPES.filter((t) => selectedTypes.has(t.type));
-      const res = await fetch(`/api/admin/deals/${dealId}/review-request`, {
+      const url = isPropertyMode
+        ? `/api/admin/properties/${propertyId}/review-request`
+        : `/api/admin/deals/${dealId}/review-request`;
+      const bodyPayload = isPropertyMode
+        ? { requested_items: items, admin_note: adminNote.trim() || null }
+        : { property_id: propertyId, requested_items: items, admin_note: adminNote.trim() || null };
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({
-          property_id: propertyId,
-          requested_items: items,
-          admin_note: adminNote.trim() || null,
-        }),
+        body: JSON.stringify(bodyPayload),
       });
       const body = await res.json();
       if (!body.ok) {
@@ -127,7 +133,11 @@ export function AdminReviewRequestPanel({ dealId, propertyId, initialRequest }: 
       } else {
         setRequest(body.request as AdminReviewRequest);
         setSuccess(
-          request ? "Request updated." : "Request created. Deal marked as additional information required.",
+          request
+            ? "Request updated."
+            : isPropertyMode
+              ? "Request created. Owner will be notified."
+              : "Request created. Deal marked as additional information required.",
         );
       }
     } catch {
@@ -143,16 +153,22 @@ export function AdminReviewRequestPanel({ dealId, propertyId, initialRequest }: 
     setSuccess(null);
     setResolving(true);
     try {
-      const res = await fetch(`/api/admin/deals/${dealId}/review-request`, {
+      const url = isPropertyMode
+        ? `/api/admin/properties/${propertyId}/review-request`
+        : `/api/admin/deals/${dealId}/review-request`;
+      const bodyPayload = isPropertyMode
+        ? { request_id: request.id, resolved_note: resolvedNote.trim() || null }
+        : {
+            request_id: request.id,
+            action: "resolve",
+            next_triage_status: nextTriageStatus,
+            resolved_note: resolvedNote.trim() || null,
+          };
+      const res = await fetch(url, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({
-          request_id: request.id,
-          action: "resolve",
-          next_triage_status: nextTriageStatus,
-          resolved_note: resolvedNote.trim() || null,
-        }),
+        body: JSON.stringify(bodyPayload),
       });
       const body = await res.json();
       if (!body.ok) {
@@ -161,7 +177,9 @@ export function AdminReviewRequestPanel({ dealId, propertyId, initialRequest }: 
         setRequest(body.request as AdminReviewRequest);
         setShowResolveForm(false);
         setSuccess(
-          `Request resolved. Deal advanced to: ${NEXT_STEP_LABEL[nextTriageStatus]}.`,
+          isPropertyMode
+            ? "Request resolved."
+            : `Request resolved. Deal advanced to: ${NEXT_STEP_LABEL[nextTriageStatus]}.`,
         );
       }
     } catch {
@@ -294,31 +312,34 @@ export function AdminReviewRequestPanel({ dealId, propertyId, initialRequest }: 
               Confirm resolution
             </div>
 
-            <div>
-              <div className="text-xs font-medium text-muted-foreground mb-2">
-                Next step for the linked deal
-              </div>
-              <div className="space-y-2">
-                {NEXT_STEP_OPTIONS.map((opt) => (
-                  <label key={opt.value} className="flex items-start gap-2.5 cursor-pointer group">
-                    <input
-                      type="radio"
-                      name="next_triage_status"
-                      value={opt.value}
-                      checked={nextTriageStatus === opt.value}
-                      onChange={() => setNextTriageStatus(opt.value)}
-                      className="mt-0.5 h-3.5 w-3.5 accent-foreground"
-                    />
-                    <span className="text-sm">
-                      <span className="font-medium">{opt.label}</span>
-                      <span className="block text-xs text-muted-foreground">
-                        {opt.description}
+            {/* Deal-mode only: next triage step picker */}
+            {!isPropertyMode && (
+              <div>
+                <div className="text-xs font-medium text-muted-foreground mb-2">
+                  Next step for the linked deal
+                </div>
+                <div className="space-y-2">
+                  {NEXT_STEP_OPTIONS.map((opt) => (
+                    <label key={opt.value} className="flex items-start gap-2.5 cursor-pointer group">
+                      <input
+                        type="radio"
+                        name="next_triage_status"
+                        value={opt.value}
+                        checked={nextTriageStatus === opt.value}
+                        onChange={() => setNextTriageStatus(opt.value)}
+                        className="mt-0.5 h-3.5 w-3.5 accent-foreground"
+                      />
+                      <span className="text-sm">
+                        <span className="font-medium">{opt.label}</span>
+                        <span className="block text-xs text-muted-foreground">
+                          {opt.description}
+                        </span>
                       </span>
-                    </span>
-                  </label>
-                ))}
+                    </label>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
             <div>
               <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1 block">
@@ -384,14 +405,16 @@ export function AdminReviewRequestPanel({ dealId, propertyId, initialRequest }: 
               )}
             </div>
 
-            <a
-              href={`/deal/${dealId}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-xs underline text-muted-foreground hover:text-foreground"
-            >
-              View linked deal →
-            </a>
+            {!isPropertyMode && (
+              <a
+                href={`/deal/${dealId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs underline text-muted-foreground hover:text-foreground"
+              >
+                View linked deal →
+              </a>
+            )}
 
             {success && <p className="text-xs text-green-700">{success}</p>}
           </div>

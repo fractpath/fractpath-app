@@ -28,6 +28,7 @@ import {
   type EnrichedPreviewData,
 } from "@/components/property/EnrichedPropertyPreview";
 import { PropertyStatusLanes } from "@/components/properties/PropertyStatusLanes";
+import { StatusBadge } from "@/components/property/StatusBadge";
 import {
   deriveParticipationLane,
   deriveValuationLane,
@@ -95,6 +96,15 @@ type Props = {
   activityEntries?: PropertyAuditEntry[];
   /** Enriched property preview data — shown to owner when available */
   enrichment?: EnrichedPreviewData | null;
+  /**
+   * Layout suppression flags — used when the parent page renders these
+   * sections independently (e.g. PropertyPageHeader + ValuationCashSection).
+   * Does NOT remove any data or workflow logic.
+   */
+  hideAddressCard?: boolean;
+  hideWorkflowWidget?: boolean;
+  hideValuationCards?: boolean;
+  hideBackLink?: boolean;
 };
 
 // ── Status badge ─────────────────────────────────────────────────────────────
@@ -102,22 +112,22 @@ type Props = {
 const STATUS_BADGE: Record<string, { label: string; className: string; hint: string }> = {
   unverified: {
     label: "Unverified",
-    className: "bg-yellow-100 text-yellow-800",
+    className: "bg-yellow-100 text-yellow-800 border-yellow-200",
     hint: "Not yet reviewed by FractPath",
   },
   under_review: {
     label: "Under review",
-    className: "bg-blue-100 text-blue-800",
+    className: "bg-blue-100 text-blue-800 border-blue-200",
     hint: "Being reviewed by FractPath",
   },
   verified: {
     label: "Verified ✓",
-    className: "bg-green-100 text-green-800",
+    className: "bg-green-100 text-green-800 border-green-200",
     hint: "Approved for participation",
   },
   archived: {
     label: "Archived",
-    className: "bg-gray-100 text-gray-600",
+    className: "bg-gray-100 text-gray-600 border-gray-200",
     hint: "No longer active",
   },
 };
@@ -193,8 +203,22 @@ function fmtDateShort(iso: string | null | undefined): string | null {
   }
 }
 
-function canEdit(status: string): boolean {
+/**
+ * Owner may edit property address and intake facts only while the property is
+ * unverified.  Once it enters the review pipeline the facts are locked.
+ */
+function canEditFacts(status: string): boolean {
   return status === "unverified";
+}
+
+/**
+ * Owner may upload/replace verification documents and supporting files as long
+ * as the property has not been archived.  Upload access is intentionally
+ * decoupled from fact-edit access so owners can keep documents current while a
+ * review is in progress or after a deal is accepted.
+ */
+function canUploadPhotos(status: string): boolean {
+  return status !== "archived";
 }
 
 // ── Row ───────────────────────────────────────────────────────────────────────
@@ -296,6 +320,10 @@ export function PropertyDetailClient({
   workflowState,
   activityEntries = [],
   enrichment = null,
+  hideAddressCard = false,
+  hideWorkflowWidget = false,
+  hideValuationCards = false,
+  hideBackLink = false,
 }: Props) {
   const [editOpen, setEditOpen] = useState(false);
 
@@ -349,20 +377,25 @@ export function PropertyDetailClient({
   return (
     <div className="space-y-6">
       {/* Back link */}
-      <div>
-        <Link
-          href="/dashboard"
-          className="text-sm text-muted-foreground hover:text-foreground underline"
-        >
-          ← Back to dashboard
-        </Link>
-      </div>
+      {!hideBackLink && (
+        <div>
+          <Link
+            href="/dashboard"
+            className="text-sm text-muted-foreground hover:text-foreground underline"
+          >
+            ← Back to dashboard
+          </Link>
+        </div>
+      )}
 
       {/* Early-stage property review status (before escalation/AVM) */}
-      {workflowState && <PropertyWorkflowWidget state={workflowState} />}
+      {!hideWorkflowWidget && workflowState && (
+        <PropertyWorkflowWidget state={workflowState} />
+      )}
 
       {/* Property valuations — distinct RentCast / ATTOM / Manual Appraisal sections */}
-      {workflowState &&
+      {!hideValuationCards &&
+        workflowState &&
         (workflowState.rentcastFmv != null ||
           workflowState.escalationDepositStatus ||
           workflowState.escalationAvmStatus ||
@@ -391,13 +424,14 @@ export function PropertyDetailClient({
           />
         )}
 
-      {/* Property summary */}
-      <div className="rounded-lg border p-5 space-y-3">
+      {/* Property summary — address card. Suppressed when PropertyPageHeader renders it above. */}
+      {!hideAddressCard && (
+        <div className="rounded-lg border p-5 space-y-3">
         <div className="flex items-start justify-between gap-3">
           <h1 className="text-lg font-semibold leading-tight">
             {property.address_display || property.address_line1}
           </h1>
-          {canEdit(property.status) && (
+          {canEditFacts(property.status) && (
             <button
               type="button"
               onClick={() => setEditOpen(true)}
@@ -409,28 +443,31 @@ export function PropertyDetailClient({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <span
-            className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${badge.className}`}
-          >
+          <StatusBadge className={badge.className} tooltip={badge.hint}>
             {badge.label}
-          </span>
-          <span className="text-xs text-muted-foreground">{badge.hint}</span>
+          </StatusBadge>
 
           {showOwnerVerifiedBadge && (
-            <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">
+            <StatusBadge
+              className="bg-emerald-100 text-emerald-800 border-emerald-200"
+              tooltip="Homeowner identity has been confirmed."
+            >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
                 <path fillRule="evenodd" d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1Zm3.844 4.574a.75.75 0 0 1 .082 1.058l-3.5 4a.75.75 0 0 1-1.09.058L5.086 8.44a.75.75 0 0 1 1.08-1.043l1.696 1.753 2.96-3.385a.75.75 0 0 1 1.022-.19Z" clipRule="evenodd" />
               </svg>
               Owner Verified
-            </span>
+            </StatusBadge>
           )}
 
           {showVerifiedAppraisalBadge && (
-            <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium border ${
-              appraisalUnderReview
-                ? "bg-blue-50 text-blue-800 border-blue-200"
-                : "bg-violet-100 text-violet-800 border-violet-200"
-            }`}>
+            <StatusBadge
+              className={
+                appraisalUnderReview
+                  ? "bg-blue-50 text-blue-800 border-blue-200"
+                  : "bg-violet-100 text-violet-800 border-violet-200"
+              }
+              tooltip="A reviewed value is currently active for this property."
+            >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
                 <path d="M6.5 9a2.5 2.5 0 1 1 5 0 2.5 2.5 0 0 1-5 0Z" />
                 <path fillRule="evenodd" d="M1.5 1A1.5 1.5 0 0 0 0 2.5v11A1.5 1.5 0 0 0 1.5 15h13a1.5 1.5 0 0 0 1.5-1.5v-11A1.5 1.5 0 0 0 14.5 1h-13Zm1 3a.5.5 0 0 1 .5-.5H5a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5Zm.5 2.5a.5.5 0 0 0 0 1h1a.5.5 0 0 0 0-1H3Zm5.5 4.5a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" clipRule="evenodd" />
@@ -440,13 +477,16 @@ export function PropertyDetailClient({
                 : ownerValuationLane.label === "Appraised"
                   ? "Appraised value"
                   : "Reviewed valuation basis"}
-            </span>
+            </StatusBadge>
           )}
 
           {appraisalExpired && (
-            <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium bg-orange-100 text-orange-800 border border-orange-200">
+            <StatusBadge
+              className="bg-orange-100 text-orange-800 border-orange-200"
+              tooltip="The reviewed valuation basis has expired and requires renewal."
+            >
               Appraisal expired
-            </span>
+            </StatusBadge>
           )}
 
           {/* Valid-until hint — only when badge is active (not under review, not expired) */}
@@ -465,6 +505,7 @@ export function PropertyDetailClient({
           </div>
         )}
       </div>
+      )}
 
       {/* Three-lane status block */}
       <PropertyStatusLanes
@@ -473,8 +514,8 @@ export function PropertyDetailClient({
         closingReadiness={ownerClosingReadinessLane}
       />
 
-      {/* Enriched property preview — shown to owner when enrichment is available */}
-      {enrichment && (
+      {/* Enriched property preview — shown when enrichment available and not replaced by ValuationCashSection */}
+      {!hideValuationCards && enrichment && (
         <div className="rounded-lg border overflow-hidden">
           <div className="bg-muted/40 px-4 py-2 border-b">
             <span className="text-sm font-medium">Property Preview</span>
@@ -486,11 +527,23 @@ export function PropertyDetailClient({
               valuationLabel={valueLabelFromValuationLane(ownerValuationLane.label)}
             />
           </div>
+          {/* Challenge link — owner can flag stale or inaccurate facts */}
+          <div className="px-4 pb-3 border-t pt-2">
+            <a
+              href={`mailto:ownersupport@fractpath.com?subject=${encodeURIComponent(
+                `Challenge property facts — ${property.address_display || property.address_line1 || property.id}`,
+              )}`}
+              className="text-xs text-muted-foreground hover:text-foreground underline"
+            >
+              Something look wrong? Challenge property facts
+            </a>
+          </div>
         </div>
       )}
 
-      {/* Valuation confirmed card — plain-language trust signal when appraisal badge is active */}
-      {showVerifiedAppraisalBadge && !appraisalUnderReview && !appraisalExpired && (
+      {/* Valuation confirmed card — plain-language trust signal when appraisal badge is active.
+          Suppressed when ValuationCashSection already shows reviewed basis in the summary row. */}
+      {!hideValuationCards && showVerifiedAppraisalBadge && !appraisalUnderReview && !appraisalExpired && (
         <div className="rounded-lg border border-violet-200 bg-violet-50 p-4 space-y-1.5">
           <div className="flex items-center gap-2">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4 text-violet-700 shrink-0">
@@ -605,7 +658,7 @@ export function PropertyDetailClient({
           <h2 className="text-sm font-semibold mb-2">Submitted property details</h2>
           <p className="text-sm text-muted-foreground">
             No intake details have been submitted yet.{" "}
-            {canEdit(property.status) && (
+            {canEditFacts(property.status) && (
               <button
                 type="button"
                 onClick={() => setEditOpen(true)}
@@ -649,7 +702,7 @@ export function PropertyDetailClient({
         ) : (
           <p className="text-sm text-muted-foreground">
             You have not enabled proposals for this property.{" "}
-            {canEdit(property.status) && (
+            {canEditFacts(property.status) && (
               <button
                 type="button"
                 onClick={() => setEditOpen(true)}
@@ -663,8 +716,8 @@ export function PropertyDetailClient({
         )}
       </div>
 
-      {/* Review request panel */}
-      {reviewRequest && (reviewRequest.status === "open" || reviewRequest.status === "submitted") && (
+      {/* Review request panel — shown for open, submitted, and recently resolved */}
+      {reviewRequest && (
         <ReviewRequestPanel
           request={reviewRequest}
           propertyId={property.id}
@@ -676,7 +729,7 @@ export function PropertyDetailClient({
       <PropertyDocumentsPanel
         propertyId={property.id}
         onOpenEdit={() => setEditOpen(true)}
-        editAllowed={canEdit(property.status)}
+        editAllowed={canUploadPhotos(property.status)}
       />
 
       {/* Linked deal */}
@@ -716,7 +769,7 @@ export function PropertyDetailClient({
 
       {/* Actions */}
       <div className="flex gap-3 flex-wrap">
-        {canEdit(property.status) && (
+        {canEditFacts(property.status) && (
           <button
             type="button"
             onClick={() => setEditOpen(true)}

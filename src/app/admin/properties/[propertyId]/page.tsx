@@ -1,3 +1,5 @@
+import { AdminVendorReviewPanel } from "@/components/admin/AdminVendorReviewPanel";
+import { AdminClaimReleasePanel } from "@/components/admin/AdminClaimReleasePanel";
 import crypto from "crypto";
 import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/auth/requireAdmin";
@@ -14,10 +16,14 @@ import {
 } from "@/components/admin/AdminReviewRequestPanel";
 import { AdminPropertyReviewControls } from "@/components/admin/AdminPropertyReviewControls";
 import type { PropertyReviewStatus } from "@/components/admin/AdminPropertyReviewControls";
-import { AdminVendorReviewPanel } from "@/components/admin/AdminVendorReviewPanel";
 import { AdminAttomScreeningPanel } from "@/components/admin/AdminAttomScreeningPanel";
 import { AdminDebtBasisPanel } from "@/components/admin/AdminDebtBasisPanel";
-import { AdminMashvisorPanel } from "@/components/admin/AdminMashvisorPanel";
+import {
+  rentcastAvmToAvm,
+  reviewedBasisFromProperty,
+} from "@/lib/property/propertyFacts";
+import { normalizedProfileToRecord } from "@/lib/property/propertyRecord";
+import { PropertyRecordSections } from "@/components/property/PropertyRecordSections";
 import { AdminEscalationSimPanel } from "@/components/admin/AdminEscalationSimPanel";
 import { AdminManualAppraisalSimPanel } from "@/components/admin/AdminManualAppraisalSimPanel";
 import { AdminPropertyClosingPanel } from "@/components/admin/AdminPropertyClosingPanel";
@@ -28,6 +34,7 @@ import {
 } from "@/lib/workflow/milestones";
 import { computeLtvPolicy } from "@/lib/ltvPolicy";
 import type { NormalizedPropertyProfile } from "@/lib/property-review/providers/rentcast";
+import type { NormalizedAvm } from "@/lib/property-review/providers/rentcast/types";
 import {
   computeAvmEligibility,
   extractAvmDealTerms,
@@ -36,13 +43,23 @@ import {
   DEVIATION_ESCALATION_THRESHOLD_PCT,
   type AvmEligibilityCard,
 } from "@/lib/avmEligibility";
-import { PropertyStatusLanes } from "@/components/properties/PropertyStatusLanes";
 import {
   deriveParticipationLane,
   deriveValuationLane,
   deriveClosingReadinessLane,
-  valueLabelFromValuationLane,
 } from "@/lib/property/statusLanes";
+import { PropertyPageHeader } from "@/components/property/PropertyPageHeader";
+import { ValuationCashSection } from "@/components/property/ValuationCashSection";
+import { PropertyMediaSection } from "@/components/property/PropertyMediaSection";
+import { AdminFactCorrectionPanel } from "@/components/property/AdminFactCorrectionPanel";
+import type { MashvisorImagesPayload } from "@/lib/mashvisor/types";
+import type { OwnerPhoto, PropertyFactCorrection } from "@/lib/property/photos";
+import {
+  shouldShowOwnerVerifiedBadge,
+  shouldShowVerifiedAppraisalValueBadge,
+  isAppraisalBadgeExpired,
+  isAppraisalBadgeUnderReview,
+} from "@/lib/property/badges";
 
 function requirePreviewSecret(): string {
   const v = process.env.ADMIN_DOC_PREVIEW_SECRET;
@@ -258,26 +275,52 @@ export default async function AdminPropertyAuditPage({
   }
 
   // Fetch all review requests for this deal+property (including resolved), newest first.
-  // currentReviewRequest = latest open/submitted (for the editable panel).
-  // allReviewRequests   = complete history (for the read-only history section).
+  // currentReviewRequest   = latest open/submitted deal-linked request (editable panel, deal mode).
+  // propertyNativeRequest  = latest open/submitted property-only request (editable panel, property mode).
+  // allReviewRequests      = complete history across both deal-linked and property-native.
   let currentReviewRequest: AdminReviewRequest | null = null;
+  let propertyNativeRequest: AdminReviewRequest | null = null;
   let allReviewRequests: AdminReviewRequest[] = [];
+
+  const REQ_SELECT =
+    "id, deal_id, property_id, status, requested_items, admin_note, homeowner_note, resolved_note, submitted_at, resolved_at, created_at";
+
   if (linkedDeal?.id) {
     const { data: reqRows } = await (supabase.from("deal_review_requests") as any)
-      .select(
-        "id, deal_id, property_id, status, requested_items, admin_note, homeowner_note, resolved_note, submitted_at, resolved_at, created_at",
-      )
+      .select(REQ_SELECT)
       .eq("deal_id", linkedDeal.id)
       .eq("property_id", propertyId)
       .order("created_at", { ascending: false })
       .limit(20);
-    allReviewRequests = (reqRows ?? []) as AdminReviewRequest[];
+    const dealRows = (reqRows ?? []) as AdminReviewRequest[];
+    allReviewRequests = dealRows;
     currentReviewRequest =
-      allReviewRequests.find((r) => r.status === "open" || r.status === "submitted") ?? null;
+      dealRows.find((r) => r.status === "open" || r.status === "submitted") ?? null;
+  }
+
+  // Always load property-native (deal_id IS NULL) requests so the panel is
+  // accessible for verification/review regardless of deal state.
+  {
+    const { data: nativeRows } = await (supabase.from("deal_review_requests") as any)
+      .select(REQ_SELECT)
+      .eq("property_id", propertyId)
+      .is("deal_id", null)
+      .order("created_at", { ascending: false })
+      .limit(20);
+    const nativeRequests = (nativeRows ?? []) as AdminReviewRequest[];
+    propertyNativeRequest =
+      nativeRequests.find((r) => r.status === "open" || r.status === "submitted") ?? null;
+    // Merge into full history, sorted newest first
+    allReviewRequests = [...allReviewRequests, ...nativeRequests].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    );
   }
 
   const auditRows = (auditRes.data ?? []) as any[];
   const underwritingRows = (underwritingRes.data ?? []) as any[];
+
+  // Top-level accepted thread ID — used by AdminClaimReleasePanel
+  const acceptedThreadId: string | null = linkedThreadRes.data?.id ?? null;
 
   const vendorSummary = summaryRes.data ?? null;
 
@@ -348,6 +391,41 @@ export default async function AdminPropertyAuditPage({
     ) ?? null;
   const persistedProfileDetails =
     (currentProfileRun?.normalized_payload as NormalizedPropertyProfile | null) ?? null;
+
+  // Build PropertyAvm from the latest completed AVM run (non-fatal path — null when absent)
+  const currentAvmRun =
+    recentRuns.find(
+      (r) => r.artifact_type === "avm" && r.is_current && r.status === "completed",
+    ) ?? null;
+  const adminPropertyAvm =
+    currentAvmRun?.normalized_payload
+      ? rentcastAvmToAvm(
+          currentAvmRun.normalized_payload as NormalizedAvm,
+          currentAvmRun.requested_at ?? null,
+        )
+      : null;
+
+  // Build reviewed/controlling basis for the preview card
+  const adminReviewedBasis = reviewedBasisFromProperty(
+    (p.latest_verified_fmv as number | null) ?? null,
+    (p.fmv_verification_source as string | null) ?? null,
+  );
+
+  // Build property record for the detailed sections panel.
+  // normalized_payload is the sole product-facing source of truth.
+  // raw_payload is retained in the DB for audit/reprocessing only.
+  const adminPropertyRecord = currentProfileRun?.normalized_payload
+    ? normalizedProfileToRecord(
+        currentProfileRun.normalized_payload as NormalizedPropertyProfile,
+        currentProfileRun.requested_at ?? null,
+      )
+    : null;
+
+  // RentCast provider record ID (stored in raw_payload.id when available)
+  const rentcastRecordId: string | null =
+    currentProfileRun?.raw_payload
+      ? ((currentProfileRun.raw_payload as any)?.id ?? null)
+      : null;
 
   // Mint short-lived per-doc tokens (10 minutes) for ALL doc types
   const docs: DocRow[] = ((docsRes.data ?? []) as any[]).map((d) => ({
@@ -467,6 +545,60 @@ export default async function AdminPropertyAuditPage({
     closingReviewStatus: (p.closing_review_status as string | null) ?? null,
   });
 
+  // ── Badge computation for PropertyPageHeader ─────────────────────────────
+  const adminShowOwnerVerified = shouldShowOwnerVerifiedBadge(
+    (p.verification_state as string | null) ?? null,
+    (p.owner_verification_removed_at as string | null) ?? null,
+  );
+  const adminShowAppraisalBadge = shouldShowVerifiedAppraisalValueBadge(
+    (p.verified_appraisal_value_status as string | null) ?? null,
+  );
+  const adminAppraisalExpired = isAppraisalBadgeExpired(
+    (p.verified_appraisal_value_status as string | null) ?? null,
+  );
+  const adminAppraisalUnderReview = isAppraisalBadgeUnderReview(
+    (p.verified_appraisal_value_status as string | null) ?? null,
+  );
+  const adminAppraisalBadgeLabel = adminAppraisalUnderReview
+    ? "Appraisal under review"
+    : adminValuationLane.label === "Appraised"
+      ? "Appraised value"
+      : "Reviewed valuation basis";
+
+  // ── Hero media data ───────────────────────────────────────────────────────
+  const adminHeroImages =
+    (currentEnrichment?.images_payload as MashvisorImagesPayload | null) ?? null;
+  const adminHeroLat = adminPropertyRecord?.latitude ?? null;
+  const adminHeroLng = adminPropertyRecord?.longitude ?? null;
+  const adminHeroAddress =
+    adminPropertyRecord?.formattedAddress ?? addressDisplay ?? null;
+
+  // Fetch owner photos (non-fatal)
+  let adminOwnerPhotos: OwnerPhoto[] = [];
+  try {
+    const { data: photoRows } = await (supabase.from("property_photos") as any)
+      .select("*")
+      .eq("property_id", propertyId)
+      .is("removed_at", null)
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true });
+    adminOwnerPhotos = photoRows ?? [];
+  } catch {
+    // non-fatal
+  }
+
+  // Fetch corrections for admin review (non-fatal)
+  let adminCorrections: PropertyFactCorrection[] = [];
+  try {
+    const { data: corrRows } = await (supabase.from("property_fact_corrections") as any)
+      .select("*")
+      .eq("property_id", propertyId)
+      .order("created_at", { ascending: false });
+    adminCorrections = corrRows ?? [];
+  } catch {
+    // non-fatal
+  }
+
   return (
     <main className="mx-auto max-w-4xl p-6 space-y-6">
 
@@ -506,29 +638,127 @@ export default async function AdminPropertyAuditPage({
         </span>
       </div>
 
-      {/* ── Page heading ── */}
-      <div>
-        <h1 className="text-2xl font-semibold">Property review</h1>
-        <p className="text-sm text-muted-foreground">{addressDisplay || p.id}</p>
-      </div>
+      {/* ── A. Property page header — address H1 + badge row ── */}
+      <PropertyPageHeader
+        address={adminHeroAddress ?? addressDisplay}
+        propertyStatus={p.status ?? null}
+        showOwnerVerified={adminShowOwnerVerified}
+        showAppraisalBadge={adminShowAppraisalBadge}
+        appraisalUnderReview={adminAppraisalUnderReview}
+        appraisalExpired={adminAppraisalExpired}
+        appraisalBadgeLabel={adminAppraisalBadgeLabel}
+        expiresAt={(p.property_review_expires_at as string | null) ?? null}
+        ownershipStatus={(p.ownership_type as string | null) ?? null}
+        isParticipationApproved={p.status === "verified"}
+      />
 
-      {/* ── Property overview ── */}
-      <div className="rounded-lg border p-4 text-sm space-y-1">
-        {/* Three-lane status block */}
-        <div className="mb-3">
-          <PropertyStatusLanes
-            participation={adminParticipationLane}
-            valuation={adminValuationLane}
-            closingReadiness={adminClosingReadinessLane}
+      {/* ── B-admin. Owner verification status — admin-only controls near top ── */}
+      <div className="rounded-lg border overflow-hidden">
+        <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b">
+          Owner verification status
+        </div>
+        <div className="p-4 space-y-3">
+          <AdminPropertyActions propertyId={propertyId} status={p.status} />
+          <AdminPropertyStatusControls
+            propertyId={propertyId}
+            currentStatus={p.status}
           />
         </div>
+      </div>
+
+      {/* ── C. Hero media — owner photos first, vendor fallback, then map ── */}
+      <PropertyMediaSection
+        propertyId={propertyId}
+        initialPhotos={adminOwnerPhotos}
+        images={adminHeroImages}
+        lat={adminHeroLat}
+        lng={adminHeroLng}
+        address={adminHeroAddress}
+        audience="admin"
+        canManagePhotos={(p.status as string) !== "archived"}
+      />
+
+      {/* ── C. Valuation & cash position — admin audience (shows secured debt) ── */}
+      <ValuationCashSection
+        audience="admin"
+        avm={adminPropertyAvm}
+        securedDebt={(p.secured_property_debt_amount as number | null) ?? null}
+        propertyReviewExpiresAt={(p.property_review_expires_at as string | null) ?? null}
+        propertyId={propertyId}
+        rentcastFmv={
+          adminPropertyAvm?.estimate != null ? adminPropertyAvm.estimate : null
+        }
+        rentcastProvider={null}
+        escalationDepositStatus={(p.escalation_deposit_status as string | null) ?? null}
+        escalationAvmStatus={(p.escalation_avm_status as string | null) ?? null}
+        ownerAttemptedAttom={false}
+        manualAppraisalStatus={(p.manual_appraisal_status as string | null) ?? null}
+        manualAppraisalFmv={(p.manual_appraisal_fmv as number | null) ?? null}
+        latestVerifiedFmv={(p.latest_verified_fmv as number | null) ?? null}
+        fmvVerificationSource={(p.fmv_verification_source as string | null) ?? null}
+        liveIneligiblePhase={null}
+        linkedDealId={linkedDeal?.id ?? null}
+        attomScreeningCompletedAt={null}
+        attomEstimatedDebt={null}
+        ownerDeclaredDebt={
+          p.has_secured_property_debt === true
+            ? ((p.secured_property_debt_amount as number | null) ?? null)
+            : null
+        }
+        debtDiscrepancySeverity={null}
+        debtDiscrepancyDelta={null}
+      />
+
+      {/* ── Secured debt ── */}
+      {(p.has_secured_property_debt != null || (p.secured_property_debt_amount as number | null) != null) && (
+        <div className="rounded-lg border overflow-hidden">
+          <div className="bg-muted/40 px-4 py-3 border-b">
+            <h2 className="text-sm font-semibold">Secured debt</h2>
+          </div>
+          <div className="p-4 grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+            <div>
+              <div className="text-muted-foreground text-xs">Secured debt declared</div>
+              <div className="font-medium">
+                {p.has_secured_property_debt === true
+                  ? "Yes"
+                  : p.has_secured_property_debt === false
+                    ? "None"
+                    : "Not declared"}
+              </div>
+            </div>
+            {(p.secured_property_debt_amount as number | null) != null && (
+              <div>
+                <div className="text-muted-foreground text-xs">Outstanding balance</div>
+                <div className="font-medium">{formatCurrency(p.secured_property_debt_amount as number)}</div>
+              </div>
+            )}
+            {(p.current_controlling_secured_debt_amount as number | null) != null && (
+              <div>
+                <div className="text-muted-foreground text-xs">Controlling debt basis</div>
+                <div className="font-medium">{formatCurrency(p.current_controlling_secured_debt_amount as number)}</div>
+              </div>
+            )}
+            {(p.max_accessible_cash_current as number | null) != null && (
+              <div>
+                <div className="text-muted-foreground text-xs">Max accessible cash</div>
+                <div className="font-medium">{formatCurrency(p.max_accessible_cash_current as number)}</div>
+              </div>
+            )}
+            {(p.secured_debt_basis_reason as string | null) && (
+              <div className="col-span-2">
+                <div className="text-muted-foreground text-xs">Basis reason</div>
+                <div className="font-medium">{p.secured_debt_basis_reason as string}</div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Property admin metadata ── */}
+      <div className="rounded-lg border p-4 text-sm space-y-1">
         <div>
           <span className="text-muted-foreground">Owner:</span>{" "}
           <span className="font-mono text-xs break-all">{p.owner_user_id}</span>
-        </div>
-        <div>
-          <span className="text-muted-foreground">Address:</span>{" "}
-          {addressDisplay || "—"}
         </div>
         <div>
           <span className="text-muted-foreground">Created:</span>{" "}
@@ -587,17 +817,6 @@ export default async function AdminPropertyAuditPage({
                   : "No milestone — accepted/pending review banner"}
             </span>
           </div>
-          {linkedDeal && (
-            <div className="flex gap-2">
-              <span className="text-muted-foreground min-w-[120px]">Linked deal:</span>
-              <a
-                href={`/admin/deals/${linkedDeal.id}`}
-                className="underline text-muted-foreground hover:text-foreground text-xs"
-              >
-                View deal review →
-              </a>
-            </div>
-          )}
         </div>
       </div>
 
@@ -769,11 +988,13 @@ export default async function AdminPropertyAuditPage({
       <PropertyDocumentsPreview propertyId={propertyId} docs={docs} />
 
       {/* ── Additional information request ── */}
-      {linkedDeal && (
+      {/* Mount when a linked deal exists (deal mode) OR when the property review
+          status is information_requested without a deal (property mode). */}
+      {(linkedDeal || reviewStatus === "information_requested") && (
         <AdminReviewRequestPanel
-          dealId={linkedDeal.id}
+          dealId={linkedDeal?.id ?? null}
           propertyId={propertyId}
-          initialRequest={currentReviewRequest}
+          initialRequest={linkedDeal ? currentReviewRequest : propertyNativeRequest}
         />
       )}
 
@@ -872,15 +1093,29 @@ export default async function AdminPropertyAuditPage({
         </div>
 
         <div className="p-4 space-y-5 text-sm">
-          {/* Status controls */}
-          <div>
-            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
-              Status controls
+          {/* Status controls + vendor review */}
+          <div className="space-y-4">
+            <div>
+              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+                Status controls
+              </div>
+              <AdminPropertyReviewControls
+                propertyId={propertyId}
+                currentReviewStatus={reviewStatus}
+              />
             </div>
-            <AdminPropertyReviewControls
-              propertyId={propertyId}
-              currentReviewStatus={reviewStatus}
-            />
+
+            {p.status === "verified" && (
+              <div>
+                <AdminVendorReviewPanel
+                  propertyId={propertyId}
+                  initialSummary={vendorSummary}
+                  lastProfileError={lastProfileError}
+                  lastAvmError={lastAvmError}
+                  initialProfileDetails={persistedProfileDetails}
+                />
+              </div>
+            )}
           </div>
 
           {/* Information requested — contextual callout */}
@@ -890,15 +1125,9 @@ export default async function AdminPropertyAuditPage({
               <p className="text-xs text-yellow-800">
                 This property is in <strong>information requested</strong> status. The homeowner has been asked to supply additional documentation.
               </p>
-              {linkedDeal ? (
-                <p className="text-xs text-yellow-800">
-                  Use the <strong>Additional information request</strong> panel on this page to view or update the checklist and requested items.
-                </p>
-              ) : (
-                <p className="text-xs text-yellow-800 italic">
-                  No deal is currently linked to this property. The information request checklist requires an active linked deal — it will appear automatically once a deal is associated.
-                </p>
-              )}
+              <p className="text-xs text-yellow-800">
+                Use the <strong>Additional information request</strong> panel on this page to view, create, or update the checklist and requested items.
+              </p>
             </div>
           )}
 
@@ -1001,15 +1230,6 @@ export default async function AdminPropertyAuditPage({
         </div>
       </div>
 
-      {/* ── Vendor review data (RentCast profile + AVM) ── */}
-      <AdminVendorReviewPanel
-        propertyId={propertyId}
-        initialSummary={vendorSummary}
-        lastProfileError={lastProfileError}
-        lastAvmError={lastAvmError}
-        initialProfileDetails={persistedProfileDetails}
-      />
-
       {/* ── ATTOM enhanced screening ── */}
       {/*
         Real ATTOM data integration: property detail + AVM fetched in parallel from
@@ -1038,19 +1258,35 @@ export default async function AdminPropertyAuditPage({
         eligibleCashCap={(p.current_fractpath_eligible_cash_cap as number | null) ?? null}
       />
 
-      {/* ── Mashvisor enrichment ── */}
-      {/*
-        Manual admin-only enrichment fetch from Mashvisor.
-        Does not auto-trigger; does not affect owner-facing surfaces.
-        Stored in property_enrichments (provider: mashvisor).
-        Requires MASHVISOR_API_KEY to be configured.
-      */}
-      <AdminMashvisorPanel
-        propertyId={propertyId}
-        hasAddress={!!(p.address_line1 && p.city && p.state)}
-        enrichment={currentEnrichment}
-        valuationLabel={valueLabelFromValuationLane(adminValuationLane.label)}
-      />
+
+      {/* ── Property record (RentCast full record) ── */}
+      {adminPropertyRecord && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 px-1">
+            <h2 className="text-sm font-semibold">Property record</h2>
+            <span className="text-[11px] text-muted-foreground">RentCast</span>
+          </div>
+          <PropertyRecordSections record={adminPropertyRecord} audience="admin" />
+        </div>
+      )}
+
+      {/* ── Owner-submitted fact corrections ── */}
+      <div className="rounded-xl border overflow-hidden">
+        <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b flex items-center justify-between">
+          <span>Owner fact corrections</span>
+          {adminCorrections.filter((c) => c.review_status === "pending").length > 0 && (
+            <span className="text-xs rounded-full px-2 py-0.5 font-normal bg-amber-100 text-amber-800">
+              {adminCorrections.filter((c) => c.review_status === "pending").length} pending
+            </span>
+          )}
+        </div>
+        <div className="p-4">
+          <AdminFactCorrectionPanel
+            propertyId={propertyId}
+            initialCorrections={adminCorrections}
+          />
+        </div>
+      </div>
 
       {/* ── Debt basis management ── */}
       {/*
@@ -1234,139 +1470,6 @@ export default async function AdminPropertyAuditPage({
         </div>
       </div>
 
-      {/* ── Linked deal ── */}
-      {/* Shows the downstream deal-eligibility impact of this property's valuation state.
-          Deposit/escalation actions are never surfaced here — they live in the section above. */}
-      <div className="rounded-lg border overflow-hidden">
-        <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b flex items-center gap-2 flex-wrap">
-          <span>Linked deal</span>
-          {linkedDeal?.triage_status && (() => {
-            const b = TRIAGE_BADGE[linkedDeal!.triage_status!];
-            return b ? (
-              <span className={`text-xs rounded-full px-2 py-0.5 font-normal ${b.cls}`}>
-                {b.label}
-              </span>
-            ) : null;
-          })()}
-          {linkedDeal && (
-            <a
-              href={`/admin/deals/${linkedDeal.id}`}
-              className="ml-auto text-xs underline text-muted-foreground hover:text-foreground font-normal"
-            >
-              Admin deal review →
-            </a>
-          )}
-        </div>
-        <div className="p-4 text-sm">
-          {!linkedDeal ? (
-            <p className="text-muted-foreground text-xs">
-              No accepted deal linked to this property yet.
-            </p>
-          ) : (
-            <div className="space-y-3">
-              <div className="space-y-0.5">
-                <div className="font-medium">{addressDisplay || "Address not available"}</div>
-                <div className="text-xs text-muted-foreground font-mono">
-                  Deal {linkedDeal.id.slice(0, 8)}…
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-x-6 gap-y-2">
-                <div>
-                  <div className="text-muted-foreground text-xs">Deal review status</div>
-                  <div className="font-medium">
-                    {linkedDeal.triage_status
-                      ? (TRIAGE_BADGE[linkedDeal.triage_status]?.label ?? linkedDeal.triage_status.replace(/_/g, " "))
-                      : <span className="text-muted-foreground">Accepted — pending review</span>}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground text-xs">Accepted</div>
-                  <div className="font-medium">{formatDate(linkedDeal.accepted_at)}</div>
-                </div>
-              </div>
-
-              {/* Deal eligibility context — derived from the shared AVM helper */}
-              {linkedDealAvmEligibility && (() => {
-                const { result } = linkedDealAvmEligibility;
-                type EligCtx = { label: string; cls: string; detail: string };
-                let ctx: EligCtx | null = null;
-                if (result === "blocked_pending_fmv") {
-                  ctx = {
-                    label: "Deal blocked — awaiting property valuation",
-                    cls: "bg-yellow-50 border-yellow-200 text-yellow-800",
-                    detail: linkedDealAvmEligibility.isFmvExpired
-                      ? "The verified AVM has expired. Deal-term eligibility cannot be assessed until a fresh AVM is run on this property."
-                      : "No verified AVM is on file. Deal-term eligibility is blocked until an AVM run completes.",
-                  };
-                } else if (result === "escalated_review_required") {
-                  ctx = {
-                    label: "Deal blocked — escalated valuation review required",
-                    cls: "bg-red-50 border-red-200 text-red-800",
-                    detail: `AVM deviation (${linkedDealAvmEligibility.deviationPct?.toFixed(1)}%) exceeds the ${DEVIATION_ESCALATION_THRESHOLD_PCT}% escalation threshold. Deal-term eligibility is blocked pending a stronger valuation review. Use the stronger valuation pathway above.`,
-                  };
-                } else if (result === "manual_review_required") {
-                  ctx = {
-                    label: "Deal review — admin acknowledgment required",
-                    cls: "bg-orange-50 border-orange-200 text-orange-800",
-                    detail: `AVM deviation (${linkedDealAvmEligibility.deviationPct?.toFixed(1)}%) requires admin acknowledgment on the deal review page before the deal can advance to ready for signatures.`,
-                  };
-                } else if (result === "ineligible_ltv") {
-                  ctx = {
-                    label: "Deal blocked — terms exceed LTV eligibility",
-                    cls: "bg-red-50 border-red-200 text-red-800",
-                    detail: `Proposed cash (${formatCurrency(linkedDealAvmEligibility.requestedCash)}) exceeds the maximum eligible amount (${formatCurrency(linkedDealAvmEligibility.maxEligibleCash)}) under the LTV policy. Deal terms must be revised or countered.`,
-                  };
-                } else if (result === "eligible") {
-                  ctx = {
-                    label: "Deal eligible for signatures",
-                    cls: "bg-green-50 border-green-200 text-green-800",
-                    detail: "Property valuation and deal terms both pass eligibility checks. The deal may be advanced to ready for signatures on the deal review page.",
-                  };
-                }
-                return ctx ? (
-                  <div className={`rounded-md border px-3 py-2.5 text-xs space-y-0.5 ${ctx.cls}`}>
-                    <div className="font-semibold">{ctx.label}</div>
-                    <div>{ctx.detail}</div>
-                  </div>
-                ) : null;
-              })()}
-
-              {linkedDeal.triage_reason_tags && linkedDeal.triage_reason_tags.length > 0 && (
-                <div>
-                  <div className="text-muted-foreground text-xs mb-1.5">Triage reason tags</div>
-                  <div className="flex flex-wrap gap-1">
-                    {linkedDeal.triage_reason_tags.map((tag) => (
-                      <span
-                        key={tag}
-                        className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-muted text-muted-foreground font-mono"
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="flex items-center gap-4 pt-1">
-                <a
-                  href="/admin/deals"
-                  className="text-xs underline text-muted-foreground hover:text-foreground"
-                >
-                  View triage queue →
-                </a>
-                <a
-                  href={`/admin/deals/${linkedDeal.id}`}
-                  className="text-xs underline text-muted-foreground hover:text-foreground"
-                >
-                  Go to deal review →
-                </a>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
       {/* ── Technical details (secondary) ── */}
       <details className="rounded-lg border overflow-hidden group">
         <summary className="bg-muted/40 px-4 py-2 text-sm font-medium cursor-pointer select-none flex items-center justify-between">
@@ -1500,20 +1603,6 @@ export default async function AdminPropertyAuditPage({
         </div>
       </details>
 
-      {/* ── Admin verification controls ── */}
-      <div className="rounded-lg border overflow-hidden">
-        <div className="bg-muted/40 px-4 py-2 text-sm font-medium border-b">
-          Verification controls
-        </div>
-        <div className="p-4 space-y-3">
-          <AdminPropertyActions propertyId={propertyId} status={p.status} />
-          <AdminPropertyStatusControls
-            propertyId={propertyId}
-            currentStatus={p.status}
-          />
-        </div>
-      </div>
-
       {/* ── Underwriting snapshots ── */}
       {underwritingRows.length > 0 && (
         <div className="rounded-lg border overflow-x-auto">
@@ -1554,6 +1643,13 @@ export default async function AdminPropertyAuditPage({
           </table>
         </div>
       )}
+
+      {/* ── Destructive admin actions ── */}
+      <AdminClaimReleasePanel
+        propertyId={propertyId}
+        acceptedThreadId={acceptedThreadId}
+        hasOwner={!!p.owner_user_id}
+      />
 
       {/* ── Property activity ── */}
       <div className="rounded-lg border overflow-x-auto">

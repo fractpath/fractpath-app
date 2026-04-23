@@ -38,9 +38,11 @@ type PropertyAddressRecord = {
 
 // Discriminated union: exact canonical match auto-persists;
 // non-exact matches require admin confirmation.
+// noResult: true indicates the vendor returned no data for this address —
+// distinct from a match failure that produced candidates.
 type FetchProfileResult =
   | { matched: true; runId: string; summary: PropertyReviewSummaryRow }
-  | { matched: false; runId: string; candidates: ProfileCandidate[] };
+  | { matched: false; runId: string; candidates: ProfileCandidate[]; noResult?: boolean };
 
 type FetchAvmResult = {
   runId: string;
@@ -223,8 +225,20 @@ export async function fetchPropertyProfileForReview(
         ? error.message
         : "Unknown RentCast profile fetch error";
 
-    await failPropertyReviewRun({ runId: run.id, errorMessage: message });
-    throw error;
+    // RentCast returns HTTP 404 with a "resource/not-found" body when the address
+    // has no record in their database.  This is a vendor no-data condition, not an
+    // application error — do not re-throw; let the fallback candidate search run.
+    const isNoResult =
+      message.includes("(404)") ||
+      message.toLowerCase().includes("no data found for address") ||
+      message.toLowerCase().includes("resource/not-found");
+
+    if (!isNoResult) {
+      await failPropertyReviewRun({ runId: run.id, errorMessage: message });
+      throw error;
+    }
+
+    console.log("rentcast_profile_no_result", { propertyId: property.id, message });
   }
 
   // ── Fallback path: component-based search for admin candidate review ───────
@@ -248,10 +262,18 @@ export async function fetchPropertyProfileForReview(
 
   await failPropertyReviewRun({
     runId: run.id,
-    errorMessage: "No exact canonical match. Admin selection required.",
+    errorMessage:
+      candidates.length === 0
+        ? "No data found for this address in RentCast."
+        : "No exact canonical match. Admin selection required.",
   });
 
-  return { matched: false, runId: run.id, candidates };
+  return {
+    matched: false,
+    runId: run.id,
+    candidates,
+    noResult: candidates.length === 0,
+  };
 }
 
 export async function confirmProfileCandidate(input: {

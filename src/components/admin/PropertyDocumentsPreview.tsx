@@ -234,7 +234,6 @@ export function PropertyDocumentsPreview(props: {
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
           role="dialog"
           aria-modal="true"
-          onClick={() => setOpen(null)}
         >
           <div
             className="w-full max-w-5xl rounded bg-background p-3"

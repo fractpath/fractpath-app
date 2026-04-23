@@ -35,22 +35,31 @@ const PERSONA_WELCOME: Record<
   },
 };
 
-const NEXT_STEPS: Record<Persona, string[]> = {
-  homeowner: [
-    "Schedule an intro call with our team",
-    "Complete property appraisal coordination",
-    "Connect with our title partner",
-  ],
-  buyer: [
-    "Refine your terms and preferences",
-    "Get matched with homeowner opportunities",
-    "Review and finalize your pathway",
-  ],
-  realtor: [
-    "Complete beta partner onboarding",
-    "Set up your referral profile",
-    "Access co-pilot resources",
-  ],
+const PERSONA_FALLBACK_STEP: Record<Persona, NextStepVm> = {
+  homeowner: {
+    key: "get-started-homeowner",
+    title: "Get started",
+    description:
+      "Add a property in your profile or explore Properties to start a deal.",
+    href: "/deal/new",
+    cta: "Create Deal",
+  },
+  buyer: {
+    key: "get-started-buyer",
+    title: "Get started",
+    description:
+      "Add a property in your profile or explore Properties to start a deal.",
+    href: "/verified-properties",
+    cta: "Create Deal",
+  },
+  realtor: {
+    key: "get-started-realtor",
+    title: "Get started",
+    description:
+      "Add a property in your profile or explore Properties to start a deal.",
+    href: "/me",
+    cta: "Create Deal",
+  },
 };
 
 const IN_PROGRESS_STATUSES = new Set([
@@ -274,7 +283,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     tagline: nickname ? `Welcome, ${nickname}` : baseWelcome.tagline,
   };
 
-  let steps: any[] = NEXT_STEPS[persona] as any[];
+  let steps: NextStepVm[] = [];
 
   const grantsRes = await supabase
     .from("deal_access_grants")
@@ -323,6 +332,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             .select("thread_id, intended_role, invitee_email")
             .eq("invitee_email", userEmail)
             .is("used_at", null)
+            .is("declined_at", null)
             .eq("intended_role", "owner")
         : { data: [] },
     ]);
@@ -507,7 +517,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   // deals I own (for "ready to submit" check)
   const myDealsRes = await supabase
     .from("deals")
-    .select("id,created_at,created_by_user_id,user_id")
+    .select("id,status,created_at,created_by_user_id,user_id")
     .or(`created_by_user_id.eq.${user.id},user_id.eq.${user.id}`)
     .order("created_at", { ascending: false })
     .limit(50);
@@ -569,79 +579,120 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   const buyerWaitingThread = pickFirst(buyerWaitingThreads);
 
-  const dynamicSteps: any[] = [];
+  const dynamicSteps: NextStepVm[] = [];
 
-  if (openReviewDealId && openReviewPropertyId) {
-    // Priority 1: open review request -- homeowner action required
+  const REVIEW_LIMBO_STATUSES = new Set([
+    "NEEDS_REVIEW",
+    "UNDER_REVIEW",
+    "REVIEW_OPEN",
+    "REVIEW_SUBMITTED",
+  ]);
+
+  const limboOwnedDeal = pickFirst(
+    myDeals.filter((d: any) => {
+      const ownedByMe =
+        d.created_by_user_id === user.id || d.user_id === user.id;
+      const inLimbo =
+        typeof d.status === "string" &&
+        REVIEW_LIMBO_STATUSES.has(d.status.toUpperCase());
+      const notAlreadyAccepted = !acceptedOwnerDealIds.has(d.id);
+      return ownedByMe && inLimbo && notAlreadyAccepted;
+    }),
+  );
+
+  // Approved priority waterfall — first match wins.
+  const claimableThread = pickFirst(invitedThreads);
+
+  if (claimableThread) {
+    // Priority 1: user has a pending owner invite — property needs to be claimed and verified
+    dynamicSteps.push({
+      key: "claim-verify-property",
+      title: "Claim and verify your property",
+      description:
+        "A property has been shared with you. Claim it and upload verification documents to continue.",
+      href: "/me",
+      cta: "Claim and Verify",
+    });
+  } else if (openReviewDealId && openReviewPropertyId) {
+    // Priority 2: open review request — homeowner action required
     dynamicSteps.push({
       key: "review-request-open",
       title: "Additional information required",
-      description:
-        "FractPath needs a few more details before your review can continue.",
+      description: "We need a few more details to keep this deal moving.",
       href: `/properties/${openReviewPropertyId}`,
-      cta: "View details",
-    });
-  } else if (submittedReviewDealId && submittedReviewPropertyId) {
-    // Priority 2: submitted -- waiting on FractPath team
-    dynamicSteps.push({
-      key: "review-request-submitted",
-      title: "Updates submitted for review",
-      description:
-        "You've submitted updates. Our team will review them and follow up if anything else is needed.",
-      href: `/properties/${submittedReviewPropertyId}`,
-      cta: "View details",
-    });
-  } else if (acceptedNoRequestDealId) {
-    // Priority 3: accepted, no open request -- deal under active review
-    dynamicSteps.push({
-      key: "accepted-pending-review",
-      title: "Deal accepted -- pending review",
-      description: "Your accepted deal is being reviewed by our team.",
-      href: `/deal/${acceptedNoRequestDealId}`,
-      cta: "View deal",
+      cta: "Review Request",
     });
   } else if (ownerPendingThread?.deal_id) {
-    // Priority 4: owner has an offer awaiting their decision
+    // Priority 3: owner has an incoming offer awaiting their decision
     dynamicSteps.push({
       key: "owner-review-offer",
       title: "Review an offer",
-      description: "You have a deal waiting for your review.",
+      description: "A new offer is waiting for your response.",
       href: `/deal/${ownerPendingThread.deal_id}#offer`,
-      cta: "Review offer",
+      cta: "Review Offer",
     });
   } else if (needsVerification) {
-    // Priority 5: property needs verification (suppressed when higher-priority state exists)
+    // Priority 4: owned property not yet verified
     dynamicSteps.push({
       key: "verify-property",
       title: "Verify your property",
-      description: "Complete verification to unlock offers and deal workflows.",
+      description:
+        "Complete verification so your property can keep moving through the deal workflow.",
       href: "/me",
-      cta: "Go to verification",
+      cta: "Verify Property",
     });
   } else if (buyerReadyDeal?.id) {
-    // Priority 6: buyer has a deal ready to submit
+    // Priority 5: buyer has a deal with a snapshot ready to submit
     dynamicSteps.push({
       key: "buyer-submit-offer",
       title: "Submit your offer",
-      description:
-        "Your deal has a snapshot and is ready to send to the owner.",
+      description: "Your draft is ready. Submit your offer to start the negotiation.",
       href: `/deal/${buyerReadyDeal.id}#offer`,
-      cta: "Submit offer",
+      cta: "Submit Offer",
+    });
+  } else if (submittedReviewDealId && submittedReviewPropertyId) {
+    // Priority 6: review request submitted — waiting on team (status/waiting message)
+    dynamicSteps.push({
+      key: "review-request-submitted",
+      title: "Updates received — under review",
+      description: "We received your updates and we're reviewing them now.",
+      href: `/properties/${submittedReviewPropertyId}`,
+      cta: "View Property",
+    });
+  } else if (acceptedNoRequestDealId) {
+    // Priority 7: accepted deal with no open review request (status/waiting message)
+    dynamicSteps.push({
+      key: "accepted-pending-review",
+      title: "Accepted deal — under review",
+      description: "Your accepted deal is being reviewed before the next step.",
+      href: `/deal/${acceptedNoRequestDealId}`,
+      cta: "View Deal",
     });
   } else if (buyerWaitingThread?.deal_id) {
-    // Priority 7: buyer waiting for owner response
+    // Priority 8: buyer waiting for owner response
     dynamicSteps.push({
       key: "buyer-waiting",
       title: "Waiting on the owner",
-      description: "Your offer is pending the owner's review.",
+      description: "Your offer has been sent. We'll let you know when the owner responds.",
       href: `/deal/${buyerWaitingThread.deal_id}#offer`,
-      cta: "View offer",
+      cta: "View Offer",
+    });
+  } else if (limboOwnedDeal?.id) {
+    // Priority 9: deal in admin-limbo review state — no stronger user action available
+    dynamicSteps.push({
+      key: "deal-under-review",
+      title: "Deal is under review",
+      description:
+        "Our team is reviewing your deal. We'll share next steps if anything is needed.",
+      href: `/deal/${limboOwnedDeal.id}`,
+      cta: "View Deal",
     });
   }
 
-  if (dynamicSteps.length) {
-    steps = dynamicSteps;
-  }
+  // Always structured — the final fallback fires only when nothing above matched.
+  steps = dynamicSteps.length
+    ? dynamicSteps
+    : [PERSONA_FALLBACK_STEP[persona]];
 
   // (rest of your DashboardPage continues unchanged…)
 
@@ -1371,7 +1422,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
               href="/deal/new"
               className="inline-flex items-center rounded-md bg-foreground px-3 py-1.5 text-sm font-medium text-background"
             >
-              + Create Deal
+              Create Deal
             </Link>
           </div>
 

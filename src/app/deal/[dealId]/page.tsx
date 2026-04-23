@@ -43,6 +43,12 @@ import type {
   MashvisorNormalizedSummary,
   MashvisorImagesPayload,
 } from "@/lib/mashvisor/types";
+import { PropertyHeroMedia } from "@/components/property/PropertyHeroMedia";
+import { PropertyRecordSections } from "@/components/property/PropertyRecordSections";
+import type { OwnerPhoto } from "@/lib/property/photos";
+import type { NormalizedPropertyProfile } from "@/lib/property-review/providers/rentcast/types";
+import type { PropertyRecord } from "@/lib/property/propertyRecord";
+import { normalizedProfileToRecord } from "@/lib/property/propertyRecord";
 
 type PageProps = {
   params: Promise<{ dealId: string }>;
@@ -138,7 +144,14 @@ async function loadNegotiationState(
         null)
       : null;
 
-  const isBuyer = effectiveThread.buyer_user_id === userId;
+  // For pending_buyer threads the buyer_user_id column is null until the
+  // buyer formally accepts — infer buyer side from owner_user_id instead.
+  const isBuyer =
+    effectiveThread.buyer_user_id !== null
+      ? effectiveThread.buyer_user_id === userId
+      : effectiveThread.status === "pending_buyer" &&
+        effectiveThread.owner_user_id !== userId;
+
   const isSender = currentProposal?.created_by_user_id === userId;
   const isResponder =
     !!currentProposal && !isSender && effectiveThread.status !== "accepted";
@@ -431,10 +444,62 @@ export default async function DealPage(ctx: PageProps) {
       }
     }
 
+    // Owner photos for linked property — sourced from property record, never copied into deal
+    let dealPropertyOwnerPhotos: OwnerPhoto[] = [];
+    if (resolvedPropertyId) {
+      try {
+        const { data: photoRows } = await (svc.from("property_photos") as any)
+          .select("id, property_id, uploaded_by, storage_path, storage_bucket, public_url, sort_order, is_hero, caption, removed_at, created_at, updated_at")
+          .eq("property_id", resolvedPropertyId)
+          .is("removed_at", null)
+          .order("sort_order", { ascending: true });
+        if (Array.isArray(photoRows)) {
+          dealPropertyOwnerPhotos = photoRows.map((r: any) => ({
+            id: r.id,
+            property_id: r.property_id,
+            uploaded_by: r.uploaded_by,
+            storage_path: r.storage_path,
+            storage_bucket: r.storage_bucket,
+            public_url: r.public_url,
+            sort_order: r.sort_order ?? 0,
+            is_hero: r.is_hero ?? false,
+            caption: r.caption ?? null,
+            removed_at: r.removed_at ?? null,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+          }));
+        }
+      } catch {
+        // non-fatal
+      }
+    }
+
+    // RentCast property record — sourced from property_review_runs, not copied into deal
+    let dealPropertyRecord: PropertyRecord | null = null;
+    if (resolvedPropertyId) {
+      try {
+        const { data: rentcastRow } = await (svc.from("property_review_runs") as any)
+          .select("normalized_payload")
+          .eq("property_id", resolvedPropertyId)
+          .eq("provider", "rentcast")
+          .eq("artifact_type", "property_profile")
+          .eq("status", "completed")
+          .eq("is_current", true)
+          .maybeSingle();
+        if (rentcastRow?.normalized_payload) {
+          dealPropertyRecord = normalizedProfileToRecord(
+            rentcastRow.normalized_payload as NormalizedPropertyProfile,
+          );
+        }
+      } catch {
+        // non-fatal
+      }
+    }
+
     const { data: candidateThreads } = await (svc.from("deal_threads") as any)
       .select("id, status, buyer_user_id, owner_user_id, created_at")
       .eq("deal_id", dealId)
-      .in("status", ["pending_owner", "negotiating", "accepted", "closed"])
+      .in("status", ["pending_owner", "pending_buyer", "negotiating", "accepted", "closed"])
       .order("created_at", { ascending: false })
       .limit(5);
 
@@ -442,7 +507,7 @@ export default async function DealPage(ctx: PageProps) {
 
     const effectiveThread =
       allCandidateThreads.find((t) =>
-        ["pending_owner", "negotiating", "accepted"].includes(t.status),
+        ["pending_owner", "pending_buyer", "negotiating", "accepted"].includes(t.status),
       ) ?? null;
 
     const threadStatusForMilestone: string | null =
@@ -452,13 +517,13 @@ export default async function DealPage(ctx: PageProps) {
 
     let editingLocked =
       !!effectiveThread &&
-      ["pending_owner", "negotiating", "accepted"].includes(
+      ["pending_owner", "pending_buyer", "negotiating", "accepted"].includes(
         effectiveThread.status,
       );
 
     const showNegotiationUi =
       !!effectiveThread &&
-      ["pending_owner", "negotiating"].includes(effectiveThread.status);
+      ["pending_owner", "pending_buyer", "negotiating"].includes(effectiveThread.status);
 
     const effectiveSnapshot = toEffectiveSnapshot(
       negState.currentProposal?.terms_snapshot ?? null,
@@ -599,20 +664,23 @@ export default async function DealPage(ctx: PageProps) {
             ownerProposalId={negState.currentProposal?.id ?? null}
             ownerProposalStatus={negState.currentProposal?.status ?? null}
             ownerTermsSnapshot={negState.currentProposal?.terms_snapshot ?? null}
+            currentUserId={user.id}
           />
 
-          {/* Enriched property preview — audience-gated, only when enrichment is available */}
-          {dealPropertyEnrichment && (
+          {/* Linked property — hero + gallery sourced from property record by property_id */}
+          {resolvedPropertyId && (dealPropertyOwnerPhotos.length > 0 || dealPropertyEnrichment) && (
             <div className="rounded-lg border overflow-hidden">
               <div className="bg-muted/40 px-4 py-2 border-b">
-                <span className="text-sm font-medium">Property Preview</span>
+                <span className="text-sm font-medium">Linked Property</span>
               </div>
-              <div className="p-4">
-                <EnrichedPropertyPreview
-                  audience={isAdmin ? "admin" : isOwner ? "owner" : "buyer"}
-                  enrichment={dealPropertyEnrichment}
-                />
-              </div>
+              <PropertyHeroMedia
+                images={dealPropertyEnrichment?.images ?? null}
+                lat={dealPropertyRecord?.latitude ?? null}
+                lng={dealPropertyRecord?.longitude ?? null}
+                address={headerProperty?.display_address ?? null}
+                audience={isAdmin ? "admin" : isOwner ? "owner" : "buyer"}
+                ownerPhotos={dealPropertyOwnerPhotos}
+              />
             </div>
           )}
 
@@ -746,7 +814,8 @@ export default async function DealPage(ctx: PageProps) {
           {showNegotiationUi && negState.isSender && effectiveThread && (
             <WaitingBanner
               threadId={effectiveThread.id}
-              isBuyer={negState.isBuyer}
+              threadStatus={effectiveThread.status}
+              isSender={negState.isSender}
             />
           )}
 
@@ -830,6 +899,17 @@ export default async function DealPage(ctx: PageProps) {
               dealId={dealId}
               initialInputs={snapJson?.inputs ?? null}
             />
+          )}
+
+          {/* Property details — sourced from linked property record by property_id, not copied into deal */}
+          {dealPropertyRecord && resolvedPropertyId && (
+            <section>
+              <h2 className="text-base font-semibold mb-3">Property Details</h2>
+              <PropertyRecordSections
+                record={dealPropertyRecord}
+                audience={isAdmin ? "admin" : isOwner ? "owner" : "buyer"}
+              />
+            </section>
           )}
 
           {events && events.length > 0 && (
@@ -1180,9 +1260,61 @@ export default async function DealPage(ctx: PageProps) {
       }
     }
 
+    // Owner photos for linked property — sourced from property record, never copied into deal
+    let fallbackDealPropertyOwnerPhotos: OwnerPhoto[] = [];
+    if (resolvedPropertyId) {
+      try {
+        const { data: photoRows } = await (svc.from("property_photos") as any)
+          .select("id, property_id, uploaded_by, storage_path, storage_bucket, public_url, sort_order, is_hero, caption, removed_at, created_at, updated_at")
+          .eq("property_id", resolvedPropertyId)
+          .is("removed_at", null)
+          .order("sort_order", { ascending: true });
+        if (Array.isArray(photoRows)) {
+          fallbackDealPropertyOwnerPhotos = photoRows.map((r: any) => ({
+            id: r.id,
+            property_id: r.property_id,
+            uploaded_by: r.uploaded_by,
+            storage_path: r.storage_path,
+            storage_bucket: r.storage_bucket,
+            public_url: r.public_url,
+            sort_order: r.sort_order ?? 0,
+            is_hero: r.is_hero ?? false,
+            caption: r.caption ?? null,
+            removed_at: r.removed_at ?? null,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+          }));
+        }
+      } catch {
+        // non-fatal
+      }
+    }
+
+    // RentCast property record — sourced from property_review_runs, not copied into deal
+    let fallbackDealPropertyRecord: PropertyRecord | null = null;
+    if (resolvedPropertyId) {
+      try {
+        const { data: rentcastRow } = await (svc.from("property_review_runs") as any)
+          .select("normalized_payload")
+          .eq("property_id", resolvedPropertyId)
+          .eq("provider", "rentcast")
+          .eq("artifact_type", "property_profile")
+          .eq("status", "completed")
+          .eq("is_current", true)
+          .maybeSingle();
+        if (rentcastRow?.normalized_payload) {
+          fallbackDealPropertyRecord = normalizedProfileToRecord(
+            rentcastRow.normalized_payload as NormalizedPropertyProfile,
+          );
+        }
+      } catch {
+        // non-fatal
+      }
+    }
+
     const effectiveThread =
       thread &&
-      ["pending_owner", "negotiating", "accepted"].includes(thread.status)
+      ["pending_owner", "pending_buyer", "negotiating", "accepted"].includes(thread.status)
         ? thread
         : null;
 
@@ -1190,13 +1322,13 @@ export default async function DealPage(ctx: PageProps) {
 
     let editingLocked =
       !!effectiveThread &&
-      ["pending_owner", "negotiating", "accepted"].includes(
+      ["pending_owner", "pending_buyer", "negotiating", "accepted"].includes(
         effectiveThread.status,
       );
 
     const showNegotiationUi =
       !!effectiveThread &&
-      ["pending_owner", "negotiating"].includes(effectiveThread.status);
+      ["pending_owner", "pending_buyer", "negotiating"].includes(effectiveThread.status);
 
     const effectiveSnapshot = toEffectiveSnapshot(
       negState.currentProposal?.terms_snapshot ?? null,
@@ -1333,20 +1465,23 @@ export default async function DealPage(ctx: PageProps) {
             ownerProposalId={negState.currentProposal?.id ?? null}
             ownerProposalStatus={negState.currentProposal?.status ?? null}
             ownerTermsSnapshot={negState.currentProposal?.terms_snapshot ?? null}
+            currentUserId={user.id}
           />
 
-          {/* Enriched property preview — audience-gated, only when enrichment is available */}
-          {fallbackDealPropertyEnrichment && (
+          {/* Linked property — hero + gallery sourced from property record by property_id */}
+          {resolvedPropertyId && (fallbackDealPropertyOwnerPhotos.length > 0 || fallbackDealPropertyEnrichment) && (
             <div className="rounded-lg border overflow-hidden">
               <div className="bg-muted/40 px-4 py-2 border-b">
-                <span className="text-sm font-medium">Property Preview</span>
+                <span className="text-sm font-medium">Linked Property</span>
               </div>
-              <div className="p-4">
-                <EnrichedPropertyPreview
-                  audience={fallbackIsAdmin ? "admin" : fallbackIsOwner ? "owner" : "buyer"}
-                  enrichment={fallbackDealPropertyEnrichment}
-                />
-              </div>
+              <PropertyHeroMedia
+                images={fallbackDealPropertyEnrichment?.images ?? null}
+                lat={fallbackDealPropertyRecord?.latitude ?? null}
+                lng={fallbackDealPropertyRecord?.longitude ?? null}
+                address={headerProperty?.display_address ?? null}
+                audience={fallbackIsAdmin ? "admin" : fallbackIsOwner ? "owner" : "buyer"}
+                ownerPhotos={fallbackDealPropertyOwnerPhotos}
+              />
             </div>
           )}
 
@@ -1474,7 +1609,8 @@ export default async function DealPage(ctx: PageProps) {
           {showNegotiationUi && negState.isSender && effectiveThread && (
             <WaitingBanner
               threadId={effectiveThread.id}
-              isBuyer={negState.isBuyer}
+              threadStatus={effectiveThread.status}
+              isSender={negState.isSender}
             />
           )}
 
@@ -1551,6 +1687,17 @@ export default async function DealPage(ctx: PageProps) {
               dealId={dealId}
               initialInputs={snapJson?.inputs ?? null}
             />
+          )}
+
+          {/* Property details — sourced from linked property record by property_id, not copied into deal */}
+          {fallbackDealPropertyRecord && resolvedPropertyId && (
+            <section>
+              <h2 className="text-base font-semibold mb-3">Property Details</h2>
+              <PropertyRecordSections
+                record={fallbackDealPropertyRecord}
+                audience={fallbackIsAdmin ? "admin" : fallbackIsOwner ? "owner" : "buyer"}
+              />
+            </section>
           )}
 
           {events && events.length > 0 && (

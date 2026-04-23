@@ -1,20 +1,18 @@
 import { notFound } from "next/navigation";
 import { createServiceClient } from "@/lib/supabase/service";
 import { AppHeader } from "@/components/layout/AppHeader";
-import { EnrichedPropertyPreview } from "@/components/property/EnrichedPropertyPreview";
-import type {
-  MashvisorNormalizedSummary,
-  MashvisorImagesPayload,
-} from "@/lib/mashvisor/types";
-import type { EnrichedPreviewData } from "@/components/property/EnrichedPropertyPreview";
+import type { MashvisorImagesPayload } from "@/lib/mashvisor/types";
+import type { PropertyAvm } from "@/components/property/EnrichedPropertyPreview";
+import type { NormalizedPropertyProfile } from "@/lib/property-review/providers/rentcast/types";
+import { reviewedBasisFromProperty } from "@/lib/property/propertyFacts";
+import type { PropertyRecord } from "@/lib/property/propertyRecord";
+import { normalizedProfileToRecord } from "@/lib/property/propertyRecord";
+import { PropertyRecordSections } from "@/components/property/PropertyRecordSections";
+import { PropertyHeroMedia } from "@/components/property/PropertyHeroMedia";
+import { PropertyPageHeader } from "@/components/property/PropertyPageHeader";
+import type { OwnerPhoto } from "@/lib/property/photos";
+import { propertyHasActiveDeal } from "@/lib/deal/activeDealCheck";
 import Link from "next/link";
-import { PropertyStatusLanes } from "@/components/properties/PropertyStatusLanes";
-import {
-  deriveClosingReadinessLane,
-  deriveParticipationLane,
-  deriveValuationLane,
-  valueLabelFromValuationLane,
-} from "@/lib/property/statusLanes";
 
 export const runtime = "nodejs";
 
@@ -26,7 +24,7 @@ type PageProps = {
 // Valuation-derivation columns (last four) are used server-side ONLY to compute
 // the displayed label — they are never rendered as raw values in the HTML.
 const PUBLIC_SELECT =
-  "id, address_line1, address_line2, city, state, postal_code, status, visibility_preference, verified_at, ownership_type, occupancy_use, latest_verified_fmv, escalation_avm_status, manual_appraisal_status, fmv_verification_source";
+  "id, address_line1, address_line2, city, state, postal_code, status, visibility_preference, verified_at, ownership_type, occupancy_use, latest_verified_fmv, escalation_avm_status, manual_appraisal_status, fmv_verification_source, latitude, longitude";
 
 function formatFullAddress(row: {
   address_line1: string | null;
@@ -46,34 +44,6 @@ function formatFullAddress(row: {
   return parts.join(", ");
 }
 
-function humanizeOccupancy(val: string | null | undefined): string | null {
-  if (!val) return null;
-  if (val === "primary_residence") return "Primary residence";
-  if (val === "secondary_residence") return "Secondary residence";
-  if (val === "rental_property") return "Rental property";
-  return val.replace(/_/g, " ");
-}
-
-function humanizeOwnership(val: string | null | undefined): string | null {
-  if (!val) return null;
-  if (val === "sole_owner") return "Sole owner";
-  if (val === "co_owner") return "Co-owner";
-  if (val === "trust") return "Trust";
-  if (val === "llc") return "LLC";
-  return val.replace(/_/g, " ");
-}
-
-function fmtVerifiedDate(val: string | null | undefined): string | null {
-  if (!val) return null;
-  try {
-    return new Date(val).toLocaleDateString("en-US", {
-      month: "long",
-      year: "numeric",
-    });
-  } catch {
-    return null;
-  }
-}
 
 export default async function PublicPropertyDetailPage({ params }: PageProps) {
   const { propertyId } = await params;
@@ -95,61 +65,112 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
   }
 
   const fullAddress = formatFullAddress(row);
-  const verifiedDate = fmtVerifiedDate(row.verified_at);
-  const occupancyLabel = humanizeOccupancy(row.occupancy_use);
-  const ownershipLabel = humanizeOwnership(row.ownership_type);
-
-  // Status lanes — participation is always "verified" (enforced above).
-  // Valuation is derived server-side from real DB fields so it aligns with the
-  // admin and owner surfaces.  Raw field values are NOT rendered in the HTML.
-  const publicParticipationLane = deriveParticipationLane("verified");
-  const publicValuationLane = deriveValuationLane({
-    manualAppraisalStatus: (row.manual_appraisal_status as string | null) ?? null,
-    escalationAvmStatus: (row.escalation_avm_status as string | null) ?? null,
-    fmvVerificationSource: (row.fmv_verification_source as string | null) ?? null,
-    latestVerifiedFmv: (row.latest_verified_fmv as number | null) ?? null,
-  });
-  const publicValuationLabel = valueLabelFromValuationLane(publicValuationLane.label);
-
-  const publicClosingReadinessLane = deriveClosingReadinessLane({
-    hasAcceptedDeal: false,
-    propertyReviewStatus: null,
-    closingReviewStatus: null,
-  });
   
-  // Fetch current enrichment (non-fatal, audience=buyer — hides provider IDs)
-  let enrichment: EnrichedPreviewData | null = null;
+  // Fetch RentCast property profile.
+  // normalized_payload is the sole product-facing source of truth.
+  // raw_payload is stored for auditability only and is not used for rendering.
+  let publicPropertyRecord: PropertyRecord | null = null;
+  try {
+    const { data: profileRun } = await (supabase.from("property_review_runs") as any)
+      .select("normalized_payload, requested_at")
+      .eq("property_id", propertyId)
+      .eq("provider", "rentcast")
+      .eq("artifact_type", "property_profile")
+      .eq("is_current", true)
+      .eq("status", "completed")
+      .maybeSingle();
+    if (profileRun?.normalized_payload) {
+      const profile = profileRun.normalized_payload as NormalizedPropertyProfile;
+      publicPropertyRecord = normalizedProfileToRecord(profile, profileRun.requested_at ?? null);
+    }
+  } catch {
+    // non-fatal
+  }
+
+  // Fetch RentCast AVM summary (non-fatal — used in value section)
+  let publicAvm: PropertyAvm | null = null;
+  try {
+    const { data: avmSummary } = await (supabase.from("property_review_summary") as any)
+      .select("fmv_amount, fmv_low, fmv_high, fmv_confidence, fmv_fetched_at")
+      .eq("property_id", propertyId)
+      .maybeSingle();
+    if (avmSummary?.fmv_amount != null) {
+      publicAvm = {
+        estimate: avmSummary.fmv_amount,
+        low: avmSummary.fmv_low ?? null,
+        high: avmSummary.fmv_high ?? null,
+        confidence: avmSummary.fmv_confidence ?? null,
+        fetchedAt: avmSummary.fmv_fetched_at ?? null,
+      };
+    }
+  } catch {
+    // non-fatal
+  }
+
+  // Build reviewed basis — generic label for buyer (hides internal source name)
+  const publicReviewedBasis = reviewedBasisFromProperty(
+    (row.latest_verified_fmv as number | null) ?? null,
+    (row.fmv_verification_source as string | null) ?? null,
+    "Reviewed estimate",
+  );
+
+  // Fetch Mashvisor enrichment images for hero slot (non-fatal, buyer-safe)
+  let publicHeroImages: MashvisorImagesPayload | null = null;
   try {
     const { data: enrichmentRow } = await (supabase
       .from("property_enrichments") as any)
-      .select("summary_payload, images_payload, fetched_at")
+      .select("images_payload")
       .eq("property_id", propertyId)
       .eq("provider", "mashvisor")
       .eq("is_current", true)
       .eq("status", "completed")
       .maybeSingle();
-
-    if (enrichmentRow) {
-      const summary = enrichmentRow.summary_payload as MashvisorNormalizedSummary | null;
-      const images = enrichmentRow.images_payload as MashvisorImagesPayload | null;
-      if (summary && images) {
-        enrichment = {
-          summary,
-          images,
-          fetchedAt: enrichmentRow.fetched_at ?? summary.fetched_at ?? null,
-          // Intentionally omit providerRecordId and imageCount for buyer audience
-        };
-      }
-    }
+    publicHeroImages = (enrichmentRow?.images_payload as MashvisorImagesPayload | null) ?? null;
   } catch {
-    // non-fatal — fall through to simplified view
+    // non-fatal
+  }
+
+  // ── Active-deal check — determines whether "Create deal" CTA is shown ──
+  // Non-fatal: on error we conservatively hide the CTA (fail-closed).
+  let hasActiveDeal = false;
+  try {
+    hasActiveDeal = await propertyHasActiveDeal(supabase, propertyId);
+  } catch {
+    hasActiveDeal = true; // fail-closed: hide CTA when check is uncertain
+  }
+  const canCreateDeal = !hasActiveDeal;
+
+  // Fetch owner photos for buyer hero display (non-fatal)
+  let publicOwnerPhotos: OwnerPhoto[] = [];
+  try {
+    const { data: photoRows } = await (supabase
+      .from("property_photos") as any)
+      .select("*")
+      .eq("property_id", propertyId)
+      .is("removed_at", null)
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true });
+    publicOwnerPhotos = photoRows ?? [];
+  } catch {
+    // non-fatal
+  }
+
+  // Coordinates from normalized property record (for hero map fallback)
+  const publicHeroLat = publicPropertyRecord?.latitude ?? null;
+  const publicHeroLng = publicPropertyRecord?.longitude ?? null;
+  const publicHeroAddress =
+    publicPropertyRecord?.formattedAddress ?? fullAddress ?? null;
+
+  // AVM summary tile helpers
+  function fmtUSD(n: number): string {
+    return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
   }
 
   return (
     <div className="min-h-screen bg-background">
       <AppHeader />
 
-      <main className="mx-auto max-w-2xl px-4 py-10 space-y-6">
+      <main className="mx-auto max-w-3xl px-4 pb-12 pt-6 space-y-6">
         {/* Back link */}
         <Link
           href="/verified-properties"
@@ -172,97 +193,121 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
           All verified properties
         </Link>
 
-        {/* Header — address + badge */}
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
-              <svg
-                className="w-3 h-3"
-                fill="currentColor"
-                viewBox="0 0 20 20"
-                aria-hidden="true"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              Verified
-            </span>
-            {verifiedDate && (
-              <span className="text-xs text-muted-foreground" suppressHydrationWarning>
-                Since {verifiedDate}
-              </span>
-            )}
-          </div>
-          <h1 className="text-xl font-semibold leading-snug">{fullAddress}</h1>
-        </div>
-
-        {/* Property status lanes — public-safe: participation + valuation only */}
-        <PropertyStatusLanes
-          participation={publicParticipationLane}
-          valuation={publicValuationLane}
-          closingReadiness={publicClosingReadinessLane}
-          showClosingReadiness={false}
+        {/* ── A. Header — address H1 + Verified badge ── */}
+        <PropertyPageHeader
+          address={publicHeroAddress ?? fullAddress}
+          propertyStatus="verified"
+          showOwnerVerified={false}
+          showAppraisalBadge={false}
+          appraisalUnderReview={false}
+          appraisalExpired={false}
+          appraisalBadgeLabel=""
+          expiresAt={null}
+          ownershipStatus={null}
+          isParticipationApproved={true}
         />
 
-        {/* Enriched preview if available — buyer audience (no provider IDs, no admin metadata) */}
-        {enrichment ? (
-          <div className="space-y-1">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              Property preview
+        {/* ── B. Hero media — owner photos first, vendor fallback, then map ── */}
+        <PropertyHeroMedia
+          ownerPhotos={publicOwnerPhotos}
+          images={publicHeroImages}
+          lat={publicHeroLat}
+          lng={publicHeroLng}
+          address={publicHeroAddress}
+          audience="buyer"
+        />
+
+        {/* ── C. Deal CTA — only when no active deal exists for this property ── */}
+        {canCreateDeal ? (
+          <div className="flex items-center justify-between rounded-lg border bg-card px-4 py-4">
+            <p className="text-sm text-muted-foreground">
+              Interested in exploring a home equity agreement for this property?
             </p>
-            <EnrichedPropertyPreview
-              enrichment={enrichment}
-              audience="buyer"
-              valuationLabel={publicValuationLabel}
-            />
+            <Link
+              href={`/deal/new?propertyId=${propertyId}`}
+              className="ml-4 shrink-0 rounded-md bg-foreground px-4 py-2 text-sm font-semibold text-background hover:opacity-90 transition-opacity"
+            >
+              Create deal
+            </Link>
           </div>
         ) : (
-          /* No-enrichment fallback — intentional simplified state */
-          <div className="rounded-lg border bg-muted/20 px-5 py-5 space-y-3">
-            <div className="flex items-center gap-2">
-              <svg
-                className="w-5 h-5 text-muted-foreground/50 flex-shrink-0"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"
-                />
-              </svg>
-              <p className="text-sm font-medium">Property details</p>
-            </div>
-            <dl className="space-y-1.5 text-sm">
-              <div className="flex justify-between gap-4">
-                <dt className="text-muted-foreground">Address</dt>
-                <dd className="font-medium text-right">{fullAddress}</dd>
-              </div>
-              {occupancyLabel && (
-                <div className="flex justify-between gap-4">
-                  <dt className="text-muted-foreground">Use</dt>
-                  <dd className="font-medium">{occupancyLabel}</dd>
-                </div>
-              )}
-              {ownershipLabel && (
-                <div className="flex justify-between gap-4">
-                  <dt className="text-muted-foreground">Ownership</dt>
-                  <dd className="font-medium">{ownershipLabel}</dd>
-                </div>
-              )}
-            </dl>
-            <p className="text-[11px] text-muted-foreground">
-              Detailed property data will be available once additional enrichment
-              is completed.
-            </p>
-          </div>
+          <p className="text-sm text-muted-foreground px-1">
+            This property already has an active deal in progress.
+          </p>
         )}
+
+        {/* ── D. Valuation summary — buyer-safe (estimate + range + reviewed basis) ── */}
+        {publicAvm?.estimate != null && (
+          <section className="rounded-lg border bg-card">
+            <div className="px-4 py-3 border-b">
+              <h2 className="text-sm font-semibold">Estimated value</h2>
+            </div>
+            <div className="px-4 py-4">
+              <div className="flex flex-wrap gap-x-8 gap-y-4">
+                <div>
+                  <p className="text-2xl font-bold tabular-nums">
+                    {fmtUSD(publicAvm.estimate)}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Estimate</p>
+                </div>
+                {publicAvm.low != null && publicAvm.high != null && (
+                  <div>
+                    <p className="text-sm font-semibold tabular-nums">
+                      {fmtUSD(publicAvm.low)} – {fmtUSD(publicAvm.high)}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Range</p>
+                  </div>
+                )}
+                {publicReviewedBasis?.value != null && (
+                  <div>
+                    <p className="text-sm font-semibold tabular-nums">
+                      {fmtUSD(publicReviewedBasis.value)}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {publicReviewedBasis.label ?? "Reviewed estimate"}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* ── E. Base property data (normalized from RentCast) — privacy-safe subset ── */}
+        {publicPropertyRecord && (
+          <PropertyRecordSections record={publicPropertyRecord} audience="buyer" />
+        )}
+
+        {/* ── F. Location map — Mapbox Static Images (non-interactive, lightweight) ── */}
+        {(() => {
+          const propLat =
+            typeof (row as any).latitude === "number" ? (row as any).latitude : null;
+          const propLng =
+            typeof (row as any).longitude === "number" ? (row as any).longitude : null;
+          const mapToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+          if (propLat == null || propLng == null || !mapToken) return null;
+          const staticUrl =
+            `https://api.mapbox.com/styles/v1/mapbox/streets-v12/static/` +
+            `pin-s-l+000(${propLng},${propLat})/` +
+            `${propLng},${propLat},14/` +
+            `600x240@2x?access_token=${mapToken}`;
+          return (
+            <section className="rounded-xl border overflow-hidden">
+              <div className="px-4 py-3 border-b bg-muted/20">
+                <h2 className="text-sm font-semibold">Location</h2>
+              </div>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={staticUrl}
+                alt={`Map showing location of ${fullAddress}`}
+                className="w-full block"
+                loading="lazy"
+                width={600}
+                height={240}
+              />
+            </section>
+          );
+        })()}
 
         {/* Compliance note */}
         <p className="text-[11px] text-muted-foreground border-t pt-4">

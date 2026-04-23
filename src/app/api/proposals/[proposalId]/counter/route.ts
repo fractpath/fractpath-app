@@ -137,7 +137,10 @@ export async function POST(
 
   const isVoidAcceptedThread = thread.status === "accepted";
 
-  if (!["pending_owner", "negotiating"].includes(thread.status) && !isVoidAcceptedThread) {
+  if (
+    !["pending_owner", "pending_buyer", "negotiating"].includes(thread.status) &&
+    !isVoidAcceptedThread
+  ) {
     return json(409, {
       ok: false,
       error: `Cannot counter in thread status: ${thread.status}`,
@@ -190,8 +193,28 @@ export async function POST(
     }
   }
 
+  // owner→buyer flow: buyer may counter while pending_buyer and before
+  // buyer_user_id is stamped (legacy threads). Mirror the isInvitedOwner
+  // pattern but for intended_role = "buyer".
+  let isInvitedBuyer = false;
+  if (!isBuyer && !isThreadOwner && !isPropertyOwner && !isInvitedOwner && user.email) {
+    const { data: buyerInvite } = await (svc.from("thread_invites") as any)
+      .select("id, intended_role, expires_at")
+      .eq("thread_id", thread.id)
+      .eq("invitee_email", user.email.toLowerCase())
+      .eq("intended_role", "buyer")
+      .limit(1)
+      .maybeSingle();
+
+    if (buyerInvite) {
+      const notExpired =
+        !buyerInvite.expires_at || new Date(buyerInvite.expires_at) > new Date();
+      isInvitedBuyer = notExpired;
+    }
+  }
+
   const hasAccess =
-    isBuyer || isThreadOwner || isPropertyOwner || isInvitedOwner;
+    isBuyer || isThreadOwner || isPropertyOwner || isInvitedOwner || isInvitedBuyer;
   if (!hasAccess) {
     return json(403, { ok: false, error: "Access denied" });
   }

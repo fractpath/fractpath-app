@@ -76,20 +76,37 @@ export async function POST(
     return NextResponse.json({ ok: false, error: upErr.message }, { status: 500 });
   }
 
-  // Best-effort event log
+  // Best-effort event log — deal_events for deal-linked requests, property audit for all.
+  if (request.deal_id) {
+    try {
+      await (svc.from("deal_events") as any).insert({
+        deal_id: request.deal_id,
+        event_type: "DEAL_REVIEW_REQUEST_SUBMITTED",
+        payload: {
+          request_id: request.id,
+          property_id: propertyId,
+          has_homeowner_note: !!(body.homeowner_note?.trim()),
+        },
+        created_by: user.id,
+      });
+    } catch {
+      // best-effort
+    }
+  }
+
+  // Property audit entry — written for both deal-linked and property-native requests
+  // so the admin property activity table always reflects homeowner submissions.
   try {
-    await (svc.from("deal_events") as any).insert({
-      deal_id: request.deal_id,
-      event_type: "DEAL_REVIEW_REQUEST_SUBMITTED",
-      payload: {
-        request_id: request.id,
-        property_id: propertyId,
-        has_homeowner_note: !!(body.homeowner_note?.trim()),
-      },
-      created_by: user.id,
+    await (svc.from("property_status_audit") as any).insert({
+      property_id: propertyId,
+      from_status: "information_requested",
+      to_status: "information_submitted",
+      changed_by: user.id,
+      actor_type: "homeowner",
+      notes: `Homeowner submitted updates for review request ${request.id}${body.homeowner_note?.trim() ? " (with note)" : ""}`,
     });
   } catch {
-    // best-effort
+    // best-effort — do not fail submission if audit write fails
   }
 
   // Notify ops/admin — best-effort, non-blocking
@@ -128,26 +145,26 @@ export async function POST(
               </a>
             </p>
             <p style="font-size:12px;color:#888;margin-top:16px;">
-              Deal ID: ${request.deal_id} · Property ID: ${propertyId}
+              ${request.deal_id ? `Deal ID: ${request.deal_id} · ` : ""}Property ID: ${propertyId}
             </p>
           </div>
         `,
       });
 
       console.log("review_request_ops_notified", {
-        dealId: request.deal_id,
+        dealId: request.deal_id ?? null,
         propertyId,
       });
     } else {
       console.log("review_request_ops_notify_skipped_no_recipient", {
-        dealId: request.deal_id,
+        dealId: request.deal_id ?? null,
         propertyId,
         hint: "Set RESEND_OPS_EMAIL env var to enable ops notifications",
       });
     }
   } catch (emailErr: any) {
     console.error("review_request_ops_notify_failed", {
-      dealId: request.deal_id,
+      dealId: request.deal_id ?? null,
       propertyId,
       error: emailErr?.message,
     });

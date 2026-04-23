@@ -25,8 +25,11 @@ type Property = {
   claim_thread_id?: string | null;
   claim_deal_id?: string | null;
   claim_thread_status?: string | null;
+  has_owner_invite?: boolean;
   // Enrichment thumbnail — merged in by API from property_enrichments
   cover_image_url?: string | null;
+  // Owner hero photo — priority over vendor enrichment thumbnail
+  hero_photo_url?: string | null;
   // Review request status — set when an open/submitted request exists for a linked deal
   review_request_status?: "open" | "submitted" | null;
   // Proposal preferences
@@ -104,6 +107,11 @@ export function PropertyList() {
   const [editTarget, setEditTarget] = useState<Property | null>(null);
   const [claimingId, setClaimingId] = useState<string | null>(null);
   const [verifyTarget, setVerifyTarget] = useState<Property | null>(null);
+  const [notMyPropertyId, setNotMyPropertyId] = useState<string | null>(null);
+  const [notMyPropertyConfirmOpen, setNotMyPropertyConfirmOpen] = useState(false);
+  const [decliningId, setDecliningId] = useState<string | null>(null);
+  const [releaseClaimTarget, setReleaseClaimTarget] = useState<Property | null>(null);
+  const [releasing, setReleasing] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -170,6 +178,50 @@ export function PropertyList() {
     }
   }
 
+  async function declineOwnership(threadId: string) {
+    if (decliningId) return;
+    setDecliningId(threadId);
+    try {
+      const res = await fetch(`/api/threads/${threadId}/not-my-property`, {
+        method: "POST",
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        t.error(json?.error || "Couldn't process your response — try again.");
+        return;
+      }
+      t.success("Response recorded. This property has been removed from your list.");
+      setNotMyPropertyId(null);
+      setNotMyPropertyConfirmOpen(false);
+      await load();
+    } finally {
+      setDecliningId(null);
+    }
+  }
+
+  async function releaseClaimNow(propertyId: string) {
+    if (releasing) return;
+    setReleasing(true);
+    try {
+      const res = await fetch(`/api/me/properties/${propertyId}/release-claim`, {
+        method: "POST",
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        const reasons: string[] = json?.details?.blocked_reasons ?? [];
+        const detail = reasons.length > 0 ? ` Reason: ${reasons.join(", ")}.` : "";
+        t.error(`Release not permitted.${detail}`);
+        setReleaseClaimTarget(null);
+        return;
+      }
+      t.success("Claim released. The property has been removed from your account.");
+      setReleaseClaimTarget(null);
+      await load();
+    } finally {
+      setReleasing(false);
+    }
+  }
+
   return (
     <div className="space-y-3">
       <button
@@ -211,11 +263,11 @@ export function PropertyList() {
             return (
               <li key={p.id} className="rounded-md border overflow-hidden">
                 <div className="flex gap-3 p-3">
-                  {/* Thumbnail — only when enrichment image is available */}
-                  {p.cover_image_url && (
+                  {/* Thumbnail — owner hero photo takes priority over vendor enrichment image */}
+                  {(p.hero_photo_url || p.cover_image_url) && (
                     <div className="relative h-16 w-24 flex-shrink-0 rounded overflow-hidden bg-muted/40">
                       <Image
-                        src={p.cover_image_url}
+                        src={p.hero_photo_url ?? p.cover_image_url!}
                         alt="Property thumbnail"
                         fill
                         className="object-cover"
@@ -275,14 +327,26 @@ export function PropertyList() {
                       )}
                   </div>
 
-                  <div className="flex shrink-0 gap-2">
+                  <div className="flex shrink-0 flex-wrap gap-2">
                     {isClaimable ? (
-                      <LoadingButton
-                        loading={claimingId === p.id}
-                        onClick={() => claimNow(p)}
-                      >
-                        Claim & verify
-                      </LoadingButton>
+                      <div className="flex flex-col items-center gap-1">
+                        <LoadingButton
+                          loading={claimingId === p.id}
+                          onClick={() => claimNow(p)}
+                        >
+                          Claim & verify
+                        </LoadingButton>
+                        <button
+                          className="text-xs text-muted-foreground underline"
+                          disabled={!!decliningId}
+                          onClick={() => {
+                            setNotMyPropertyId(p.claim_thread_id ?? null);
+                            setNotMyPropertyConfirmOpen(true);
+                          }}
+                        >
+                          Not your property?
+                        </button>
+                      </div>
                     ) : (
                       <>
                         <Link
@@ -314,6 +378,15 @@ export function PropertyList() {
                               onClick={() => setVerifyTarget(p)}
                             >
                               Verify
+                            </button>
+                          )}
+                        {p.visibility === "owned" &&
+                          (p.status === "unverified" || p.status === "under_review" || p.status === "archived") && (
+                            <button
+                              className="text-sm text-muted-foreground underline"
+                              onClick={() => setReleaseClaimTarget(p)}
+                            >
+                              Release claim
                             </button>
                           )}
                       </>
@@ -435,6 +508,83 @@ export function PropertyList() {
                 onClick={() => archiveId && archiveNow(archiveId)}
               >
                 Archive
+              </LoadingButton>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {notMyPropertyConfirmOpen && notMyPropertyId && (
+        <Modal
+          open={true}
+          onClose={() => {
+            setNotMyPropertyConfirmOpen(false);
+            setNotMyPropertyId(null);
+          }}
+          title="Confirm: not your property?"
+        >
+          <div className="space-y-4">
+            <div className="text-sm text-muted-foreground">
+              This will remove the property from your list. The party who
+              shared it with you will be notified. You can still claim the
+              property later if that changes.
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-md border px-3 py-2 text-sm"
+                onClick={() => {
+                  setNotMyPropertyConfirmOpen(false);
+                  setNotMyPropertyId(null);
+                }}
+              >
+                Cancel
+              </button>
+              <LoadingButton
+                loading={!!decliningId}
+                onClick={() =>
+                  notMyPropertyId && declineOwnership(notMyPropertyId)
+                }
+              >
+                Confirm
+              </LoadingButton>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {releaseClaimTarget && (
+        <Modal
+          open={true}
+          onClose={() => setReleaseClaimTarget(null)}
+          title="Release property claim?"
+        >
+          <div className="space-y-4">
+            <div className="text-sm text-muted-foreground">
+              This removes your claim on{" "}
+              <strong>
+                {releaseClaimTarget.address_display ||
+                  releaseClaimTarget.address_line1}
+              </strong>
+              . Any non-binding deal threads associated with this property
+              will be closed. This action cannot be undone.
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-md border px-3 py-2 text-sm"
+                onClick={() => setReleaseClaimTarget(null)}
+              >
+                Cancel
+              </button>
+              <LoadingButton
+                loading={releasing}
+                onClick={() =>
+                  releaseClaimTarget &&
+                  releaseClaimNow(releaseClaimTarget.id)
+                }
+              >
+                Release claim
               </LoadingButton>
             </div>
           </div>

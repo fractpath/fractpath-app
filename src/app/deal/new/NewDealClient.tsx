@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 
 type NewDealClientProps = {
   persona: string;
+  initialPropertyId?: string | null;
 };
 
-export function NewDealClient({ persona }: NewDealClientProps) {
+export function NewDealClient({ persona, initialPropertyId }: NewDealClientProps) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(true);
@@ -21,23 +22,28 @@ export function NewDealClient({ persona }: NewDealClientProps) {
 
     async function createDeal() {
       try {
+        const body: Record<string, unknown> = {};
+        if (initialPropertyId) {
+          body.propertyId = initialPropertyId;
+        }
+
         const res = await fetch("/api/deals/create", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
+          body: JSON.stringify(body),
         });
 
-        const body = await res
+        const responseBody = await res
           .json()
           .catch(() => ({ ok: false, error: "Invalid response" }));
 
         if (cancelled) return;
 
-        if (!res.ok || body.ok === false) {
-          throw new Error(body.error ?? `Create failed (${res.status})`);
+        if (!res.ok || responseBody.ok === false) {
+          throw new Error(responseBody.error ?? `Create failed (${res.status})`);
         }
 
-        router.push(body.redirect_url ?? "/dashboard");
+        router.push(responseBody.redirect_url ?? "/dashboard");
       } catch (err: any) {
         if (!cancelled) {
           setError(err?.message ?? "Failed to create deal");
@@ -51,7 +57,7 @@ export function NewDealClient({ persona }: NewDealClientProps) {
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [router, initialPropertyId]);
 
   if (error) {
     return (
@@ -78,7 +84,7 @@ export function NewDealClient({ persona }: NewDealClientProps) {
   return (
     <div className="flex flex-col items-center justify-center py-12">
       <div className="animate-pulse text-sm text-muted-foreground">
-        Creating your deal...
+        {creating ? "Creating your deal..." : "Redirecting..."}
       </div>
     </div>
   );

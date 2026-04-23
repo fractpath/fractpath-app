@@ -25,6 +25,8 @@ type Props = {
   // Thread context
   activeThreadId?: string | null;
   activeThreadStatus?: string | null;
+  // Current authenticated user — forwarded to SubmitOfferModal for direction detection
+  currentUserId?: string | null;
 };
 
 export function DealActionsBar({
@@ -40,6 +42,7 @@ export function DealActionsBar({
   ownerTermsSnapshot,
   activeThreadId,
   activeThreadStatus,
+  currentUserId,
 }: Props) {
   const router = useRouter();
   const [openSubmit, setOpenSubmit] = useState(false);
@@ -59,11 +62,11 @@ export function DealActionsBar({
     !!ownerProposalId &&
     ownerProposalStatus === "submitted";
 
-  // Buyer can withdraw when their offer is pending
+  // Buyer can withdraw only while their offer is still pending (before any counter)
   const canBuyerWithdraw =
     isBuyer &&
     locked &&
-    activeThreadStatus === "pending_owner" &&
+    (activeThreadStatus === "pending_owner" || activeThreadStatus === "pending_buyer") &&
     !!activeThreadId;
 
   async function handleOwnerDecision(decision: "accept" | "reject") {
@@ -203,6 +206,7 @@ export function DealActionsBar({
             dealId={dealId}
             propertyId={propertyId}
             effectiveSnapshot={effectiveSnapshot}
+            currentUserId={currentUserId ?? null}
           />
           <ShareDealModal
             open={openShare}

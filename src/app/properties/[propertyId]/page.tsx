@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -8,11 +9,30 @@ import type { HomeownerReviewRequest } from "@/components/properties/ReviewReque
 import type { PropertyWorkflowState } from "@/components/properties/PropertyDetailClient";
 import type { LiveIneligiblePhase } from "@/components/properties/PropertyValuationSections";
 import type { PropertyAuditEntry } from "@/components/properties/PropertyActivityTimeline";
-import type {
-  MashvisorNormalizedSummary,
-  MashvisorImagesPayload,
-} from "@/lib/mashvisor/types";
-import type { EnrichedPreviewData } from "@/components/property/EnrichedPropertyPreview";
+import type { MashvisorImagesPayload } from "@/lib/mashvisor/types";
+import type { EnrichedPreviewData, PropertyAvm } from "@/components/property/EnrichedPropertyPreview";
+import type { NormalizedPropertyProfile } from "@/lib/property-review/providers/rentcast/types";
+import {
+  rentcastProfileToFacts,
+  reviewedBasisFromProperty,
+} from "@/lib/property/propertyFacts";
+import type { PropertyRecord } from "@/lib/property/propertyRecord";
+import { normalizedProfileToRecord } from "@/lib/property/propertyRecord";
+import { PropertyRecordSections } from "@/components/property/PropertyRecordSections";
+import { PropertyMediaSection } from "@/components/property/PropertyMediaSection";
+import { PropertyPageHeader } from "@/components/property/PropertyPageHeader";
+import { ValuationCashSection } from "@/components/property/ValuationCashSection";
+import { OwnerPropertyEditControls } from "@/components/property/OwnerPropertyEditControls";
+import { OwnerReleaseClaimSection } from "@/components/property/OwnerReleaseClaimSection";
+import type { OwnerPhoto, PropertyFactCorrection } from "@/lib/property/photos";
+import {
+  shouldShowOwnerVerifiedBadge,
+  shouldShowVerifiedAppraisalValueBadge,
+  isAppraisalBadgeExpired,
+  isAppraisalBadgeUnderReview,
+} from "@/lib/property/badges";
+import { deriveValuationLane } from "@/lib/property/statusLanes";
+import { propertyHasActiveDeal } from "@/lib/deal/activeDealCheck";
 
 export const runtime = "nodejs";
 
@@ -72,14 +92,24 @@ export default async function PropertyDetailPage({ params }: PageProps) {
   // Fetch AVM summary for the property (non-fatal)
   let rentcastFmv: number | null = null;
   let rentcastProvider: string | null = null;
+  let rentcastAvm: PropertyAvm | null = null;
   try {
     const { data: summary } = await (svc.from("property_review_summary") as any)
-      .select("fmv_provider, fmv_amount")
+      .select("fmv_provider, fmv_amount, fmv_low, fmv_high, fmv_confidence, fmv_fetched_at")
       .eq("property_id", propertyId)
       .maybeSingle();
     if (summary) {
       rentcastFmv = summary.fmv_amount ?? null;
       rentcastProvider = summary.fmv_provider ?? null;
+      if (summary.fmv_amount != null) {
+        rentcastAvm = {
+          estimate: summary.fmv_amount,
+          low: summary.fmv_low ?? null,
+          high: summary.fmv_high ?? null,
+          confidence: summary.fmv_confidence ?? null,
+          fetchedAt: summary.fmv_fetched_at ?? null,
+        };
+      }
     }
   } catch {
     // non-fatal
@@ -224,15 +254,19 @@ export default async function PropertyDetailPage({ params }: PageProps) {
     debtDiscrepancyDelta,
   };
 
-  // Fetch open/submitted review request for the linked deal + this property
+  // Fetch open/submitted/resolved review request.
+  // Priority: deal-linked request (if a deal exists) → property-native (deal_id IS NULL).
+  // Includes resolved so owner can see the complete lifecycle.
+  const OWNER_REQ_SELECT =
+    "id, status, requested_items, admin_note, homeowner_note, submitted_at, resolved_note, resolved_at";
   let reviewRequest: HomeownerReviewRequest | null = null;
   if (linkedDeal?.deal_id) {
     try {
       const { data: reqRow } = await (svc.from("deal_review_requests") as any)
-        .select("id, status, requested_items, admin_note, submitted_at")
+        .select(OWNER_REQ_SELECT)
         .eq("deal_id", linkedDeal.deal_id)
         .eq("property_id", propertyId)
-        .in("status", ["open", "submitted"])
+        .in("status", ["open", "submitted", "resolved"])
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -242,7 +276,37 @@ export default async function PropertyDetailPage({ params }: PageProps) {
           status: reqRow.status,
           requested_items: reqRow.requested_items ?? [],
           admin_note: reqRow.admin_note ?? null,
+          homeowner_note: reqRow.homeowner_note ?? null,
           submitted_at: reqRow.submitted_at ?? null,
+          resolved_note: reqRow.resolved_note ?? null,
+          resolved_at: reqRow.resolved_at ?? null,
+        };
+      }
+    } catch {
+      // non-fatal
+    }
+  }
+  // Fallback: property-native review request (no deal required)
+  if (!reviewRequest) {
+    try {
+      const { data: nativeRow } = await (svc.from("deal_review_requests") as any)
+        .select(OWNER_REQ_SELECT)
+        .eq("property_id", propertyId)
+        .is("deal_id", null)
+        .in("status", ["open", "submitted", "resolved"])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (nativeRow) {
+        reviewRequest = {
+          id: nativeRow.id,
+          status: nativeRow.status,
+          requested_items: nativeRow.requested_items ?? [],
+          admin_note: nativeRow.admin_note ?? null,
+          homeowner_note: nativeRow.homeowner_note ?? null,
+          submitted_at: nativeRow.submitted_at ?? null,
+          resolved_note: nativeRow.resolved_note ?? null,
+          resolved_at: nativeRow.resolved_at ?? null,
         };
       }
     } catch {
@@ -250,8 +314,38 @@ export default async function PropertyDetailPage({ params }: PageProps) {
     }
   }
 
-  // Fetch current enrichment for this property (non-fatal)
+  // Fetch current RentCast property profile.
+  // normalized_payload is the sole product-facing source of truth.
+  // raw_payload is stored for auditability only and is not used for rendering.
+  let rentcastProfileFacts = null as ReturnType<typeof rentcastProfileToFacts> | null;
+  let ownerPropertyRecord: PropertyRecord | null = null;
+  try {
+    const { data: profileRun } = await (svc.from("property_review_runs") as any)
+      .select("normalized_payload, requested_at")
+      .eq("property_id", propertyId)
+      .eq("provider", "rentcast")
+      .eq("artifact_type", "property_profile")
+      .eq("is_current", true)
+      .eq("status", "completed")
+      .maybeSingle();
+    if (profileRun?.normalized_payload) {
+      const profile = profileRun.normalized_payload as NormalizedPropertyProfile;
+      rentcastProfileFacts = rentcastProfileToFacts(profile, profileRun.requested_at ?? null);
+      ownerPropertyRecord = normalizedProfileToRecord(profile, profileRun.requested_at ?? null);
+    }
+  } catch {
+    // non-fatal — proceed without RentCast facts
+  }
+
+  // Build reviewed/controlling basis for the preview card
+  const ownerReviewedBasis = reviewedBasisFromProperty(
+    row.latest_verified_fmv ?? null,
+    row.fmv_verification_source ?? null,
+  );
+
+  // Fetch Mashvisor enrichment for images (non-fatal — images go to hero; facts/AVM go to compact preview)
   let ownerEnrichment: EnrichedPreviewData | null = null;
+  let heroImages: MashvisorImagesPayload | null = null;
   try {
     const { data: enrichmentRow } = await (svc.from("property_enrichments") as any)
       .select("summary_payload, images_payload, fetched_at")
@@ -261,25 +355,292 @@ export default async function PropertyDetailPage({ params }: PageProps) {
       .eq("status", "completed")
       .maybeSingle();
 
-    if (enrichmentRow) {
-      const summary = enrichmentRow.summary_payload as MashvisorNormalizedSummary | null;
-      const images = enrichmentRow.images_payload as MashvisorImagesPayload | null;
-      if (summary && images) {
-        ownerEnrichment = {
-          summary,
-          images,
-          fetchedAt: enrichmentRow.fetched_at ?? summary.fetched_at ?? null,
-        };
-      }
+    const images = enrichmentRow?.images_payload as MashvisorImagesPayload | null ?? null;
+    heroImages = images;
+
+    if (rentcastProfileFacts || rentcastAvm || images) {
+      ownerEnrichment = {
+        summary: enrichmentRow?.summary_payload ?? null,
+        // Images are intentionally omitted here — they appear in the hero instead.
+        // This prevents gallery duplication between the hero slot and the compact preview.
+        images: null,
+        fetchedAt: enrichmentRow?.fetched_at ?? null,
+        facts: rentcastProfileFacts ?? undefined,
+        avm: rentcastAvm,
+        reviewedBasis: ownerReviewedBasis,
+      };
     }
   } catch {
     // non-fatal — proceed without enrichment
   }
 
+  // If Mashvisor query failed but we have RentCast facts/AVM, still show them
+  if (!ownerEnrichment && (rentcastProfileFacts || rentcastAvm)) {
+    ownerEnrichment = {
+      facts: rentcastProfileFacts ?? undefined,
+      avm: rentcastAvm,
+      reviewedBasis: ownerReviewedBasis,
+    };
+  }
+
+  // Fetch owner photos (non-fatal)
+  let ownerPhotos: OwnerPhoto[] = [];
+  try {
+    const { data: photoRows } = await (svc.from("property_photos") as any)
+      .select("*")
+      .eq("property_id", propertyId)
+      .is("removed_at", null)
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true });
+    ownerPhotos = photoRows ?? [];
+  } catch {
+    // non-fatal
+  }
+
+  // Fetch owner corrections (non-fatal)
+  let ownerCorrections: PropertyFactCorrection[] = [];
+  try {
+    const { data: corrRows } = await (svc.from("property_fact_corrections") as any)
+      .select("*")
+      .eq("property_id", propertyId)
+      .order("created_at", { ascending: false });
+    ownerCorrections = corrRows ?? [];
+  } catch {
+    // non-fatal
+  }
+
+  // Build canonical values for the correction modal from normalized record
+  const canonicalValues: Record<string, string | number | null> = {
+    bedrooms: ownerPropertyRecord?.beds ?? null,
+    bathrooms: ownerPropertyRecord?.baths ?? null,
+    sqft_living: ownerPropertyRecord?.sqft ?? null,
+    lot_sqft: ownerPropertyRecord?.lotSize ?? null,
+    year_built: ownerPropertyRecord?.yearBuilt ?? null,
+    owner_occupied: row.occupancy_use ?? null,
+  };
+
+  // Apply approved corrections to the ownerPropertyRecord display
+  // Approved corrections override the RentCast canonical values for owner/public display surfaces.
+  // The canonical RentCast value is always preserved in canonicalValues above for admin comparison.
+  if (ownerPropertyRecord && ownerCorrections.length > 0) {
+    const fieldMap: Record<string, keyof typeof ownerPropertyRecord> = {
+      bedrooms: "beds",
+      bathrooms: "baths",
+      sqft_living: "sqft",
+      lot_sqft: "lotSize",
+      year_built: "yearBuilt",
+    };
+    const approved = ownerCorrections.filter((c) => c.review_status === "approved");
+    if (approved.length > 0) {
+      const patchedRecord = { ...ownerPropertyRecord };
+      for (const correction of approved) {
+        const recordKey = fieldMap[correction.field_key];
+        if (recordKey) {
+          const numVal = Number(correction.owner_submitted_value);
+          if (!isNaN(numVal)) {
+            (patchedRecord as any)[recordKey] = numVal;
+          }
+        }
+      }
+      ownerPropertyRecord = patchedRecord;
+    }
+  }
+
+  // Coordinates from normalized property record (for hero map fallback)
+  const heroLat = ownerPropertyRecord?.latitude ?? null;
+  const heroLng = ownerPropertyRecord?.longitude ?? null;
+  const heroAddress = ownerPropertyRecord?.formattedAddress ?? address_display ?? null;
+
+  // ── Owner deal CTA: active-deal check ────────────────────────────────────
+  // Show "Create deal" CTA only when the property is verified, the owner has
+  // not opted out of proposals, and no active deal already exists.
+  let ownerCanCreateDeal = false;
+  if (
+    row.status === "verified" &&
+    row.proposal_interest_status !== "not_interested"
+  ) {
+    try {
+      const hasActive = await propertyHasActiveDeal(svc, propertyId);
+      ownerCanCreateDeal = !hasActive;
+    } catch {
+      ownerCanCreateDeal = false; // fail-closed
+    }
+  }
+
+  // ── Badge computation for PropertyPageHeader ─────────────────────────────
+  const ownerValuationLaneForBadge = deriveValuationLane({
+    manualAppraisalStatus: workflowState.manualAppraisalStatus,
+    escalationAvmStatus: workflowState.escalationAvmStatus,
+    fmvVerificationSource: workflowState.fmvVerificationSource,
+    latestVerifiedFmv: workflowState.latestVerifiedFmv,
+  });
+  const showOwnerVerified = shouldShowOwnerVerifiedBadge(
+    row.verification_state ?? null,
+    row.owner_verification_removed_at ?? null,
+  );
+  const showAppraisalBadge = shouldShowVerifiedAppraisalValueBadge(
+    row.verified_appraisal_value_status ?? null,
+  );
+  const appraisalExpired = isAppraisalBadgeExpired(
+    row.verified_appraisal_value_status ?? null,
+  );
+  const appraisalUnderReview = isAppraisalBadgeUnderReview(
+    row.verified_appraisal_value_status ?? null,
+  );
+  const appraisalBadgeLabel =
+    appraisalUnderReview
+      ? "Appraisal under review"
+      : ownerValuationLaneForBadge.label === "Appraised"
+        ? "Appraised value"
+        : "Reviewed valuation basis";
+
   return (
     <div>
       <AppHeader />
-      <main className="mx-auto max-w-2xl p-6 space-y-6">
+      <main className="mx-auto max-w-3xl px-4 pb-12 pt-6 space-y-6">
+        {/* ── Back link — above everything ── */}
+        <div>
+          <Link
+            href="/me"
+            className="text-sm text-muted-foreground hover:text-foreground underline"
+          >
+            ← Back to my account
+          </Link>
+        </div>
+
+        {/* ── A. Header — address H1 + badge row with tooltips ── */}
+        <PropertyPageHeader
+          address={heroAddress ?? address_display}
+          propertyStatus={row.status ?? null}
+          showOwnerVerified={showOwnerVerified}
+          showAppraisalBadge={showAppraisalBadge}
+          appraisalUnderReview={appraisalUnderReview}
+          appraisalExpired={appraisalExpired}
+          appraisalBadgeLabel={appraisalBadgeLabel}
+          expiresAt={row.property_review_expires_at ?? null}
+          isParticipationApproved={row.status === "verified"}
+        />
+
+        {/* ── A2. Owner deal CTA — only when property is verified and eligible ── */}
+        {ownerCanCreateDeal ? (
+          <div className="flex items-center justify-between rounded-lg border bg-card px-4 py-4">
+            <p className="text-sm text-muted-foreground">
+              Ready to explore a home equity agreement for this property?
+            </p>
+            <Link
+              href={`/deal/new?propertyId=${propertyId}`}
+              className="ml-4 shrink-0 rounded-md bg-foreground px-4 py-2 text-sm font-semibold text-background hover:opacity-90 transition-opacity"
+            >
+              Create deal
+            </Link>
+          </div>
+        ) : row.status === "verified" && linkedDeal?.deal_id ? (
+          <div className="flex items-center justify-between rounded-lg border bg-muted/40 px-4 py-3">
+            <p className="text-sm text-muted-foreground">
+              An active deal is in progress for this property.
+            </p>
+            <Link
+              href={`/deal/${linkedDeal.deal_id}`}
+              className="ml-4 shrink-0 rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted/40 transition-colors"
+            >
+              View deal
+            </Link>
+          </div>
+        ) : null}
+
+        {/* ── B. Hero media — owner photos first, vendor fallback, then map ── */}
+        <PropertyMediaSection
+          propertyId={propertyId}
+          initialPhotos={ownerPhotos}
+          images={heroImages}
+          lat={heroLat}
+          lng={heroLng}
+          address={heroAddress}
+          audience="owner"
+          canManagePhotos={row.status !== "archived"}
+        />
+
+        {/* ── B2. Owner property edit controls (settings + corrections) ── */}
+        <OwnerPropertyEditControls
+          propertyId={propertyId}
+          currentVisibility={row.visibility_preference ?? "private"}
+          currentProposalStatus={row.proposal_interest_status ?? "not_interested"}
+          initialCorrections={ownerCorrections}
+          canonicalValues={canonicalValues}
+          propertyStatus={row.status ?? ""}
+        />
+
+        {/* ── B3. Release claim — only when user IS the current owner_user_id and property is not archived ── */}
+        {row.status !== "archived" && row.owner_user_id === user.id && (
+          <OwnerReleaseClaimSection propertyId={propertyId} />
+        )}
+
+        {/* ── C. Valuation & cash position — consolidated section with tabs ── */}
+        {(workflowState.rentcastFmv != null ||
+          workflowState.escalationDepositStatus ||
+          workflowState.escalationAvmStatus ||
+          workflowState.ownerAttemptedAttom ||
+          workflowState.manualAppraisalStatus ||
+          workflowState.liveIneligiblePhase !== null ||
+          workflowState.fmvVerificationSource === "attom") && (
+          <ValuationCashSection
+            audience="owner"
+            avm={rentcastAvm}
+            securedDebt={row.secured_property_debt_amount ?? null}
+            propertyReviewExpiresAt={row.property_review_expires_at ?? null}
+            propertyId={property.id}
+            rentcastFmv={workflowState.rentcastFmv}
+            rentcastProvider={workflowState.rentcastProvider}
+            escalationDepositStatus={workflowState.escalationDepositStatus}
+            escalationAvmStatus={workflowState.escalationAvmStatus}
+            ownerAttemptedAttom={workflowState.ownerAttemptedAttom}
+            manualAppraisalStatus={workflowState.manualAppraisalStatus}
+            manualAppraisalFmv={workflowState.manualAppraisalFmv}
+            latestVerifiedFmv={workflowState.latestVerifiedFmv}
+            fmvVerificationSource={workflowState.fmvVerificationSource}
+            liveIneligiblePhase={workflowState.liveIneligiblePhase}
+            linkedDealId={linkedDeal?.deal_id ?? null}
+            attomScreeningCompletedAt={workflowState.attomScreeningCompletedAt}
+            attomEstimatedDebt={workflowState.attomEstimatedDebt}
+            ownerDeclaredDebt={workflowState.ownerDeclaredDebt}
+            debtDiscrepancySeverity={workflowState.debtDiscrepancySeverity}
+            debtDiscrepancyDelta={workflowState.debtDiscrepancyDelta}
+          />
+        )}
+
+        {/* ── D. Secured debt summary — owner only ── */}
+        {row.has_secured_property_debt === true && (
+          <div className="rounded-lg border overflow-hidden">
+            <div className="bg-muted/40 px-4 py-3 border-b">
+              <h2 className="text-sm font-semibold">Secured debt</h2>
+            </div>
+            <div className="p-4 grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+              <div>
+                <div className="text-muted-foreground text-xs">Secured debt declared</div>
+                <div className="font-medium">Yes</div>
+              </div>
+              {row.secured_property_debt_amount != null && (
+                <div>
+                  <div className="text-muted-foreground text-xs">Outstanding balance</div>
+                  <div className="font-medium">
+                    {new Intl.NumberFormat("en-US", {
+                      style: "currency",
+                      currency: "USD",
+                      maximumFractionDigits: 0,
+                    }).format(row.secured_property_debt_amount)}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── E. Base property data (normalized from RentCast) ── */}
+        {ownerPropertyRecord && (
+          <PropertyRecordSections record={ownerPropertyRecord} audience="owner" />
+        )}
+
+        {/* ── E. Owner information & documents (workflow, deal, docs, intake) ── */}
         <PropertyDetailClient
           property={property}
           linkedDeal={linkedDeal}
@@ -287,6 +648,10 @@ export default async function PropertyDetailPage({ params }: PageProps) {
           workflowState={workflowState}
           activityEntries={activityEntries}
           enrichment={ownerEnrichment}
+          hideAddressCard
+          hideWorkflowWidget
+          hideValuationCards
+          hideBackLink
         />
       </main>
     </div>

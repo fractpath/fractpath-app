@@ -88,13 +88,38 @@ export async function GET(_req: Request, ctx: { params: Promise<Params> }) {
     }
   }
 
+  // owner→buyer flow: buyer arrives via invite before buyer_user_id is stamped.
+  // Mirror the isInvitedOwner check but for intended_role = "buyer".
+  let isInvitedBuyer = false;
+  if (email && !isBuyer) {
+    const { data: buyerInvite, error: buyerInviteErr } = await (
+      svc.from("thread_invites") as any
+    )
+      .select("id,intended_role,expires_at")
+      .eq("thread_id", threadId)
+      .eq("invitee_email", email)
+      .eq("intended_role", "buyer")
+      .limit(1)
+      .maybeSingle();
+
+    if (buyerInviteErr) return jsonError(buyerInviteErr.message, 500);
+
+    if (buyerInvite) {
+      const notExpired =
+        !buyerInvite.expires_at ||
+        new Date(buyerInvite.expires_at) > new Date();
+      isInvitedBuyer = notExpired;
+    }
+  }
+
   const canView =
     isBuyer ||
     isThreadOwner ||
     isCreator ||
     isPropertyOwner ||
     isOwnerParticipant ||
-    isInvitedOwner;
+    isInvitedOwner ||
+    isInvitedBuyer;
 
   if (!canView) {
     return jsonError("Forbidden", 403);

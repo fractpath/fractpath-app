@@ -55,12 +55,16 @@ export async function GET() {
   const svc = createServiceClient();
   const email = user.email?.toLowerCase() ?? null;
 
+  // created_by_user_id is excluded when claim_released_at IS NOT NULL to prevent
+  // a released property from reappearing via the creator bridge after an owner
+  // releases their claim (owner_user_id and claimed_by_user_id are already null
+  // post-release, so only the creator bridge survives without this guard).
   const { data: ownedData, error: ownedErr } = await (
     svc.from("properties") as any
   )
     .select(OWNED_SELECT)
     .or(
-      `owner_user_id.eq.${user.id},created_by_user_id.eq.${user.id},claimed_by_user_id.eq.${user.id}`,
+      `owner_user_id.eq.${user.id},claimed_by_user_id.eq.${user.id},and(created_by_user_id.eq.${user.id},claim_released_at.is.null)`,
     )
     .order("updated_at", { ascending: false });
 
@@ -77,6 +81,10 @@ export async function GET() {
   {
     const threadIdSet = new Set<string>();
     const grantedDealIdSet = new Set<string>();
+    // Tracks which thread IDs are backed by a direct email invite.
+    // Used to prefer invite-backed threads in threadByPropertyId so that
+    // claim_thread_id always points to the invite thread when one exists.
+    const inviteBackedThreadIds = new Set<string>();
 
     if (email) {
       const { data: invites, error: invitesErr } = await (
@@ -84,7 +92,8 @@ export async function GET() {
       )
         .select("thread_id, invitee_email, intended_role, expires_at")
         .eq("invitee_email", email)
-        .eq("intended_role", "owner");
+        .eq("intended_role", "owner")
+        .is("declined_at", null);
 
       if (invitesErr) return jsonError(invitesErr.message, 500);
 
@@ -93,6 +102,7 @@ export async function GET() {
           !inv?.expires_at || new Date(inv.expires_at) > new Date();
         if (notExpired && inv?.thread_id) {
           threadIdSet.add(inv.thread_id);
+          inviteBackedThreadIds.add(inv.thread_id);
         }
       }
     }
@@ -150,6 +160,22 @@ export async function GET() {
       }
     }
 
+    // Remove threads this user has already dismissed ("Not your property?").
+    // A single query covers all four bridges — the dismissal table is the
+    // universal per-user, per-thread decline record.
+    if (threadIdSet.size > 0) {
+      const { data: dismissals } = await (
+        svc.from("thread_claim_dismissals") as any
+      )
+        .select("thread_id")
+        .eq("user_id", user.id)
+        .in("thread_id", Array.from(threadIdSet));
+
+      for (const d of dismissals ?? []) {
+        if (d?.thread_id) threadIdSet.delete(d.thread_id);
+      }
+    }
+
     const threadIds = Array.from(threadIdSet);
 
     if (threadIds.length > 0) {
@@ -178,7 +204,11 @@ export async function GET() {
         const threadByPropertyId = new Map<string, any>();
         for (const thread of threads ?? []) {
           if (!thread?.property_id) continue;
-          if (!threadByPropertyId.has(thread.property_id)) {
+          const existing = threadByPropertyId.get(thread.property_id);
+          // Prefer invite-backed threads so claim_thread_id and has_owner_invite stay
+          // aligned. Without this, a non-invite thread encountered first would win the
+          // slot, making has_owner_invite false even when a valid invite exists.
+          if (!existing || (!inviteBackedThreadIds.has(existing.id) && inviteBackedThreadIds.has(thread.id))) {
             threadByPropertyId.set(thread.property_id, thread);
           }
         }
@@ -191,6 +221,9 @@ export async function GET() {
               claim_thread_id: thread?.id ?? null,
               claim_deal_id: thread?.deal_id ?? null,
               claim_thread_status: thread?.status ?? null,
+              has_owner_invite: thread?.id
+                ? inviteBackedThreadIds.has(thread.id)
+                : false,
             };
           })
           .filter((p: any) => {
@@ -261,6 +294,7 @@ export async function GET() {
           claim_thread_id: r.claim_thread_id ?? null,
           claim_deal_id: r.claim_deal_id ?? null,
           claim_thread_status: r.claim_thread_status ?? null,
+          has_owner_invite: r.has_owner_invite ?? false,
         }),
       );
     }
@@ -340,6 +374,43 @@ export async function GET() {
           rows = rows.map((r: any) => {
             const thumb = thumbnailMap.get(r.id);
             return thumb !== undefined ? { ...r, cover_image_url: thumb } : r;
+          });
+        }
+      } catch {
+        // best-effort — do not fail the response
+      }
+    }
+  }
+
+  // Enrich with owner hero photo — priority over vendor enrichment thumbnail
+  // Hero priority: owner-designated hero > first active owner photo > cover_image_url (enrichment)
+  {
+    const ownedIds = rows.map((r: any) => r.id).filter(Boolean);
+    if (ownedIds.length > 0) {
+      try {
+        const { data: photoRows } = await (svc.from("property_photos") as any)
+          .select("property_id, public_url, is_hero, sort_order, created_at")
+          .in("property_id", ownedIds)
+          .is("removed_at", null)
+          .order("sort_order", { ascending: true })
+          .order("created_at", { ascending: true });
+
+        const heroByPropertyId = new Map<string, string>();
+        const firstByPropertyId = new Map<string, string>();
+        for (const photo of photoRows ?? []) {
+          if (!photo?.property_id) continue;
+          if (photo.is_hero && !heroByPropertyId.has(photo.property_id)) {
+            heroByPropertyId.set(photo.property_id, photo.public_url);
+          }
+          if (!firstByPropertyId.has(photo.property_id)) {
+            firstByPropertyId.set(photo.property_id, photo.public_url);
+          }
+        }
+
+        if (heroByPropertyId.size > 0 || firstByPropertyId.size > 0) {
+          rows = rows.map((r: any) => {
+            const heroUrl = heroByPropertyId.get(r.id) ?? firstByPropertyId.get(r.id) ?? null;
+            return heroUrl ? { ...r, hero_photo_url: heroUrl } : r;
           });
         }
       } catch {

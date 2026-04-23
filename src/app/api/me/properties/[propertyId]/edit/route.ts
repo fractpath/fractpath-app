@@ -52,7 +52,17 @@ export async function PATCH(
     .maybeSingle();
 
   if (!existing) return jsonError("Not found", 404);
-  // Note: edits after verification may require re-review in a future workflow.
+
+  // Archived properties are fully locked — no edits or uploads.
+  if (existing.status === "archived") {
+    return jsonError("Archived properties cannot be modified.", 403);
+  }
+
+  // Fact-field edits (address, intake, debt declaration, proposal prefs) are
+  // restricted to unverified properties only.  Document/photo uploads are
+  // allowed for any non-archived property so owners can keep their files
+  // current during review and after a deal is accepted.
+  const allowFactEdits: boolean = existing.status === "unverified";
 
   let formData: FormData;
   try {
@@ -61,132 +71,138 @@ export async function PATCH(
     return jsonError("Expected multipart form data", 400);
   }
 
-  const address_line1 = String(formData.get("address_line1") ?? "").trim();
-  const address_line2 = String(formData.get("address_line2") ?? "").trim();
-  const city = String(formData.get("city") ?? "").trim();
-  const state = String(formData.get("state") ?? "").trim();
-  const postal_code = String(formData.get("postal_code") ?? "").trim();
+  // ── Fact-field update (unverified properties only) ────────────────────────
 
-  if (!address_line1) return jsonError("Street address is required", 422);
-  if (!state) return jsonError("State is required", 422);
-  if (!postal_code) return jsonError("Zip code is required", 422);
+  if (allowFactEdits) {
+    const address_line1 = String(formData.get("address_line1") ?? "").trim();
+    const address_line2 = String(formData.get("address_line2") ?? "").trim();
+    const city = String(formData.get("city") ?? "").trim();
+    const state = String(formData.get("state") ?? "").trim();
+    const postal_code = String(formData.get("postal_code") ?? "").trim();
 
-  const displayParts = [address_line1, address_line2, city, state, postal_code].filter(Boolean).join(", ");
-  const computed_normalized = normalizeAddress(displayParts);
+    if (!address_line1) return jsonError("Street address is required", 422);
+    if (!state) return jsonError("State is required", 422);
+    if (!postal_code) return jsonError("Zip code is required", 422);
 
-  // Build update payload
-  const updatePayload: Record<string, any> = {
-    address_line1,
-    address_line2: address_line2 || null,
-    city: city || null,
-    state,
-    postal_code,
-    normalized_address: computed_normalized || null,
-  };
+    const displayParts = [address_line1, address_line2, city, state, postal_code].filter(Boolean).join(", ");
+    const computed_normalized = normalizeAddress(displayParts);
 
-  // Debt declaration update (optional during edit)
-  const hasSecuredDebtRaw = formData.get("has_secured_debt");
-  if (hasSecuredDebtRaw === "true" || hasSecuredDebtRaw === "false") {
-    const hasSecuredDebt = hasSecuredDebtRaw === "true";
-    updatePayload.has_secured_property_debt = hasSecuredDebt;
-    updatePayload.secured_debt_verification_status = hasSecuredDebt
-      ? "pending"
-      : "not_applicable";
+    // Build update payload
+    const updatePayload: Record<string, any> = {
+      address_line1,
+      address_line2: address_line2 || null,
+      city: city || null,
+      state,
+      postal_code,
+      normalized_address: computed_normalized || null,
+    };
 
-    if (hasSecuredDebt) {
-      const amountRaw = formData.get("secured_debt_amount");
-      if (amountRaw !== null) {
-        const amount = parseFloat(String(amountRaw));
-        if (!isNaN(amount) && amount >= 0) {
-          updatePayload.secured_property_debt_amount = amount;
+    // Debt declaration update (optional during edit)
+    const hasSecuredDebtRaw = formData.get("has_secured_debt");
+    if (hasSecuredDebtRaw === "true" || hasSecuredDebtRaw === "false") {
+      const hasSecuredDebt = hasSecuredDebtRaw === "true";
+      updatePayload.has_secured_property_debt = hasSecuredDebt;
+      updatePayload.secured_debt_verification_status = hasSecuredDebt
+        ? "pending"
+        : "not_applicable";
+
+      if (hasSecuredDebt) {
+        const amountRaw = formData.get("secured_debt_amount");
+        if (amountRaw !== null) {
+          const amount = parseFloat(String(amountRaw));
+          if (!isNaN(amount) && amount >= 0) {
+            updatePayload.secured_property_debt_amount = amount;
+          }
         }
+
+        if (formData.get("secured_debt_certified") === "true") {
+          const nowIso = new Date().toISOString();
+          const freshUntilIso = new Date(
+            Date.now() + 90 * 24 * 60 * 60 * 1000,
+          ).toISOString();
+
+          updatePayload.secured_debt_certified_at = nowIso;
+          updatePayload.secured_debt_last_verified_at = nowIso;
+          updatePayload.secured_debt_fresh_until = freshUntilIso;
+        }
+      } else {
+        // Clearing debt declaration
+        updatePayload.secured_property_debt_amount = null;
+        updatePayload.secured_debt_certified_at = null;
+        updatePayload.secured_debt_last_verified_at = null;
+        updatePayload.secured_debt_fresh_until = null;
       }
+    }
 
-      if (formData.get("secured_debt_certified") === "true") {
-        const nowIso = new Date().toISOString();
-        const freshUntilIso = new Date(
-          Date.now() + 90 * 24 * 60 * 60 * 1000,
-        ).toISOString();
+    // Sprint 16 intake fields — all optional during edit; only update when provided
+    function strField(key: string): string | null {
+      const v = String(formData.get(key) ?? "").trim();
+      return v === "" ? null : v;
+    }
+    function numField(key: string): number | null {
+      const v = String(formData.get(key) ?? "").trim();
+      if (v === "") return null;
+      const n = parseFloat(v.replace(/[^0-9.]/g, ""));
+      return isNaN(n) ? null : n;
+    }
 
-        updatePayload.secured_debt_certified_at = nowIso;
-        updatePayload.secured_debt_last_verified_at = nowIso;
-        updatePayload.secured_debt_fresh_until = freshUntilIso;
+    const intakeFields: Record<string, any> = {
+      ownership_type: strField("ownership_type"),
+      occupancy_use: strField("occupancy_use"),
+      occupancy_use_other: strField("occupancy_use_other"),
+      major_condition_issue: strField("major_condition_issue"),
+      major_condition_issue_details: strField("major_condition_issue_details"),
+      known_liens_and_claims: (() => {
+        const vals = formData
+          .getAll("known_liens_and_claims")
+          .map((v) => String(v).trim())
+          .filter(Boolean);
+        return vals.length > 0 ? vals : null;
+      })(),
+      total_known_debt_amount: numField("total_known_debt_amount"),
+      total_known_debt_confidence: strField("total_known_debt_confidence"),
+      debt_statement_availability: strField("debt_statement_availability"),
+      title_claims_known: strField("title_claims_known"),
+      title_claims_details: strField("title_claims_details"),
+      owner_stated_fmv: numField("owner_stated_fmv"),
+      owner_stated_fmv_confidence: strField("owner_stated_fmv_confidence"),
+      owner_stated_fmv_source: strField("owner_stated_fmv_source"),
+      owner_stated_fmv_source_other: strField("owner_stated_fmv_source_other"),
+      willing_to_proceed_formal_review: strField("willing_to_proceed_formal_review"),
+    };
+
+    for (const [k, v] of Object.entries(intakeFields)) {
+      if (v !== null) updatePayload[k] = v;
+    }
+
+    // --- Proposal preferences (optional during edit; only update when sent) ---
+    const proposalInterestStatusEdit = strField("proposal_interest_status");
+    const visibilityPrefEdit = strField("visibility_preference");
+    const proposalAcknowledgedEdit = formData.get("proposal_preferences_acknowledged") === "true";
+    if (proposalInterestStatusEdit === "not_interested" || proposalInterestStatusEdit === "interested_after_verification") {
+      updatePayload.proposal_interest_status = proposalInterestStatusEdit;
+      updatePayload.visibility_preference =
+        proposalInterestStatusEdit === "interested_after_verification"
+          ? (visibilityPrefEdit === "private" || visibilityPrefEdit === "matched" || visibilityPrefEdit === "public"
+              ? visibilityPrefEdit
+              : "private")
+          : "private";
+      if (proposalInterestStatusEdit === "interested_after_verification" && proposalAcknowledgedEdit) {
+        updatePayload.proposal_preferences_acknowledged_at = new Date().toISOString();
       }
-    } else {
-      // Clearing debt declaration
-      updatePayload.secured_property_debt_amount = null;
-      updatePayload.secured_debt_certified_at = null;
-      updatePayload.secured_debt_last_verified_at = null;
-      updatePayload.secured_debt_fresh_until = null;
     }
-  }
 
-  // Sprint 16 intake fields — all optional during edit; only update when provided
-  function strField(key: string): string | null {
-    const v = String(formData.get(key) ?? "").trim();
-    return v === "" ? null : v;
-  }
-  function numField(key: string): number | null {
-    const v = String(formData.get(key) ?? "").trim();
-    if (v === "") return null;
-    const n = parseFloat(v.replace(/[^0-9.]/g, ""));
-    return isNaN(n) ? null : n;
-  }
+    const { error: updateErr } = await (svc.from("properties") as any)
+      .update(updatePayload)
+      .eq("id", propertyId)
+      .or(
+        `owner_user_id.eq.${user.id},created_by_user_id.eq.${user.id},claimed_by_user_id.eq.${user.id}`,
+      );
 
-  const intakeFields: Record<string, any> = {
-    ownership_type: strField("ownership_type"),
-    occupancy_use: strField("occupancy_use"),
-    occupancy_use_other: strField("occupancy_use_other"),
-    major_condition_issue: strField("major_condition_issue"),
-    major_condition_issue_details: strField("major_condition_issue_details"),
-    known_liens_and_claims: (() => {
-      const vals = formData
-        .getAll("known_liens_and_claims")
-        .map((v) => String(v).trim())
-        .filter(Boolean);
-      return vals.length > 0 ? vals : null;
-    })(),
-    total_known_debt_amount: numField("total_known_debt_amount"),
-    total_known_debt_confidence: strField("total_known_debt_confidence"),
-    debt_statement_availability: strField("debt_statement_availability"),
-    title_claims_known: strField("title_claims_known"),
-    title_claims_details: strField("title_claims_details"),
-    owner_stated_fmv: numField("owner_stated_fmv"),
-    owner_stated_fmv_confidence: strField("owner_stated_fmv_confidence"),
-    owner_stated_fmv_source: strField("owner_stated_fmv_source"),
-    owner_stated_fmv_source_other: strField("owner_stated_fmv_source_other"),
-    willing_to_proceed_formal_review: strField("willing_to_proceed_formal_review"),
-  };
+    if (updateErr) return jsonError(updateErr.message, 500);
+  } // end allowFactEdits
 
-  for (const [k, v] of Object.entries(intakeFields)) {
-    if (v !== null) updatePayload[k] = v;
-  }
-
-  // --- Proposal preferences (optional during edit; only update when sent) ---
-  const proposalInterestStatusEdit = strField("proposal_interest_status");
-  const visibilityPrefEdit = strField("visibility_preference");
-  const proposalAcknowledgedEdit = formData.get("proposal_preferences_acknowledged") === "true";
-  if (proposalInterestStatusEdit === "not_interested" || proposalInterestStatusEdit === "interested_after_verification") {
-    updatePayload.proposal_interest_status = proposalInterestStatusEdit;
-    updatePayload.visibility_preference =
-      proposalInterestStatusEdit === "interested_after_verification"
-        ? (visibilityPrefEdit === "private" || visibilityPrefEdit === "matched" || visibilityPrefEdit === "public"
-            ? visibilityPrefEdit
-            : "private")
-        : "private";
-    if (proposalInterestStatusEdit === "interested_after_verification" && proposalAcknowledgedEdit) {
-      updatePayload.proposal_preferences_acknowledged_at = new Date().toISOString();
-    }
-  }
-
-  const { error: updateErr } = await (svc.from("properties") as any)
-    .update(updatePayload)
-    .eq("id", propertyId)
-    .or(
-      `owner_user_id.eq.${user.id},created_by_user_id.eq.${user.id},claimed_by_user_id.eq.${user.id}`,
-    );
-
-  if (updateErr) return jsonError(updateErr.message, 500);
+  // ── Document / photo uploads (all non-archived properties) ────────────────
 
   // Process verification doc re-uploads (selfie, drivers_license, utility_bill)
   for (const docType of ALLOWED_DOC_TYPES) {

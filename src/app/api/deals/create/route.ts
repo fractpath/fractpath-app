@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import { computeDealAdapter as computeDeal } from "@/lib/computeAdapter";
 import { insertDealSnapshot } from "@/lib/dealSnapshotDb";
 import { ensureScenario } from "@/lib/defaultScenario";
 import { assertNotRealtor } from "@/lib/authz";
 import { CONTRACT_VERSION, SCHEMA_VERSION } from "@/lib/contractVersion";
 import { normalizeCanonicalInputsFromUnknown } from "@/lib/normalizeCanonicalInputs";
+import { propertyHasActiveDeal } from "@/lib/deal/activeDealCheck";
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
@@ -37,6 +42,41 @@ export async function POST(request: NextRequest) {
       body = {};
     }
 
+    // Optional: propertyId can be passed to pre-link a property and enforce
+    // the one-active-deal-per-property business rule.
+    const rawPropertyId =
+      typeof (body as any)?.propertyId === "string"
+        ? ((body as any).propertyId as string).trim()
+        : null;
+
+    const propertyId =
+      rawPropertyId && UUID_RE.test(rawPropertyId) ? rawPropertyId : null;
+
+    const svc = createServiceClient();
+
+    // ── Active-deal guard ───────────────────────────────────────────────────
+    // If a property is specified, block creation when it already has a live deal.
+    if (propertyId) {
+      let hasActive: boolean;
+      try {
+        hasActive = await propertyHasActiveDeal(svc, propertyId);
+      } catch (checkErr: any) {
+        console.error("ACTIVE_DEAL_CHECK_FAILED", {
+          propertyId,
+          userId: user.id,
+          error: checkErr?.message,
+        });
+        return jsonError("Could not verify deal eligibility for this property.", 500);
+      }
+
+      if (hasActive) {
+        return jsonError(
+          "This property already has an active deal in progress.",
+          409,
+        );
+      }
+    }
+
     const normalized = normalizeCanonicalInputsFromUnknown(body);
 
     const hasInputs =
@@ -66,6 +106,54 @@ export async function POST(request: NextRequest) {
         },
         { status: 500 },
       );
+    }
+
+    // ── Pre-link property via DEAL_HEADER_UPDATED event ─────────────────────
+    // When propertyId is supplied (deep-link from public property page),
+    // immediately emit a header event so the deal page shows the property
+    // pre-selected without any further action from the user.
+    if (propertyId) {
+      try {
+        // Fetch public-safe address columns only
+        const { data: propRow } = await (svc.from("properties") as any)
+          .select("address_line1, address_line2, city, state, postal_code, status")
+          .eq("id", propertyId)
+          .maybeSingle();
+
+        let displayAddress = "";
+        if (propRow) {
+          const parts: string[] = [];
+          if (propRow.address_line1) parts.push(propRow.address_line1);
+          if (propRow.address_line2) parts.push(propRow.address_line2);
+          const csz: string[] = [];
+          if (propRow.city) csz.push(propRow.city);
+          if (propRow.state) csz.push(propRow.state);
+          if (propRow.postal_code) csz.push(propRow.postal_code);
+          if (csz.length) parts.push(csz.join(", "));
+          displayAddress = parts.join(", ");
+        }
+
+        await (svc.from("deal_events") as any).insert({
+          deal_id: dealId,
+          event_type: "DEAL_HEADER_UPDATED",
+          payload: {
+            property_id: propertyId,
+            display_address: displayAddress,
+            property_status: propRow?.status ?? null,
+            title: null,
+            ownership_status: null,
+          },
+          created_by: user.id,
+        });
+      } catch (headerErr: any) {
+        // Non-fatal: the deal is created; property linking is cosmetic at this stage.
+        console.error("DEAL_HEADER_PRELINK_FAILED", {
+          dealId,
+          propertyId,
+          userId: user.id,
+          error: headerErr?.message,
+        });
+      }
     }
 
     if (!hasInputs) {
