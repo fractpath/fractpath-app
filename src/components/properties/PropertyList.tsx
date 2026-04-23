@@ -336,18 +336,16 @@ export function PropertyList() {
                         >
                           Claim & verify
                         </LoadingButton>
-                        {p.has_owner_invite && (
-                          <button
-                            className="text-xs text-muted-foreground underline"
-                            disabled={!!decliningId}
-                            onClick={() => {
-                              setNotMyPropertyId(p.claim_thread_id ?? null);
-                              setNotMyPropertyConfirmOpen(true);
-                            }}
-                          >
-                            Not your property?
-                          </button>
-                        )}
+                        <button
+                          className="text-xs text-muted-foreground underline"
+                          disabled={!!decliningId}
+                          onClick={() => {
+                            setNotMyPropertyId(p.claim_thread_id ?? null);
+                            setNotMyPropertyConfirmOpen(true);
+                          }}
+                        >
+                          Not your property?
+                        </button>
                       </div>
                     ) : (
                       <>

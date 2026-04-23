@@ -23,12 +23,10 @@ export async function POST(
 
   if (authErr || !user) return json(401, { error: "Unauthorized" });
 
-  const email = user.email?.toLowerCase() ?? null;
-  if (!email) return json(400, { error: "User has no email" });
-
   const svc = createServiceClient();
+  const email = user.email?.toLowerCase() ?? null;
 
-  // 1) Load thread — we need deal_id and buyer_user_id to notify the submitter.
+  // 1) Load thread — needed for notification and claim-state guard.
   const { data: thread, error: tErr } = await (svc.from("deal_threads") as any)
     .select("id, deal_id, property_id, buyer_user_id, owner_user_id, status")
     .eq("id", threadId)
@@ -37,27 +35,11 @@ export async function POST(
   if (tErr) return json(500, { error: tErr.message });
   if (!thread) return json(404, { error: "Thread not found" });
 
-  // 2) Find the invite for this user on this thread.
-  const { data: invite, error: invErr } = await (svc.from("thread_invites") as any)
-    .select("id, intended_role, expires_at, used_at, declined_at")
-    .eq("thread_id", threadId)
-    .eq("invitee_email", email)
-    .eq("intended_role", "owner")
-    .is("declined_at", null)
-    .limit(1)
-    .maybeSingle();
-
-  if (invErr) return json(500, { error: invErr.message });
-  if (!invite) {
-    return json(404, {
-      error: "No pending owner invite found for this thread",
-    });
-  }
-
-  // Guard: do not allow decline if the user has already claimed the property.
+  // 2) Guard: do not allow decline if the user has already claimed the property.
+  //    They should use Release Claim instead.
   if (thread.property_id) {
     const { data: prop } = await (svc.from("properties") as any)
-      .select("owner_user_id, claimed_by_user_id, ownership_status")
+      .select("owner_user_id, claimed_by_user_id")
       .eq("id", thread.property_id)
       .maybeSingle();
 
@@ -72,14 +54,31 @@ export async function POST(
     }
   }
 
-  // 3) Mark the invite as declined (per-recipient — property stays unclaimed).
-  const { error: declineErr } = await (svc.from("thread_invites") as any)
-    .update({ declined_at: new Date().toISOString() })
-    .eq("id", invite.id);
+  // 3) Insert a thread_claim_dismissal — the universal per-user, per-thread
+  //    "not my property" record. Works for ALL claimable-card bridges:
+  //    invite, participant, owner_user_id, and access grant.
+  //    ON CONFLICT DO NOTHING makes this idempotent.
+  const { error: dismissalErr } = await (
+    svc.from("thread_claim_dismissals") as any
+  ).upsert(
+    { thread_id: threadId, user_id: user.id },
+    { onConflict: "thread_id,user_id", ignoreDuplicates: true },
+  );
 
-  if (declineErr) return json(500, { error: declineErr.message });
+  if (dismissalErr) return json(500, { error: dismissalErr.message });
 
-  // 4) Write a deal_events entry so the deal submitter sees this in-app.
+  // 4) If an invite-backed record also exists for this user+thread, mark it
+  //    declined for backward compatibility (invite filter already checks declined_at).
+  if (email) {
+    await (svc.from("thread_invites") as any)
+      .update({ declined_at: new Date().toISOString() })
+      .eq("thread_id", threadId)
+      .eq("invitee_email", email)
+      .eq("intended_role", "owner")
+      .is("declined_at", null);
+  }
+
+  // 5) Write a deal_events entry so the deal submitter sees this in-app.
   const dealId: string | null = thread.deal_id ?? null;
   if (dealId) {
     await (svc.from("deal_events") as any)
@@ -97,7 +96,7 @@ export async function POST(
       })
       .select();
 
-    // 5) Resolve buyer (deal submitter) contact and send email — non-fatal.
+    // 6) Resolve buyer (deal submitter) contact and send email — non-fatal.
     try {
       const buyerUserId: string | null = thread.buyer_user_id ?? null;
       if (buyerUserId) {

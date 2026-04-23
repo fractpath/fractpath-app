@@ -82,7 +82,8 @@ export async function GET() {
     const threadIdSet = new Set<string>();
     const grantedDealIdSet = new Set<string>();
     // Tracks which thread IDs are backed by a direct email invite.
-    // Only invite-backed claimable cards support "Not My Property".
+    // Used to prefer invite-backed threads in threadByPropertyId so that
+    // claim_thread_id always points to the invite thread when one exists.
     const inviteBackedThreadIds = new Set<string>();
 
     if (email) {
@@ -156,6 +157,22 @@ export async function GET() {
 
       for (const row of grantThreads ?? []) {
         if (row?.id) threadIdSet.add(row.id);
+      }
+    }
+
+    // Remove threads this user has already dismissed ("Not your property?").
+    // A single query covers all four bridges — the dismissal table is the
+    // universal per-user, per-thread decline record.
+    if (threadIdSet.size > 0) {
+      const { data: dismissals } = await (
+        svc.from("thread_claim_dismissals") as any
+      )
+        .select("thread_id")
+        .eq("user_id", user.id)
+        .in("thread_id", Array.from(threadIdSet));
+
+      for (const d of dismissals ?? []) {
+        if (d?.thread_id) threadIdSet.delete(d.thread_id);
       }
     }
 
