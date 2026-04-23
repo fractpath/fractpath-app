@@ -34,21 +34,6 @@ export async function POST(
   if (tErr) return json(500, { error: tErr.message });
   if (!thread) return json(404, { error: "Thread not found" });
 
-  // Guard: terminal threads cannot be used to claim a property.
-  // A closed/voided thread may still have stale invites or participant rows
-  // that would otherwise satisfy the auth check below.
-  const TERMINAL_THREAD_STATUSES = new Set([
-    "closed",
-    "closed_due_to_claim_release",
-    "voided_by_admin",
-  ]);
-  if (TERMINAL_THREAD_STATUSES.has(thread.status)) {
-    return json(409, {
-      error:
-        "This deal thread is no longer active. The property may still be claimable via a new offer.",
-    });
-  }
-
   if (!thread.property_id) {
     return json(400, { error: "Thread has no property" });
   }

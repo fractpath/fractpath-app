@@ -381,7 +381,7 @@ export function PropertyList() {
                             </button>
                           )}
                         {p.visibility === "owned" &&
-                          (p.status === "unverified" || p.status === "under_review") && (
+                          (p.status === "unverified" || p.status === "under_review" || p.status === "archived") && (
                             <button
                               className="text-sm text-muted-foreground underline"
                               onClick={() => setReleaseClaimTarget(p)}
