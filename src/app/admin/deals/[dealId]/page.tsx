@@ -1410,16 +1410,26 @@ export default async function AdminDealReviewPage({
           <div className="bg-red-50 px-4 py-2 text-sm font-medium border-b border-red-200 text-red-800">
             Danger zone
           </div>
-          <div className="p-4 flex items-start gap-4">
-            <div className="flex-1 space-y-1">
-              <p className="text-sm font-medium text-red-900">Delete this draft deal</p>
+          {events.length === 0 ? (
+            <div className="p-4 flex items-start gap-4">
+              <div className="flex-1 space-y-1">
+                <p className="text-sm font-medium text-red-900">Delete this draft deal</p>
+                <p className="text-xs text-muted-foreground">
+                  Permanently removes this orphan draft and all attached data (snapshots, access grants, stale threads).
+                  Only available for DRAFT deals with no audit history, no submitted proposals, and no signature packets.
+                </p>
+              </div>
+              <AdminDealDeleteButton dealId={dealId} />
+            </div>
+          ) : (
+            <div className="p-4 space-y-1">
+              <p className="text-sm font-medium text-red-900">Hard delete not available</p>
               <p className="text-xs text-muted-foreground">
-                Permanently removes this orphan draft and all attached data (snapshots, events, access grants, stale threads).
-                Only available for DRAFT deals with no submitted proposals and no signature packets.
+                This draft has append-only audit history ({events.length} event{events.length !== 1 ? "s" : ""}) and cannot be permanently deleted.
+                Use Void/Archive instead to close it without removing the audit trail.
               </p>
             </div>
-            <AdminDealDeleteButton dealId={dealId} />
-          </div>
+          )}
         </div>
       )}
 

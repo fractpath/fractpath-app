@@ -94,7 +94,23 @@ export async function POST(
     });
   }
 
+  // Block if any append-only deal_events exist for this deal.
+  // deal_events has an append-only trigger that unconditionally rejects deletes.
+  // A draft with events is not a true orphan — block hard delete and direct admin to void instead.
+  const { count: eventCount } = await (svc.from("deal_events") as any)
+    .select("id", { count: "exact", head: true })
+    .eq("deal_id", dealId);
+
+  if (eventCount && eventCount > 0) {
+    return json(409, {
+      error:
+        "This draft has audit history and cannot be permanently deleted. Void it instead.",
+    });
+  }
+
   // ── Safe to delete — cascade through dependents ──────────────────────────
+  // deal_events is intentionally NOT deleted: either it has 0 rows (skip is safe)
+  // or we already returned 409 above. Never attempt to delete from append-only tables.
 
   if (threadIds.length > 0) {
     await (svc.from("deal_proposals") as any).delete().in("thread_id", threadIds);
@@ -105,7 +121,6 @@ export async function POST(
   }
 
   await (svc.from("deal_access_grants") as any).delete().eq("deal_id", dealId);
-  await (svc.from("deal_events") as any).delete().eq("deal_id", dealId);
   await (svc.from("deal_snapshots") as any).delete().eq("deal_id", dealId);
 
   const { error: delErr } = await (svc.from("deals") as any).delete().eq("id", dealId);
