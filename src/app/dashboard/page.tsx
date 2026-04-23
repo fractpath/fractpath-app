@@ -1371,7 +1371,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
               href="/deal/new"
               className="inline-flex items-center rounded-md bg-foreground px-3 py-1.5 text-sm font-medium text-background"
             >
-              + Create Deal
+              Create Deal
             </Link>
           </div>
 

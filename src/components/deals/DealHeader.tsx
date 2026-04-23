@@ -193,7 +193,7 @@ export function DealHeader({
       <div className="border-t pt-6">
         <div className="flex items-center justify-between mb-3">
           <span className="text-sm font-semibold" data-testid="deal-property-label">
-            Property
+            Address
           </span>
           {!isDisabled && (
             <button

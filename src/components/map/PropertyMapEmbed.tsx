@@ -6,11 +6,6 @@ import { PropertyDiscoveryCard } from "@/components/property/PropertyDiscoveryCa
 
 const ANNAPOLIS: [number, number] = [-76.4922, 38.9784];
 const DEFAULT_ZOOM = 9;
-const IS_DEV = process.env.NODE_ENV !== "production";
-
-// Module-level counter: increments every time the map instance is constructed.
-// Persists across React re-renders; resets on HMR hot reload (intentional).
-let _mapInitCount = 0;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -34,14 +29,6 @@ function fmtAbbrev(n: number): string {
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-
-type DebugStats = {
-  initCount: number;
-  zoom: number;
-  tilesOk: number;
-  tileErrors: number;
-  markerCount: number;
-};
 
 type Props = {
   properties: DiscoveryProperty[];
@@ -84,15 +71,6 @@ export function PropertyMapEmbed({
     onMarkerClickRef.current = onMarkerClick;
   }, [onMarkerClick]);
 
-  // Dev-only debug stats
-  const [debugStats, setDebugStats] = useState<DebugStats>({
-    initCount: 0,
-    zoom: DEFAULT_ZOOM,
-    tilesOk: 0,
-    tileErrors: 0,
-    markerCount: 0,
-  });
-
   // ── Map initialization ─────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -102,13 +80,6 @@ export function PropertyMapEmbed({
     async function init() {
       const ml = (await import("maplibre-gl")).default;
       if (cancelled || !containerRef.current) return;
-
-      if (IS_DEV) {
-        _mapInitCount++;
-        const captured = _mapInitCount;
-        setDebugStats((prev) => ({ ...prev, initCount: captured }));
-        console.log(`[MapDebug] Map init #${captured}`);
-      }
 
       const map = new ml.Map({
         container: containerRef.current,
@@ -143,22 +114,6 @@ export function PropertyMapEmbed({
       map.addControl(new ml.NavigationControl({ showCompass: false }), "top-right");
 
       mapRef.current = map;
-
-      if (IS_DEV) {
-        map.on("zoom", () => {
-          const z = parseFloat(map.getZoom().toFixed(1));
-          setDebugStats((prev) => ({ ...prev, zoom: z }));
-        });
-        map.on("data", (e: any) => {
-          if (e.dataType === "tile") {
-            setDebugStats((prev) => ({ ...prev, tilesOk: prev.tilesOk + 1 }));
-          }
-        });
-        map.on("error", (e: any) => {
-          setDebugStats((prev) => ({ ...prev, tileErrors: prev.tileErrors + 1 }));
-          console.warn("[MapDebug] map error:", e?.error?.message ?? e?.error ?? e);
-        });
-      }
 
       map.on("load", () => {
         if (!cancelled) setMapReady(true);
@@ -240,10 +195,6 @@ export function PropertyMapEmbed({
         });
 
         markersRef.current.set(property.id, marker);
-      }
-
-      if (IS_DEV) {
-        setDebugStats((prev) => ({ ...prev, markerCount: markersRef.current.size }));
       }
 
       // Fit bounds once on first render — no animation to avoid unnecessary tile loads on mount
@@ -351,47 +302,6 @@ export function PropertyMapEmbed({
             onLoadPhotos={onLoadOverlayPhotos ?? (() => {})}
             onClose={onOverlayClose}
           />
-        </div>
-      )}
-
-      {/* Dev-only debug overlay — tree-shaken in production builds */}
-      {IS_DEV && mapReady && (
-        <div
-          style={{
-            position: "absolute",
-            bottom: 8,
-            left: 8,
-            background: "rgba(0,0,0,0.72)",
-            color: "#d4d4d8",
-            fontFamily: "ui-monospace, monospace",
-            fontSize: 11,
-            lineHeight: 1.6,
-            padding: "6px 10px",
-            borderRadius: 6,
-            pointerEvents: "none",
-            zIndex: 10,
-            whiteSpace: "nowrap",
-          }}
-        >
-          <div style={{ color: "#facc15", fontWeight: 700, marginBottom: 2 }}>⚙ MapDebug</div>
-          <div>
-            inits: <b style={{ color: "#fff" }}>{debugStats.initCount}</b>
-          </div>
-          <div>
-            zoom: <b style={{ color: "#fff" }}>{debugStats.zoom}</b>
-          </div>
-          <div>
-            tiles OK: <b style={{ color: "#4ade80" }}>{debugStats.tilesOk}</b>
-          </div>
-          <div>
-            tile errors:{" "}
-            <b style={{ color: debugStats.tileErrors > 0 ? "#f87171" : "#fff" }}>
-              {debugStats.tileErrors}
-            </b>
-          </div>
-          <div>
-            markers: <b style={{ color: "#fff" }}>{debugStats.markerCount}</b>
-          </div>
         </div>
       )}
     </div>
