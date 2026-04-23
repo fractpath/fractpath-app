@@ -169,7 +169,7 @@ export default async function VerifiedPropertiesPage() {
 
       <main className="mx-auto max-w-5xl px-4 py-10 space-y-6">
         <div className="flex items-center justify-between gap-4">
-          <h1 className="text-2xl font-semibold">Properties Open to Proposals</h1>
+          <h1 className="text-2xl font-semibold">Properties Open to Deals</h1>
           <div className="flex-shrink-0 flex items-center gap-2.5">
             <span className="text-sm text-muted-foreground hidden sm:block">
               Have a property in mind?
