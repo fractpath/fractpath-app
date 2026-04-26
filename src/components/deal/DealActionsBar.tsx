@@ -62,11 +62,13 @@ export function DealActionsBar({
     !!ownerProposalId &&
     ownerProposalStatus === "submitted";
 
-  // Buyer can withdraw only while their offer is still pending (before any counter)
+  // Buyer can withdraw only when their own offer is pending owner review.
+  // In pending_buyer (owner-to-buyer flow) the buyer is the RECIPIENT, not the sender,
+  // so Withdraw must never appear — the owner is the one waiting to be responded to.
   const canBuyerWithdraw =
     isBuyer &&
     locked &&
-    (activeThreadStatus === "pending_owner" || activeThreadStatus === "pending_buyer") &&
+    activeThreadStatus === "pending_owner" &&
     !!activeThreadId;
 
   async function handleOwnerDecision(decision: "accept" | "reject") {

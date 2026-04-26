@@ -213,8 +213,29 @@ export async function POST(
     }
   }
 
+  // owner→buyer flow: buyer_user_id is NULL until the buyer formally joins the thread.
+  // isInvitedBuyer covers the case where a matching invite row exists and hasn't expired,
+  // but the invite expires after 7 days and may not exist when the buyer arrives via a
+  // share link. The deal_access_grants row is written durably when the invite is sent,
+  // so it is the canonical signal that this user is the legitimately invited buyer.
+  let isPendingBuyerRecipient = false;
+  if (
+    !isBuyer && !isThreadOwner && !isPropertyOwner && !isInvitedOwner && !isInvitedBuyer &&
+    thread.status === "pending_buyer" &&
+    thread.buyer_user_id === null &&
+    user.id !== thread.owner_user_id
+  ) {
+    const { data: accessGrant } = await (svc.from("deal_access_grants") as any)
+      .select("role")
+      .eq("deal_id", thread.deal_id as string)
+      .eq("user_id", user.id)
+      .is("revoked_at", null)
+      .maybeSingle();
+    isPendingBuyerRecipient = !!accessGrant;
+  }
+
   const hasAccess =
-    isBuyer || isThreadOwner || isPropertyOwner || isInvitedOwner || isInvitedBuyer;
+    isBuyer || isThreadOwner || isPropertyOwner || isInvitedOwner || isInvitedBuyer || isPendingBuyerRecipient;
   if (!hasAccess) {
     return json(403, { ok: false, error: "Access denied" });
   }
