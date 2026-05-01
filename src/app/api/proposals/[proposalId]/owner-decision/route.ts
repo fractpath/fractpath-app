@@ -4,6 +4,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { getAppBaseUrlServer } from "@/lib/appBaseUrl";
 import { sendTemplateEmail } from "@/lib/email/sendTemplateEmail";
 import { evaluateDealTriage } from "@/lib/dealTriage";
+import { sendAdminAcceptedDealReviewNeededEmail } from "@/lib/email/adminNotifications";
 
 function json(status: number, body: any) {
   return NextResponse.json(body, { status });
@@ -442,6 +443,41 @@ export async function POST(
         logKey: "homeowner_offer_accepted_email",
       }),
     ]);
+
+    // ── Admin notification: deal accepted (best-effort) ──
+    try {
+      const [buyerResult, ownerResult] = await Promise.all([
+        finalBuyerUserId
+          ? svc.auth.admin.getUserById(finalBuyerUserId)
+          : Promise.resolve({ data: null }),
+        finalOwnerUserId
+          ? svc.auth.admin.getUserById(finalOwnerUserId)
+          : Promise.resolve({ data: null }),
+      ]);
+
+      const buyerEmail = normalizeEmail(
+        (buyerResult as any).data?.user?.email,
+      );
+      const ownerEmail = normalizeEmail(
+        (ownerResult as any).data?.user?.email,
+      );
+
+      await sendAdminAcceptedDealReviewNeededEmail({
+        dealId: resolvedDealId,
+        propertyAddress,
+        buyerEmail,
+        ownerEmail,
+      });
+
+      console.info("ADMIN_DEAL_ACCEPTED_NOTIFICATION_SENT", {
+        dealId: resolvedDealId,
+      });
+    } catch (notifErr: any) {
+      console.error("ADMIN_DEAL_ACCEPTED_NOTIFICATION_FAILED", {
+        dealId: resolvedDealId,
+        error: notifErr?.message,
+      });
+    }
 
     return json(200, {
       ok: true,

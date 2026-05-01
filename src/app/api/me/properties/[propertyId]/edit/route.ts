@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { enforceLimitsAndProcess } from "@/lib/uploads/documentProcessing";
 import { normalizeAddress } from "@/lib/propertyResolve";
+import { sendAdminPropertyVerificationNeededEmail } from "@/lib/email/adminNotifications";
 
 export const runtime = "nodejs";
 
@@ -205,6 +206,7 @@ export async function PATCH(
   // ── Document / photo uploads (all non-archived properties) ────────────────
 
   // Process verification doc re-uploads (selfie, drivers_license, utility_bill)
+  let identityDocUploaded = false;
   for (const docType of ALLOWED_DOC_TYPES) {
     const file = formData.get(docType);
     if (!file || !(file instanceof File) || file.size === 0) continue;
@@ -258,6 +260,8 @@ export async function PATCH(
     if (upsertErr) {
       return jsonError(`Document record failed for ${docType}: ${upsertErr.message}`, 500);
     }
+
+    identityDocUploaded = true;
   }
 
   // Process secured debt statement re-uploads (appended, not upserted)
@@ -363,6 +367,36 @@ export async function PATCH(
       doc_type: docType,
       ...result.meta,
     });
+  }
+
+  // ── Admin notification: identity verification documents uploaded (best-effort) ──
+  if (identityDocUploaded) {
+    try {
+      const { data: propInfo } = await (svc.from("properties") as any)
+        .select("address_line1, city, state")
+        .eq("id", propertyId)
+        .maybeSingle();
+
+      const parts = [
+        propInfo?.address_line1,
+        propInfo?.city,
+        propInfo?.state,
+      ].filter(Boolean);
+      const propertyAddress = parts.length > 0 ? parts.join(", ") : null;
+
+      await sendAdminPropertyVerificationNeededEmail({
+        propertyId,
+        propertyAddress,
+        ownerEmail: user.email ?? null,
+      });
+
+      console.info("ADMIN_VERIFICATION_NOTIFICATION_SENT", { propertyId });
+    } catch (notifErr: any) {
+      console.error("ADMIN_VERIFICATION_NOTIFICATION_FAILED", {
+        propertyId,
+        error: notifErr?.message,
+      });
+    }
   }
 
   return NextResponse.json({ ok: true });
