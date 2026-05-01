@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   CANONICAL_DEAL_TERM_DEFAULTS,
@@ -128,20 +128,45 @@ function NumberInput({
   suffix?: string;
   className?: string;
 }) {
+  // Draft string state lets users fully clear a field before typing a new value.
+  // The parent numeric `value` is only updated when the draft parses to a valid number.
+  // On blur, if the draft is still invalid, it resets to the last committed value.
+  const [draft, setDraft] = useState(() => String(value));
+  const committedRef = useRef(value);
+
+  // Sync draft when the parent resets or changes the value from outside (e.g., tab switch).
+  // Only update if the parent value differs from what we last committed, to avoid
+  // clobbering in-progress edits.
+  useEffect(() => {
+    if (value !== committedRef.current) {
+      committedRef.current = value;
+      setDraft(String(value));
+    }
+  }, [value]);
+
   return (
     <div className="flex items-center gap-1.5">
       {prefix && (
         <span className="text-sm text-muted-foreground">{prefix}</span>
       )}
       <input
-        type="number"
-        value={value}
-        min={min}
-        max={max}
-        step={step ?? 1}
+        type="text"
+        inputMode="decimal"
+        value={draft}
         onChange={(e) => {
-          const n = parseFloat(e.target.value);
-          if (Number.isFinite(n)) onChange(n);
+          const raw = e.target.value;
+          setDraft(raw);
+          const n = parseFloat(raw);
+          if (Number.isFinite(n)) {
+            committedRef.current = n;
+            onChange(n);
+          }
+        }}
+        onBlur={() => {
+          const n = parseFloat(draft);
+          if (!Number.isFinite(n)) {
+            setDraft(String(committedRef.current));
+          }
         }}
         className={`rounded-md border border-input bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring ${className ?? "w-32"}`}
       />
@@ -751,16 +776,11 @@ export function DealTermsModal({
 
   useEffect(() => {
     setMounted(true);
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";
     return () => {
-      document.removeEventListener("keydown", onKey);
       document.body.style.overflow = "";
     };
-  }, [onClose]);
+  }, []);
 
   const handleSave = async () => {
     setSaving(true);
@@ -796,9 +816,6 @@ export function DealTermsModal({
   const content = (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center sm:items-center bg-black/50 p-0 sm:p-4"
-      onClick={(e) => {
-        if (e.currentTarget === e.target) onClose();
-      }}
     >
       <div
         role="dialog"
