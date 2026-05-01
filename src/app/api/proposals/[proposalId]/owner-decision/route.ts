@@ -133,6 +133,7 @@ export async function POST(
 
   // owner_to_buyer flow: buyer arrives via invite with intended_role="buyer"
   let isInvitedBuyer = false;
+  let buyerInviteId: string | null = null;
   if (!isBuyer && !isOwnerSide && user.email) {
     const { data: buyerInvite } = await (svc.from("thread_invites") as any)
       .select("id, intended_role, expires_at")
@@ -146,6 +147,7 @@ export async function POST(
       const notExpired =
         !buyerInvite.expires_at || new Date(buyerInvite.expires_at) > new Date();
       isInvitedBuyer = notExpired;
+      if (notExpired) buyerInviteId = buyerInvite.id as string;
     }
   }
 
@@ -185,6 +187,16 @@ export async function POST(
       ok: false,
       error: "Cannot resolve deal for this proposal",
     });
+  }
+
+  // Fetch deal row — needed for lifecycle status checks
+  const { data: dealRow, error: dealFetchErr } = await (svc.from("deals") as any)
+    .select("id, status, accepted_at")
+    .eq("id", resolvedDealId)
+    .maybeSingle();
+
+  if (dealFetchErr || !dealRow) {
+    return json(404, { ok: false, error: "Deal not found" });
   }
 
   let canonicalHeader: Record<string, unknown> | undefined;
@@ -267,6 +279,14 @@ export async function POST(
   }
 
   if (decision === "accept") {
+    // Lifecycle guard: deal must be PROPOSED before it can become ACCEPTED
+    if (dealRow.status !== "PROPOSED") {
+      return json(409, {
+        ok: false,
+        error: `Deal must be PROPOSED to accept (current status: ${dealRow.status})`,
+      });
+    }
+
     const { data: existing } = await (svc.from("deal_events") as any)
       .select("id")
       .eq("deal_id", resolvedDealId)
@@ -317,16 +337,45 @@ export async function POST(
       return json(500, { ok: false, error: tUpdErr.message });
     }
 
-    // Advance deal row to ACCEPTED (DB trigger sets accepted_at; best-effort)
-    const { error: dealUpdErr } = await (svc.from("deals") as any)
+    // Mark matching buyer invite as used when invited buyer accepts
+    if (isInvitedBuyer && buyerInviteId) {
+      try {
+        await (svc.from("thread_invites") as any)
+          .update({ used_at: new Date().toISOString(), used_by_user_id: user.id })
+          .eq("id", buyerInviteId)
+          .is("used_at", null);
+      } catch (inviteErr: any) {
+        console.error("ACCEPT_INVITE_MARK_USED_FAILED", {
+          dealId: resolvedDealId,
+          inviteId: buyerInviteId,
+          error: inviteErr?.message,
+        });
+      }
+    }
+
+    // Advance deal PROPOSED → ACCEPTED (blocking; DB trigger sets accepted_at)
+    const { data: acceptedDeal, error: dealUpdErr } = await (svc.from("deals") as any)
       .update({ status: "ACCEPTED" })
       .eq("id", resolvedDealId)
-      .neq("status", "ACCEPTED");
+      .eq("status", "PROPOSED")
+      .select("id, status, accepted_at")
+      .maybeSingle();
 
     if (dealUpdErr) {
-      console.error("OWNER_DECISION_DEAL_STATUS_UPDATE_ERROR", {
+      return json(500, {
+        ok: false,
+        error: `Failed to mark deal ACCEPTED: ${dealUpdErr.message}`,
+      });
+    }
+
+    if (!acceptedDeal || acceptedDeal.status !== "ACCEPTED" || !acceptedDeal.accepted_at) {
+      console.error("OWNER_DECISION_DEAL_NOT_ACCEPTED", {
         dealId: resolvedDealId,
-        error: dealUpdErr.message,
+        deal: acceptedDeal,
+      });
+      return json(500, {
+        ok: false,
+        error: "Deal failed to reach ACCEPTED state with accepted_at timestamp",
       });
     }
 

@@ -440,6 +440,12 @@ export async function POST(
           },
           { onConflict: "deal_id,user_id" },
         );
+
+        // Link buyer_user_id on the thread now that we know the buyer's account
+        await (svc.from("deal_threads") as any)
+          .update({ buyer_user_id: inviteeUserId })
+          .eq("id", thread.id)
+          .is("buyer_user_id", null);
       }
     } catch (grantErr: any) {
       console.error("submit_offer_owner_to_buyer_grant_error", {
@@ -499,13 +505,30 @@ export async function POST(
   const { error: eventErr } = await (svc.from("deal_events") as any).insert({
     deal_id: dealId,
     event_type: "offer_submitted",
-    payload: { thread_id: thread.id, proposal_id: proposal.id, mode },
+    payload: {
+      thread_id: thread.id,
+      proposal_id: proposal.id,
+      mode,
+      intended_role: isOwnerToBuyer ? "buyer" : "owner",
+      ...(knownInviteeEmail ? { invitee_email: knownInviteeEmail } : {}),
+    },
     created_by: user.id,
   });
 
   if (eventErr) {
     console.error("submit_offer_event_insert_error", eventErr);
     return json(500, { error: eventErr.message });
+  }
+
+  // Transition deal DRAFT → PROPOSED now that an offer thread is live.
+  const { error: proposedErr } = await (svc.from("deals") as any)
+    .update({ status: "PROPOSED" })
+    .eq("id", dealId)
+    .eq("status", "DRAFT");
+
+  if (proposedErr) {
+    console.error("submit_offer_proposed_transition_error", proposedErr);
+    return json(500, { error: proposedErr.message });
   }
 
   const APP = getAppBaseUrlServer();

@@ -78,10 +78,14 @@ export function WaitingBanner({ threadId, threadStatus, isSender }: Props) {
             </span>
             <div>
               <div className="text-sm font-medium text-blue-900 dark:text-blue-100">
-                Waiting for the other party to respond
+                {isSender && threadStatus === "pending_buyer"
+                  ? "Offer sent to buyer"
+                  : "Waiting for the other party to respond"}
               </div>
               <div className="mt-0.5 text-xs text-blue-700 dark:text-blue-300">
-                Your proposal has been sent. You will be notified when they respond.
+                {isSender && threadStatus === "pending_buyer"
+                  ? "Your offer has been sent to the buyer. You will be notified when they respond."
+                  : "Your proposal has been sent. You will be notified when they respond."}
               </div>
             </div>
           </div>
