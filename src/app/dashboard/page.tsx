@@ -702,7 +702,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     grants.length > 0
       ? await supabase
           .from("deals")
-          .select("id, status, owner_user_id, mode, archived_at")
+          .select("id, status, owner_user_id, mode, archived_at, admin_voided_at")
           .in(
             "id",
             grants.map((g) => g.deal_id),
@@ -710,7 +710,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       : { data: [], error: null as any };
 
   const deals = ((dealsRes.data ?? []) as Record<string, any>[]).filter(
-    (d) => !d.archived_at,
+    (d) => !d.archived_at && !d.admin_voided_at,
   );
   const byId = new Map<string, Record<string, any>>();
   for (const d of deals) byId.set(d.id, d);
@@ -831,9 +831,10 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     if (extraIds.length > 0) {
       const [extraDealsRes, extraSnapsRes] = await Promise.all([
         (svc.from("deals") as any)
-          .select("id, owner_user_id, status, created_at, archived_at")
+          .select("id, owner_user_id, status, created_at, archived_at, admin_voided_at")
           .in("id", extraIds)
-          .is("archived_at", null),
+          .is("archived_at", null)
+          .is("admin_voided_at", null),
         (svc.from("deal_snapshots") as any)
           .select("deal_id, snapshot_json, created_at")
           .in("deal_id", extraIds)

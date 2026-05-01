@@ -5,6 +5,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { getDealEvents } from "@/lib/dealTimeline";
 import { AdminDealActions } from "@/components/admin/AdminDealActions";
 import { AdminDealDeleteButton } from "@/components/admin/AdminDealDeleteButton";
+import { AdminDealVoidButton } from "@/components/admin/AdminDealVoidButton";
 import { AdminDealServicingPanel } from "@/components/admin/AdminDealServicingPanel";
 import { AdminReopenNegotiationButton } from "@/components/admin/AdminReopenNegotiationButton";
 import { SignatureCard } from "@/components/deal/SignatureCard";
@@ -467,7 +468,7 @@ export default async function AdminDealReviewPage({
 
   // ── Fetch deal ──────────────────────────────────────────────────────────
   const { data: deal, error: dealErr } = await (svc.from("deals") as any)
-    .select("id, status, triage_status, triage_reason_tags, fmv_plausibility_flag, accepted_at, created_at, servicing_status, servicing_note, renegotiation_status")
+    .select("id, status, triage_status, triage_reason_tags, fmv_plausibility_flag, accepted_at, created_at, servicing_status, servicing_note, renegotiation_status, admin_voided_at, admin_voided_by, admin_void_reason")
     .eq("id", dealId)
     .maybeSingle();
 
@@ -721,6 +722,12 @@ export default async function AdminDealReviewPage({
             </p>
           </div>
           <div className="flex flex-wrap gap-1.5 items-center mt-1">
+            {/* Voided badge — shown prominently when admin_voided_at is set */}
+            {deal.admin_voided_at && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-orange-100 text-orange-800 ring-1 ring-orange-300">
+                Voided
+              </span>
+            )}
             {/* Canonical stage is the authoritative current-state label. */}
             <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
               {dealCanonical.meta.adminLabel}
@@ -1403,6 +1410,45 @@ export default async function AdminDealReviewPage({
           />
         </div>
       </div>
+
+      {/* ── Void deal ── */}
+      {!deal.admin_voided_at ? (
+        <div className="rounded-lg border border-orange-200 overflow-hidden">
+          <div className="bg-orange-50 px-4 py-2 text-sm font-medium border-b border-orange-200 text-orange-800">
+            Void deal
+          </div>
+          <div className="p-4 flex items-start gap-4">
+            <div className="flex-1 space-y-1">
+              <p className="text-sm font-medium text-orange-900">Void this deal for testing</p>
+              <p className="text-xs text-muted-foreground">
+                Closes all active threads and proposals without releasing the property owner claim or
+                changing property verification state. Use this to reset a test deal so the same
+                verified property can be used for a new owner-to-buyer flow.
+              </p>
+            </div>
+            <AdminDealVoidButton dealId={dealId} />
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-lg border border-orange-200 overflow-hidden">
+          <div className="bg-orange-50 px-4 py-2 text-sm font-medium border-b border-orange-200 text-orange-800">
+            Deal voided
+          </div>
+          <div className="p-4 space-y-1">
+            <p className="text-sm font-medium text-orange-900">
+              This deal was voided on {formatDate(deal.admin_voided_at)}
+            </p>
+            {deal.admin_void_reason && (
+              <p className="text-xs text-muted-foreground">
+                Reason: {deal.admin_void_reason}
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              All active threads and proposals were closed. The property owner claim was not affected.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* ── Danger zone (draft-only admin delete) ── */}
       {deal.status === "DRAFT" && !latestProposal && !sigData.packet && (

@@ -80,14 +80,14 @@ export default async function AdminDealsTriagePage({ searchParams }: PageProps) 
 
   let query = (svc.from("deals") as any)
     .select(
-      "id, status, triage_status, triage_reason_tags, fmv_plausibility_flag, accepted_at, created_at, deal_threads(property_id, properties(address_line1, city, state))",
+      "id, status, triage_status, triage_reason_tags, fmv_plausibility_flag, accepted_at, created_at, admin_voided_at, deal_threads(property_id, properties(address_line1, city, state))",
     )
     .order("accepted_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
     .limit(100);
 
   if (filterRaw === "accepted") {
-    query = query.eq("status", "ACCEPTED");
+    query = query.eq("status", "ACCEPTED").is("admin_voided_at", null);
   } else if (filterRaw === "triaged") {
     query = query.not("triage_status", "is", null);
   } else if (filterRaw === "no_triage") {
@@ -202,6 +202,11 @@ export default async function AdminDealsTriagePage({ searchParams }: PageProps) 
                     </div>
 
                     <div className="flex flex-wrap gap-1.5">
+                      {deal.admin_voided_at && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-orange-100 text-orange-800 ring-1 ring-orange-300">
+                          Voided
+                        </span>
+                      )}
                       {badge ? (
                         <span
                           className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${badge.className}`}
