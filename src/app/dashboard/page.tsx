@@ -381,6 +381,44 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       .filter(Boolean) as string[],
   );
 
+  // ── Active-deal guard (early thread signals) ──────────────────────────────
+  // Collect all deal IDs surfaced by early thread queries and fetch the ones
+  // that are archived or admin-voided. Every downstream next-step branch must
+  // exclude these deal IDs so archived deals never drive active messages.
+  const _earlyThreadDealIds = Array.from(
+    new Set<string>([
+      ...Array.from(acceptedOwnerDealIds),
+      ...ownerCandidateThreads
+        .map((t: any) => t?.deal_id as string | undefined)
+        .filter((id): id is string => !!id),
+    ])
+  );
+
+  const archivedDealIdSet = new Set<string>();
+  if (_earlyThreadDealIds.length > 0) {
+    const { data: _inactiveDeals } = await (svcEarly.from("deals") as any)
+      .select("id")
+      .in("id", _earlyThreadDealIds)
+      .or("archived_at.not.is.null,admin_voided_at.not.is.null");
+    for (const row of (_inactiveDeals ?? []) as any[]) {
+      if (row?.id) archivedDealIdSet.add(row.id as string);
+    }
+  }
+
+  // Remove archived/voided deals from acceptedOwnerDealIds before any
+  // downstream computation (review-request signals, waterfall branches).
+  for (const id of Array.from(acceptedOwnerDealIds)) {
+    if (archivedDealIdSet.has(id)) acceptedOwnerDealIds.delete(id);
+  }
+
+  // Filtered views of owner-side thread arrays excluding archived deals.
+  const activeOwnerActionableThreads = ownerActionableThreads.filter(
+    (t: any) => t?.deal_id && !archivedDealIdSet.has(t.deal_id),
+  );
+  const activeInvitedThreads = invitedThreads.filter(
+    (t: any) => t?.deal_id && !archivedDealIdSet.has(t.deal_id),
+  );
+
   // Sprint 16: fetch review request status for accepted deals (best-effort, non-fatal)
   const dealToPropertyIdForReview = new Map<string, string>();
   for (const t of acceptedOwnerThreads as any[]) {
@@ -462,6 +500,28 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const threads = myThreads ?? [];
   const props = myProperties ?? [];
 
+  // ── Active-deal guard (buyer-side threads) ────────────────────────────────
+  // Extend archivedDealIdSet with any deal IDs from the user's own threads
+  // that were not covered by the early owner-side thread query above.
+  {
+    const _newThreadDealIds = Array.from(
+      new Set(
+        threads
+          .map((t: any) => t?.deal_id as string | undefined)
+          .filter((id): id is string => !!id && !archivedDealIdSet.has(id)),
+      ),
+    );
+    if (_newThreadDealIds.length > 0) {
+      const { data: _moreInactive } = await (svcEarly.from("deals") as any)
+        .select("id")
+        .in("id", _newThreadDealIds)
+        .or("archived_at.not.is.null,admin_voided_at.not.is.null");
+      for (const row of (_moreInactive ?? []) as any[]) {
+        if (row?.id) archivedDealIdSet.add(row.id as string);
+      }
+    }
+  }
+
   const dealIdsWithThreads = new Set(
     threads.map((t: any) => t.deal_id).filter(Boolean) as string[],
   );
@@ -472,6 +532,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   );
 
   const buyerWaitingThreads = threads.filter((t: any) => {
+    if (t?.deal_id && archivedDealIdSet.has(t.deal_id)) return false; // archived deal
     if (!["pending_owner", "negotiating"].includes(t.status)) return false;
     if (t.buyer_user_id !== user.id) return false;
     const latest = myLatestSubmittedByThread.get(t.id);
@@ -495,7 +556,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   const pendingOwnerDealIds = Array.from(
     new Set(
-      ownerActionableThreads
+      activeOwnerActionableThreads
         .map((t: any) => t?.deal_id)
         .filter(Boolean) as string[],
     ),
@@ -514,11 +575,13 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       .filter(Boolean) as string[],
   );
 
-  // deals I own (for "ready to submit" check)
+  // deals I own (for "ready to submit" check) — exclude archived/voided deals
   const myDealsRes = await supabase
     .from("deals")
     .select("id,status,created_at,created_by_user_id,user_id")
     .or(`created_by_user_id.eq.${user.id},user_id.eq.${user.id}`)
+    .is("archived_at", null)
+    .is("admin_voided_at", null)
     .order("created_at", { ascending: false })
     .limit(50);
 
@@ -564,7 +627,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     props.filter((p: any) => p.status && p.status !== "verified"),
   );
 
-  const ownerPendingThread = pickFirst(ownerActionableThreads);
+  const ownerPendingThread = pickFirst(activeOwnerActionableThreads);
 
   const buyerReadyDeal = pickFirst(
     myDeals.filter((d: any) => {
@@ -601,7 +664,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   );
 
   // Approved priority waterfall — first match wins.
-  const claimableThread = pickFirst(invitedThreads);
+  const claimableThread = pickFirst(activeInvitedThreads);
 
   if (claimableThread) {
     // Priority 1: user has a pending owner invite — property needs to be claimed and verified
