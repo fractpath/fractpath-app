@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import {
+  ARCHIVE_BLOCKED_THREAD_STATUSES,
+  isDealArchiveEligible,
+} from "@/lib/deal/archiveEligibility";
 
 export const runtime = "nodejs";
 
@@ -22,20 +26,21 @@ export async function POST(
 
   if (!user) return jsonError("Unauthorized", 401);
 
-  const { data: grant } = await supabase
-    .from("deal_access_grants")
-    .select("role")
-    .eq("deal_id", dealId)
-    .eq("user_id", user.id)
-    .is("revoked_at", null)
-    .eq("role", "OWNER")
-    .maybeSingle();
-
-  const { data: deal } = await supabase
-    .from("deals")
-    .select("id, owner_user_id, archived_at")
-    .eq("id", dealId)
-    .maybeSingle();
+  const [{ data: grant }, { data: deal }] = await Promise.all([
+    supabase
+      .from("deal_access_grants")
+      .select("role")
+      .eq("deal_id", dealId)
+      .eq("user_id", user.id)
+      .is("revoked_at", null)
+      .eq("role", "OWNER")
+      .maybeSingle(),
+    supabase
+      .from("deals")
+      .select("id, owner_user_id, archived_at")
+      .eq("id", dealId)
+      .maybeSingle(),
+  ]);
 
   if (!deal) return jsonError("Deal not found", 404);
 
@@ -45,6 +50,23 @@ export async function POST(
   // Idempotent: if already archived, treat as success.
   if ((deal as any).archived_at) {
     return NextResponse.json({ ok: true, already_archived: true });
+  }
+
+  // ── Lifecycle guard: reject archive for active negotiation states ─────────
+  // Check the most-recent non-terminal thread for this deal.
+  const { data: activeThread } = await supabase
+    .from("deal_threads")
+    .select("id, status")
+    .eq("deal_id", dealId)
+    .in("status", ARCHIVE_BLOCKED_THREAD_STATUSES)
+    .limit(1)
+    .maybeSingle();
+
+  if (activeThread && !isDealArchiveEligible(activeThread.status)) {
+    return jsonError(
+      `Cannot archive a deal while it has an active negotiation (thread status: ${activeThread.status})`,
+      409,
+    );
   }
 
   const svc = createServiceClient();

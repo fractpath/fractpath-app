@@ -6,6 +6,7 @@ import { SubmitOfferModal } from "@/components/deal/SubmitOfferModal";
 import { ShareDealModal } from "@/components/deal/ShareDealModal";
 import { ArchiveDealModal } from "@/components/deal/ArchiveDealModal";
 import { CounterOfferModal } from "@/components/deal/CounterOfferModal";
+import { isDealArchiveEligible } from "@/lib/deal/archiveEligibility";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -53,6 +54,9 @@ export function DealActionsBar({
   const [ownerBusy, setOwnerBusy] = useState(false);
 
   const canSubmit = !!propertyId && !readOnly && !locked;
+
+  // Archive is only allowed when there is no active negotiation thread.
+  const canArchive = isDealArchiveEligible(activeThreadStatus);
 
   // Owner can act when thread is waiting for their decision
   const canOwnerDecide =
@@ -189,14 +193,16 @@ export function DealActionsBar({
           </button>
         )}
 
-        <button
-          type="button"
-          onClick={() => setOpenArchive(true)}
-          className="rounded-md border bg-white px-3 py-1.5 text-sm font-medium"
-          data-testid="deal-action-archive"
-        >
-          Archive
-        </button>
+        {canArchive && (
+          <button
+            type="button"
+            onClick={() => setOpenArchive(true)}
+            className="rounded-md border bg-white px-3 py-1.5 text-sm font-medium"
+            data-testid="deal-action-archive"
+          >
+            Archive
+          </button>
+        )}
       </div>
 
       {/* ── Modals ──────────────────────────────────────────────────────────── */}
@@ -229,11 +235,13 @@ export function DealActionsBar({
         </div>
       )}
 
-      <ArchiveDealModal
-        open={openArchive}
-        onClose={() => setOpenArchive(false)}
-        dealId={dealId}
-      />
+      {canArchive && (
+        <ArchiveDealModal
+          open={openArchive}
+          onClose={() => setOpenArchive(false)}
+          dealId={dealId}
+        />
+      )}
     </>
   );
 }
