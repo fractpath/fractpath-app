@@ -1,5 +1,6 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { AppHeader } from "@/components/layout/AppHeader";
+import { PageViewEvent } from "@/components/analytics/PageViewEvent";
 import type { DiscoveryProperty } from "@/app/api/map/public-properties/route";
 import { VerifiedPropertiesClient } from "@/components/property/VerifiedPropertiesClient";
 
@@ -167,6 +168,7 @@ export default async function VerifiedPropertiesPage() {
   return (
     <div className="min-h-screen bg-background">
       <AppHeader />
+      <PageViewEvent event="public_properties_viewed" />
 
       <main className="mx-auto max-w-5xl px-4 py-10 space-y-6">
         <div className="flex items-center justify-between gap-4">

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { AppHeader } from "@/components/layout/AppHeader";
+import { PageViewEvent } from "@/components/analytics/PageViewEvent";
 import { DealPageShell } from "@/components/deal/DealPageShell";
 import { DealDetailWidgetPanel } from "@/components/deal/DealDetailWidgetPanel";
 import { DealActivityFeed } from "@/components/deal/DealActivityFeed";
@@ -667,6 +668,14 @@ export default async function DealPage(ctx: PageProps) {
     return (
       <div className="min-h-screen">
         <AppHeader />
+        <PageViewEvent
+          event="deal_viewed"
+          props={{
+            deal_id: dealId,
+            deal_status: effectiveThread?.status ?? null,
+            property_id: resolvedPropertyId ?? null,
+          }}
+        />
         <main className="mx-auto max-w-5xl p-6 space-y-6">
           <DealPageShell
             dealId={dealId}
@@ -1520,6 +1529,14 @@ export default async function DealPage(ctx: PageProps) {
     return (
       <div className="min-h-screen">
         <AppHeader />
+        <PageViewEvent
+          event="deal_viewed"
+          props={{
+            deal_id: dealId,
+            deal_status: effectiveThread?.status ?? null,
+            property_id: resolvedPropertyId ?? null,
+          }}
+        />
         <main className="mx-auto max-w-5xl p-6 space-y-6">
           <DealPageShell
             dealId={dealId}

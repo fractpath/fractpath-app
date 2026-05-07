@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { AppHeader } from "@/components/layout/AppHeader";
+import { PageViewEvent } from "@/components/analytics/PageViewEvent";
 import { OnboardingGate } from "@/components/onboarding/OnboardingGate";
 
 import { DealCard } from "@/components/dashboard/DealCard";
@@ -1238,6 +1239,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     <div>
       <AppHeader />
       <OnboardingGate />
+      <PageViewEvent event="dashboard_viewed" />
       <main className="mx-auto max-w-3xl p-6 space-y-8">
         <header>
           <h1 className="text-2xl font-semibold">{welcome.tagline}</h1>

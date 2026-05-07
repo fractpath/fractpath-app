@@ -157,7 +157,9 @@ function AuthIdentitySync() {
           // sessionStorage unavailable
         }
 
-        if (!justSignedUp) {
+        if (justSignedUp) {
+          captureAppEvent("signup_completed", { user_role: userRole });
+        } else {
           captureAppEvent("login_completed", { user_role: userRole });
         }
       }

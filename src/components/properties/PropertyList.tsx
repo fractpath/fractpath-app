@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useToast } from "@/components/ui/Toast";
+import { captureAppEvent } from "@/lib/analytics/events";
 import { LoadingButton } from "@/components/ui/LoadingButton";
 import { Modal } from "@/components/ui/Modal";
 import { PropertyForm } from "@/components/properties/PropertyForm";
@@ -166,6 +167,7 @@ export function PropertyList() {
       }
 
       t.success("Property claimed. Complete verification to continue.");
+      captureAppEvent("property_claim_completed", { property_id: p.id });
       await load();
 
       const claimed = {

@@ -61,9 +61,12 @@ export function initPostHog(): void {
     // Disable autocapture to keep the event stream clean.
     autocapture: false,
     persistence: "localStorage+cookie",
-    // Share identity across subdomains (app.fractpath.com ↔ fractpath.com).
-    // Cast required: PostHog JS types omit cookie_domain but the runtime accepts it.
-    ...({ cookie_domain: ".fractpath.com" } as object),
+    // Share identity across app.fractpath.com ↔ fractpath.com.
+    // Type cast required: posthog-js types omit these runtime-supported props.
+    ...({
+      cross_subdomain_cookie: true,
+      cookie_domain: ".fractpath.com",
+    } as object),
     loaded(ph) {
       if (process.env.NODE_ENV === "development") {
         ph.debug();

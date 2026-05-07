@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState, useEffect } from "react";
+import { captureAppEvent } from "@/lib/analytics/events";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import {
@@ -644,6 +645,14 @@ export function PropertyForm(props: {
         if (!res.ok) {
           t.error(json?.error || "Something went wrong — try again.");
           return;
+        }
+
+        const createdId = json?.property?.id ?? resolved?.property_id ?? null;
+        captureAppEvent("property_created", { property_id: createdId });
+        if (Object.values(files).some((f) => f !== null)) {
+          captureAppEvent("verification_documents_uploaded", {
+            property_id: createdId,
+          });
         }
       }
 

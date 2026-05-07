@@ -1,3 +1,5 @@
+import { SignupTracker } from "@/components/analytics/SignupTracker";
+
 export const dynamic = "force-dynamic";
 
 type SP = Record<string, string | string[] | undefined>;
@@ -41,6 +43,7 @@ export default async function SignupPage({ searchParams }: Props) {
 
   return (
     <main style={{ maxWidth: 560, margin: "40px auto", padding: "0 16px" }}>
+      <SignupTracker />
       <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 8 }}>
         Create your account
       </h1>

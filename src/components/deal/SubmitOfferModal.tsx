@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Modal } from "@/components/ui/Modal";
 import { usePageLoading } from "@/components/ui/PageLoadingOverlay";
+import { captureAppEvent } from "@/lib/analytics/events";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -135,6 +136,11 @@ export function SubmitOfferModal({ open, onClose, dealId, propertyId, effectiveS
         throw new Error(body?.error ?? `Submit failed (${res.status})`);
       }
 
+      captureAppEvent("offer_submitted", {
+        deal_id: dealId,
+        property_id: propertyId ?? null,
+        deal_origin: isActingAsOwner ? "owner_initiated" : "buyer_initiated",
+      });
       onClose();
       router.refresh();
     } catch (err: any) {

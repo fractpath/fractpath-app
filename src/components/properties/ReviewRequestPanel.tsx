@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { captureAppEvent } from "@/lib/analytics/events";
 
 export type HomeownerReviewRequest = {
   id: string;
@@ -51,6 +52,9 @@ export function ReviewRequestPanel({
       if (!body.ok) {
         setErr(body.error ?? "Failed to submit. Please try again.");
       } else {
+        captureAppEvent("property_verification_submitted", {
+          property_id: propertyId,
+        });
         setRequest(body.request as HomeownerReviewRequest);
       }
     } catch {

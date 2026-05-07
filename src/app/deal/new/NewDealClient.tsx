@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { captureAppEvent } from "@/lib/analytics/events";
 
 type NewDealClientProps = {
   persona: string;
@@ -17,6 +18,8 @@ export function NewDealClient({ persona, initialPropertyId }: NewDealClientProps
     try {
       localStorage.removeItem("fractpath:deal:new:header");
     } catch {}
+
+    captureAppEvent("deal_started", { property_id: initialPropertyId ?? null });
 
     let cancelled = false;
 
@@ -43,6 +46,10 @@ export function NewDealClient({ persona, initialPropertyId }: NewDealClientProps
           throw new Error(responseBody.error ?? `Create failed (${res.status})`);
         }
 
+        captureAppEvent("deal_created", {
+          deal_id: responseBody.deal_id ?? null,
+          property_id: initialPropertyId ?? null,
+        });
         router.push(responseBody.redirect_url ?? "/dashboard");
       } catch (err: any) {
         if (!cancelled) {

@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { createServiceClient } from "@/lib/supabase/service";
 import { AppHeader } from "@/components/layout/AppHeader";
+import { PageViewEvent } from "@/components/analytics/PageViewEvent";
 import type { MashvisorImagesPayload } from "@/lib/mashvisor/types";
 import type { PropertyAvm } from "@/components/property/EnrichedPropertyPreview";
 import type { NormalizedPropertyProfile } from "@/lib/property-review/providers/rentcast/types";
@@ -169,6 +170,14 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
   return (
     <div className="min-h-screen bg-background">
       <AppHeader />
+      <PageViewEvent
+        event="public_property_viewed"
+        props={{
+          property_id: propertyId,
+          property_state: row.state ?? null,
+          property_zip: row.postal_code ?? null,
+        }}
+      />
 
       <main className="mx-auto max-w-3xl px-4 pb-12 pt-6 space-y-6">
         {/* Back link */}

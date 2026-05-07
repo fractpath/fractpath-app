@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { captureAppEvent } from "@/lib/analytics/events";
 import { Modal } from "@/components/ui/Modal";
 import { ProposalComparisonCard } from "./ProposalComparisonCard";
 import { CounterOfferModal } from "./CounterOfferModal";
@@ -54,6 +55,9 @@ export function NegotiationSection({
         throw new Error(body?.error ?? `${decision} failed (${res.status})`);
       }
       setResult(`Proposal ${body.status ?? decision + "ed"}`);
+      if (decision === "accept") {
+        captureAppEvent("offer_accepted", { deal_thread_id: threadId });
+      }
       setAcceptOpen(false);
       setRejectOpen(false);
       router.refresh();
