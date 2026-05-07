@@ -18,6 +18,11 @@ type Props = {
   currentTerms: AnyRecord | null;
   previousTerms: AnyRecord | null;
   isOwnerSide: boolean;
+  dealId?: string | null;
+  propertyId?: string | null;
+  dealStatus?: string | null;
+  dealOrigin?: "buyer_initiated" | "owner_initiated" | "unknown";
+  currentUserRole?: "buyer" | "owner" | "admin" | "unknown";
 };
 
 export function NegotiationSection({
@@ -27,6 +32,11 @@ export function NegotiationSection({
   currentTerms,
   previousTerms,
   isOwnerSide,
+  dealId,
+  propertyId,
+  dealStatus,
+  dealOrigin,
+  currentUserRole,
 }: Props) {
   const router = useRouter();
   const { data: verStatus, loading: verLoading } =
@@ -56,7 +66,20 @@ export function NegotiationSection({
       }
       setResult(`Proposal ${body.status ?? decision + "ed"}`);
       if (decision === "accept") {
-        captureAppEvent("offer_accepted", { deal_thread_id: threadId });
+        captureAppEvent("offer_accepted", {
+          deal_thread_id: threadId,
+          deal_id: dealId ?? null,
+          property_id: propertyId ?? null,
+          deal_status: dealStatus ?? null,
+          deal_origin: dealOrigin ?? "unknown",
+          initiating_role: dealOrigin === "owner_initiated" ? "owner"
+            : dealOrigin === "buyer_initiated" ? "buyer"
+            : "unknown",
+          invite_type: isOwnerSide && dealOrigin === "buyer_initiated" ? "buyer_to_owner"
+            : !isOwnerSide && dealOrigin === "owner_initiated" ? "owner_to_buyer"
+            : "unknown",
+          current_user_role: currentUserRole ?? "unknown",
+        });
       }
       setAcceptOpen(false);
       setRejectOpen(false);

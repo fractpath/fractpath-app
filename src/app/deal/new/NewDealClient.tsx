@@ -19,7 +19,20 @@ export function NewDealClient({ persona, initialPropertyId }: NewDealClientProps
       localStorage.removeItem("fractpath:deal:new:header");
     } catch {}
 
-    captureAppEvent("deal_started", { property_id: initialPropertyId ?? null });
+    const _dealOrigin = persona === "homeowner" ? "owner_initiated" as const
+      : persona === "buyer" ? "buyer_initiated" as const
+      : "unknown" as const;
+    const _initiatingRole = persona === "homeowner" ? "owner" as const
+      : persona === "buyer" ? "buyer" as const
+      : "unknown" as const;
+
+    captureAppEvent("deal_started", {
+      property_id: initialPropertyId ?? null,
+      deal_origin: _dealOrigin,
+      initiating_role: _initiatingRole,
+      invite_type: "none",
+      current_user_role: _initiatingRole,
+    });
 
     let cancelled = false;
 
@@ -49,6 +62,10 @@ export function NewDealClient({ persona, initialPropertyId }: NewDealClientProps
         captureAppEvent("deal_created", {
           deal_id: responseBody.deal_id ?? null,
           property_id: initialPropertyId ?? null,
+          deal_origin: _dealOrigin,
+          initiating_role: _initiatingRole,
+          invite_type: "none",
+          current_user_role: _initiatingRole,
         });
         router.push(responseBody.redirect_url ?? "/dashboard");
       } catch (err: any) {

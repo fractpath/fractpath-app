@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { DealCtaLink } from "@/components/analytics/DealCtaLink";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
@@ -1484,12 +1485,18 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                 Deals you own and manage
               </p>
             </div>
-            <Link
+            <DealCtaLink
               href="/deal/new"
               className="inline-flex items-center rounded-md bg-foreground px-3 py-1.5 text-sm font-medium text-background"
+              analyticsProps={{
+                cta_location: "dashboard",
+                deal_origin: persona === "buyer" ? "buyer_initiated" : "owner_initiated",
+                initiating_role: persona === "buyer" ? "buyer" : "owner",
+                invite_type: "none",
+              }}
             >
               Create Deal
-            </Link>
+            </DealCtaLink>
           </div>
 
           {ownerCards.length === 0 ? (

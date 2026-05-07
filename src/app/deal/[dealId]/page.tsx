@@ -665,6 +665,22 @@ export default async function DealPage(ctx: PageProps) {
       ineligibleDescription = canonicalResult.exceptionDescription ?? null;
     }
 
+    const _a = {
+      origin: !effectiveThread ? "unknown" as const
+        : effectiveThread.created_by_user_id === effectiveThread.owner_user_id ? "owner_initiated" as const
+        : effectiveThread.created_by_user_id === effectiveThread.buyer_user_id ? "buyer_initiated" as const
+        : "unknown" as const,
+      initRole: !effectiveThread ? "unknown" as const
+        : effectiveThread.created_by_user_id === effectiveThread.owner_user_id ? "owner" as const
+        : effectiveThread.created_by_user_id === effectiveThread.buyer_user_id ? "buyer" as const
+        : "admin" as const,
+      inviteType: !effectiveThread ? "unknown" as const
+        : effectiveThread.owner_user_id !== null && effectiveThread.created_by_user_id === effectiveThread.buyer_user_id ? "buyer_to_owner" as const
+        : effectiveThread.owner_user_id !== null ? "owner_to_buyer" as const
+        : "none" as const,
+      userRole: isAdmin ? "admin" as const : isOwner ? "owner" as const : negState.isBuyer ? "buyer" as const : "unknown" as const,
+    };
+
     return (
       <div className="min-h-screen">
         <AppHeader />
@@ -672,8 +688,13 @@ export default async function DealPage(ctx: PageProps) {
           event="deal_viewed"
           props={{
             deal_id: dealId,
+            deal_thread_id: effectiveThread?.id ?? null,
             deal_status: effectiveThread?.status ?? null,
             property_id: resolvedPropertyId ?? null,
+            deal_origin: _a.origin,
+            initiating_role: _a.initRole,
+            invite_type: _a.inviteType,
+            current_user_role: _a.userRole,
           }}
         />
         <main className="mx-auto max-w-5xl p-6 space-y-6">
@@ -899,6 +920,11 @@ export default async function DealPage(ctx: PageProps) {
                   negState.previousProposal?.terms_snapshot ?? null
                 }
                 isOwnerSide={negState.isOwnerSide}
+                dealId={dealId}
+                propertyId={resolvedPropertyId ?? null}
+                dealStatus={effectiveThread?.status ?? null}
+                dealOrigin={_a.origin}
+                currentUserRole={_a.userRole}
               />
             )}
 
@@ -1526,6 +1552,22 @@ export default async function DealPage(ctx: PageProps) {
         canonicalResult.exceptionDescription ?? null;
     }
 
+    const _b = {
+      origin: !effectiveThread ? "unknown" as const
+        : effectiveThread.created_by_user_id === effectiveThread.owner_user_id ? "owner_initiated" as const
+        : effectiveThread.created_by_user_id === effectiveThread.buyer_user_id ? "buyer_initiated" as const
+        : "unknown" as const,
+      initRole: !effectiveThread ? "unknown" as const
+        : effectiveThread.created_by_user_id === effectiveThread.owner_user_id ? "owner" as const
+        : effectiveThread.created_by_user_id === effectiveThread.buyer_user_id ? "buyer" as const
+        : "admin" as const,
+      inviteType: !effectiveThread ? "unknown" as const
+        : effectiveThread.owner_user_id !== null && effectiveThread.created_by_user_id === effectiveThread.buyer_user_id ? "buyer_to_owner" as const
+        : effectiveThread.owner_user_id !== null ? "owner_to_buyer" as const
+        : "none" as const,
+      userRole: fallbackIsAdmin ? "admin" as const : fallbackIsOwner ? "owner" as const : negState.isBuyer ? "buyer" as const : "unknown" as const,
+    };
+
     return (
       <div className="min-h-screen">
         <AppHeader />
@@ -1533,8 +1575,13 @@ export default async function DealPage(ctx: PageProps) {
           event="deal_viewed"
           props={{
             deal_id: dealId,
+            deal_thread_id: effectiveThread?.id ?? null,
             deal_status: effectiveThread?.status ?? null,
             property_id: resolvedPropertyId ?? null,
+            deal_origin: _b.origin,
+            initiating_role: _b.initRole,
+            invite_type: _b.inviteType,
+            current_user_role: _b.userRole,
           }}
         />
         <main className="mx-auto max-w-5xl p-6 space-y-6">
@@ -1713,6 +1760,11 @@ export default async function DealPage(ctx: PageProps) {
                   negState.previousProposal?.terms_snapshot ?? null
                 }
                 isOwnerSide={negState.isOwnerSide}
+                dealId={dealId}
+                propertyId={resolvedPropertyId ?? null}
+                dealStatus={effectiveThread?.status ?? null}
+                dealOrigin={_b.origin}
+                currentUserRole={_b.userRole}
               />
             )}
 

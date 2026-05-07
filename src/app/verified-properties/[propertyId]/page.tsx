@@ -14,6 +14,7 @@ import { PropertyPageHeader } from "@/components/property/PropertyPageHeader";
 import type { OwnerPhoto } from "@/lib/property/photos";
 import { propertyHasActiveDeal } from "@/lib/deal/activeDealCheck";
 import Link from "next/link";
+import { DealCtaLink } from "@/components/analytics/DealCtaLink";
 
 export const runtime = "nodejs";
 
@@ -232,12 +233,21 @@ export default async function PublicPropertyDetailPage({ params }: PageProps) {
             <p className="text-sm text-muted-foreground">
               Interested in exploring a home equity agreement for this property?
             </p>
-            <Link
+            <DealCtaLink
               href={`/deal/new?propertyId=${propertyId}`}
               className="ml-4 shrink-0 rounded-md bg-foreground px-4 py-2 text-sm font-semibold text-background hover:opacity-90 transition-opacity"
+              analyticsProps={{
+                property_id: propertyId,
+                property_state: row.state ?? null,
+                property_zip: row.postal_code ?? null,
+                cta_location: "public_property_detail",
+                deal_origin: "buyer_initiated",
+                initiating_role: "buyer",
+                invite_type: "buyer_to_owner",
+              }}
             >
               Create deal
-            </Link>
+            </DealCtaLink>
           </div>
         ) : (
           <p className="text-sm text-muted-foreground px-1">

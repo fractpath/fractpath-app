@@ -140,6 +140,9 @@ export function SubmitOfferModal({ open, onClose, dealId, propertyId, effectiveS
         deal_id: dealId,
         property_id: propertyId ?? null,
         deal_origin: isActingAsOwner ? "owner_initiated" : "buyer_initiated",
+        initiating_role: isActingAsOwner ? "owner" : "buyer",
+        invite_type: isActingAsOwner ? "owner_to_buyer" : isVerifiedOwner ? "buyer_to_owner" : "none",
+        current_user_role: isActingAsOwner ? "owner" : "buyer",
       });
       onClose();
       router.refresh();
