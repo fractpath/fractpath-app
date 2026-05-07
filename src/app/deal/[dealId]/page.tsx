@@ -1084,7 +1084,7 @@ export default async function DealPage(ctx: PageProps) {
 
     if (payloadThreadId) {
       const { data: eventThread } = await (svc.from("deal_threads") as any)
-        .select("id,status,property_id,buyer_user_id,owner_user_id,created_by_user_id,deal_id")
+        .select("id,status,property_id,buyer_user_id,owner_user_id,created_by_user_id,current_proposal_id,deal_id")
         .eq("id", payloadThreadId)
         .maybeSingle();
 
