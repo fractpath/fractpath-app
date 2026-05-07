@@ -1,8 +1,8 @@
 /**
- * PostHog analytics — client-side only.
+ * PostHog core — client-side only.
  *
- * Import this module only from "use client" components or browser-safe hooks.
- * Never import it from server components, API routes, or middleware.
+ * Import only from "use client" components or browser-safe hooks.
+ * Never import from server components, API routes, or middleware.
  */
 
 import posthog from "posthog-js";
@@ -38,8 +38,9 @@ export type MarketingEventProps = {
 let _initialized = false;
 
 /**
- * Initialize PostHog once. Safe to call multiple times — subsequent calls
- * are no-ops. Must only be called in a browser context (useEffect / "use client").
+ * Initialize PostHog once.
+ * Safe to call multiple times — subsequent calls are no-ops.
+ * Must only be called in a browser context (useEffect / "use client").
  */
 export function initPostHog(): void {
   if (_initialized) return;
@@ -49,10 +50,7 @@ export function initPostHog(): void {
   const host =
     process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "https://us.i.posthog.com";
 
-  if (!key) {
-    // Key not configured — analytics silently disabled.
-    return;
-  }
+  if (!key) return; // Key not configured — analytics silently disabled.
 
   posthog.init(key, {
     api_host: host,
@@ -63,6 +61,9 @@ export function initPostHog(): void {
     // Disable autocapture to keep the event stream clean.
     autocapture: false,
     persistence: "localStorage+cookie",
+    // Share identity across subdomains (app.fractpath.com ↔ fractpath.com).
+    // Cast required: PostHog JS types omit cookie_domain but the runtime accepts it.
+    ...({ cookie_domain: ".fractpath.com" } as object),
     loaded(ph) {
       if (process.env.NODE_ENV === "development") {
         ph.debug();
@@ -73,16 +74,46 @@ export function initPostHog(): void {
   _initialized = true;
 }
 
-/**
- * Returns true when PostHog has been successfully initialized.
- */
+/** Returns true when PostHog has been successfully initialized. */
 export function isPostHogReady(): boolean {
   return _initialized && typeof window !== "undefined";
 }
 
+// ── Identity ──────────────────────────────────────────────────────────────
+
+type IdentifyProps = {
+  user_role?: string;
+  account_created_at?: string;
+  email?: string | null;
+  [key: string]: unknown;
+};
+
 /**
- * Read UTM parameters from the current page URL.
+ * Identify the authenticated user.
+ * Uses the Supabase auth UUID as the stable distinct_id.
+ * Call after a successful SIGNED_IN auth event.
  */
+export function identifyUser(userId: string, props: IdentifyProps = {}): void {
+  if (!isPostHogReady()) return;
+  posthog.identify(userId, {
+    ...props,
+    // Never send undefined — PostHog treats undefined as a deletion signal.
+    ...(props.email ? { email: props.email } : {}),
+  });
+}
+
+/**
+ * Reset PostHog identity (call on logout).
+ * Clears the current distinct_id so the next anonymous session starts fresh.
+ */
+export function resetIdentity(): void {
+  if (!isPostHogReady()) return;
+  posthog.reset();
+}
+
+// ── UTM helpers ───────────────────────────────────────────────────────────
+
+/** Read UTM parameters from the current page URL. */
 export function readUtmParams(searchParams?: URLSearchParams): Pick<
   MarketingEventProps,
   "utm_source" | "utm_medium" | "utm_campaign" | "utm_content" | "utm_term"
@@ -98,9 +129,11 @@ export function readUtmParams(searchParams?: URLSearchParams): Pick<
   };
 }
 
+// ── Marketing-site event capture ──────────────────────────────────────────
+
 /**
- * Capture a marketing event with standard properties merged in.
- * Safe to call even if PostHog is not initialized — silently no-ops.
+ * Capture a marketing-site event with standard properties merged in.
+ * Safe to call even if PostHog is not initialized.
  */
 export function captureMarketingEvent(
   eventName: MarketingEventName,
@@ -124,14 +157,16 @@ export function captureMarketingEvent(
   });
 }
 
+// ── Attribution URL builder ───────────────────────────────────────────────
+
 const APP_HOST_RE = /app\.fractpath\.com/i;
 
 /**
  * Append FractPath marketing attribution parameters to a URL that points to
- * the app (app.fractpath.com or any path starting with /signup, /login, etc.).
+ * the app (app.fractpath.com or same-origin /signup, /login).
  *
- * Existing UTM params are preserved; attribution params are added only when
- * they are not already present.
+ * Existing UTM params are preserved; attribution params are only added when
+ * not already present in the destination URL.
  */
 export function buildAttributedUrl(
   href: string,
@@ -154,7 +189,6 @@ export function buildAttributedUrl(
 
   const isAppLink =
     APP_HOST_RE.test(url.hostname) ||
-    // Same-origin links to signup / login are also attribution targets.
     (url.hostname === window.location.hostname &&
       (url.pathname.startsWith("/signup") ||
         url.pathname.startsWith("/login")));
@@ -166,16 +200,12 @@ export function buildAttributedUrl(
 
   if (!sp.has("entry")) sp.set("entry", "marketing");
   if (!sp.has("source_page"))
-    sp.set(
-      "source_page",
-      opts.sourcePage ?? window.location.pathname,
-    );
+    sp.set("source_page", opts.sourcePage ?? window.location.pathname);
   if (opts.sourceEvent && !sp.has("source_event"))
     sp.set("source_event", opts.sourceEvent);
   if (opts.audience && !sp.has("audience"))
     sp.set("audience", opts.audience);
 
-  // Carry forward UTM params that aren't already in the destination URL.
   const utmKeys = [
     "utm_source",
     "utm_medium",
