@@ -39,7 +39,7 @@ export type SessionAttribution = {
 };
 
 const FIRST_TOUCH_KEY = "fp:first_touch";
-const SESSION_KEY = "fp:session_attr";
+const SESSION_KEY = "fp:session_attribution";
 
 type RawParams = {
   entry?: string | null;

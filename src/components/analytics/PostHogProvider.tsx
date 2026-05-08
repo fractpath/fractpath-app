@@ -38,6 +38,7 @@ function PostHogInit() {
   useEffect(() => {
     if (ran.current) return;
     ran.current = true;
+    console.log("[FractPath Analytics] Provider mounted");
     initPostHog();
   }, []);
 
@@ -56,6 +57,7 @@ function AttributionCapture() {
 
     // Always run captureAttribution so session attribution is up to date.
     captureAttribution(window.location.href);
+    console.log("[FractPath Analytics] attribution persisted");
 
     // If this is a tracked entry from marketing, fire app_entered.
     const entry = searchParams.get("entry");
