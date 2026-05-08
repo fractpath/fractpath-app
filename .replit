@@ -62,3 +62,4 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOi
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9uYWNha215bnZ6Y3ZicWVuamFmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzMzUyMzAsImV4cCI6MjA4NDkxMTIzMH0.SoIrVUxTfAn4AcaeuK25S3NcgldCoS5Z8r96DW9eoIQ"
 SUPABASE_URL = "https://onacakmynvzcvbqenjaf.supabase.co"
 SHARE_FROM_EMAIL = "FractPath <noreply@notify.fractpath.com>"
+NEXT_PUBLIC_POSTHOG_KEY = "phc_nAB4dq6r2NMYHB8bEkSJ8wrkGgZTAdaQsgii2ePAsktX"
