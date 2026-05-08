@@ -20,7 +20,6 @@ import {
   isPostHogReady,
   identifyUser,
   resetIdentity,
-  captureMarketingEvent,
 } from "@/lib/analytics/posthog";
 import {
   captureAttribution,
@@ -95,13 +94,6 @@ function PageViewTracker() {
 
     // Native PostHog pageview (used by funnels, recordings, heat maps).
     posthog.capture("$pageview", { $current_url: url });
-
-    // Custom marketing page view (for marketing-site continuity).
-    captureMarketingEvent("marketing_page_viewed", {
-      page_path: pathname,
-      page_title:
-        typeof document !== "undefined" ? document.title : undefined,
-    });
   }, [pathname, searchParams]);
 
   return null;
