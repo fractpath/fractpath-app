@@ -43,14 +43,33 @@ let _initialized = false;
  * Must only be called in a browser context (useEffect / "use client").
  */
 export function initPostHog(): void {
-  if (_initialized) return;
-  if (typeof window === "undefined") return;
+  console.log("[FractPath Analytics] initPostHog called", {
+    alreadyInitialized: _initialized,
+    hasKey: !!process.env.NEXT_PUBLIC_POSTHOG_KEY,
+    env: process.env.NODE_ENV,
+  });
+
+  if (_initialized) {
+    console.log("[FractPath Analytics] initPostHog: already initialized, skipping");
+    return;
+  }
+  if (typeof window === "undefined") {
+    console.log("[FractPath Analytics] initPostHog: skipped (server context)");
+    return;
+  }
 
   const key = process.env.NEXT_PUBLIC_POSTHOG_KEY;
   const host =
     process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "https://us.i.posthog.com";
 
-  if (!key) return; // Key not configured — analytics silently disabled.
+  if (!key) {
+    // Key not configured — analytics silently disabled.
+    console.warn(
+      "[FractPath Analytics] initPostHog: NEXT_PUBLIC_POSTHOG_KEY is not set — " +
+      "PostHog will not initialize and all captureAppEvent calls will be no-ops.",
+    );
+    return;
+  }
 
   posthog.init(key, {
     api_host: host,
@@ -68,6 +87,7 @@ export function initPostHog(): void {
       cookie_domain: ".fractpath.com",
     } as object),
     loaded(ph) {
+      console.log("[FractPath Analytics] PostHog loaded and ready", { api_host: host });
       if (process.env.NODE_ENV === "development") {
         ph.debug();
       }
@@ -75,6 +95,17 @@ export function initPostHog(): void {
   });
 
   _initialized = true;
+  console.log("[FractPath Analytics] initPostHog: initialized successfully");
+
+  if (typeof window !== "undefined" && process.env.NODE_ENV !== "production") {
+    (window as any).__fractpathPostHog = posthog;
+    (window as any).__fractpathTrackTest = () =>
+      posthog.capture("debug_test_event_from_app_wrapper");
+    console.log(
+      "[FractPath Analytics] Debug helpers exposed: " +
+      "window.__fractpathPostHog, window.__fractpathTrackTest()",
+    );
+  }
 }
 
 /** Returns true when PostHog has been successfully initialized. */
@@ -97,6 +128,11 @@ type IdentifyProps = {
  * Call after a successful SIGNED_IN auth event.
  */
 export function identifyUser(userId: string, props: IdentifyProps = {}): void {
+  console.log("[FractPath Analytics] identifyUser called", {
+    userId,
+    ready: isPostHogReady(),
+    role: props.user_role,
+  });
   if (!isPostHogReady()) return;
   posthog.identify(userId, {
     ...props,
@@ -110,6 +146,9 @@ export function identifyUser(userId: string, props: IdentifyProps = {}): void {
  * Clears the current distinct_id so the next anonymous session starts fresh.
  */
 export function resetIdentity(): void {
+  console.log("[FractPath Analytics] resetIdentity (resetAnalytics) called", {
+    ready: isPostHogReady(),
+  });
   if (!isPostHogReady()) return;
   posthog.reset();
 }

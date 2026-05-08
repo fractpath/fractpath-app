@@ -127,7 +127,15 @@ export function captureAppEvent(
   eventName: AppEventName,
   props: AppEventProps = {},
 ): void {
-  if (!isPostHogReady()) return;
+  const ready = isPostHogReady();
+  console.log("[FractPath Analytics] captureAppEvent", eventName, {
+    ready,
+    deal_id: props.deal_id,
+    property_id: props.property_id,
+    deal_origin: props.deal_origin,
+    current_user_role: props.current_user_role,
+  });
+  if (!ready) return;
 
   const s = getSessionAttribution();
 
